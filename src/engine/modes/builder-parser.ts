@@ -180,12 +180,15 @@ class BuilderParser extends CstParser {
 		});
 	});
 
-	// rename <target> to "<name>"
+	// rename <target> to "<name>" | rename <target> to <name...>
 	public renameCommand = this.RULE("renameCommand", () => {
 		this.CONSUME(Rename);
 		this.SUBRULE(this.targetRef, { LABEL: "target" });
 		this.CONSUME(To);
-		this.CONSUME(QuotedString, { LABEL: "name" });
+		this.OR([
+			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedName" }) },
+			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "nameWords" })) },
+		]);
 	});
 
 	// set <target>.<param> [to] <value>
@@ -208,10 +211,13 @@ class BuilderParser extends CstParser {
 		]);
 	});
 
-	// load "<source>" into <target>
+	// load "<source>" into <target> | load <source> into <target>
 	public loadCommand = this.RULE("loadCommand", () => {
 		this.CONSUME(Load);
-		this.CONSUME(QuotedString, { LABEL: "source" });
+		this.OR([
+			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedSource" }) },
+			{ ALT: () => this.CONSUME(Identifier, { LABEL: "sourceWord" }) },
+		]);
 		this.CONSUME(Into);
 		this.SUBRULE(this.targetRef, { LABEL: "target" });
 	});
@@ -369,7 +375,9 @@ function extractRenameCommand(
 	node: CstNode,
 ): { command: RenameCommand } | { error: string } {
 	const target = extractTargetRef(asNode(node.children.target[0]));
-	const name = stripQuotes((node.children.name[0] as IToken).image);
+	const name = node.children.quotedName
+		? stripQuotes((node.children.quotedName[0] as IToken).image)
+		: (node.children.nameWords as IToken[]).map((t) => t.image).join(" ");
 	return { command: { type: "rename", target, name } };
 }
 
@@ -418,7 +426,9 @@ function extractGetCommand(
 function extractLoadCommand(
 	node: CstNode,
 ): { command: LoadCommand } | { error: string } {
-	const source = stripQuotes((node.children.source[0] as IToken).image);
+	const source = node.children.quotedSource
+		? stripQuotes((node.children.quotedSource[0] as IToken).image)
+		: (node.children.sourceWord[0] as IToken).image;
 	const target = extractTargetRef(asNode(node.children.target[0]));
 	return { command: { type: "load", source, target } };
 }

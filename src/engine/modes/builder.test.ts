@@ -212,6 +212,18 @@ describe("builder parser — rename commands", () => {
 		expect(cmd.target).toBe("Master Chain");
 		expect(cmd.name).toBe("Main Chain");
 	});
+
+	it("parses rename with bare identifier name", () => {
+		const cmd = parseOk("rename SineSynth1 to MySine") as RenameCommand;
+		expect(cmd.target).toBe("SineSynth1");
+		expect(cmd.name).toBe("MySine");
+	});
+
+	it("parses rename with multi-word bare name", () => {
+		const cmd = parseOk("rename SineSynth1 to My Sine") as RenameCommand;
+		expect(cmd.target).toBe("SineSynth1");
+		expect(cmd.name).toBe("My Sine");
+	});
 });
 
 // ── Parser tests — set ──────────────────────────────────────────────
@@ -280,6 +292,12 @@ describe("builder parser — load commands", () => {
 		const cmd = parseOk('load "MyNetwork" into "Script FX 1"') as LoadCommand;
 		expect(cmd.source).toBe("MyNetwork");
 		expect(cmd.target).toBe("Script FX 1");
+	});
+
+	it("parses load with bare identifier source", () => {
+		const cmd = parseOk("load MyReverb into ScriptFX1") as LoadCommand;
+		expect(cmd.source).toBe("MyReverb");
+		expect(cmd.target).toBe("ScriptFX1");
 	});
 });
 

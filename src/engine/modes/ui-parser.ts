@@ -116,7 +116,7 @@ class UiParser extends CstParser {
 		]);
 	});
 
-	// add <type> [as] ["<name>"] [at <x> <y> <w> <h>]
+	// add <type> [as] ["<name>" | <name>] [at <x> <y> <w> <h>]
 	public addCommand = this.RULE("addCommand", () => {
 		this.CONSUME(Add);
 		this.OR2([
@@ -124,8 +124,16 @@ class UiParser extends CstParser {
 			{ ALT: () => this.AT_LEAST_ONE2(() => this.CONSUME2(Identifier, { LABEL: "componentType" })) },
 		]);
 		this.OPTION(() => {
-			this.OPTION5(() => { this.CONSUME(As); });
-			this.CONSUME(QuotedString, { LABEL: "name" });
+			this.OR3([
+				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedName" }) },
+				{ ALT: () => {
+					this.CONSUME(As);
+					this.OR4([
+						{ ALT: () => this.CONSUME2(QuotedString, { LABEL: "quotedName" }) },
+						{ ALT: () => this.CONSUME4(Identifier, { LABEL: "nameWord" }) },
+					]);
+				}},
+			]);
 		});
 		this.OPTION2(() => {
 			this.CONSUME(At);
@@ -173,12 +181,15 @@ class UiParser extends CstParser {
 		});
 	});
 
-	// rename <target> to "<newName>"
+	// rename <target> to "<newName>" | rename <target> to <newName...>
 	public renameCommand = this.RULE("renameCommand", () => {
 		this.CONSUME(Rename);
 		this.SUBRULE(this.targetRef, { LABEL: "target" });
 		this.CONSUME(To);
-		this.CONSUME(QuotedString, { LABEL: "newName" });
+		this.OR([
+			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedNewName" }) },
+			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "newNameWords" })) },
+		]);
 	});
 
 	// show tree | show <target>
@@ -256,9 +267,11 @@ function extractAddCommand(
 		componentType = words.join(" ");
 	}
 
-	const name = node.children.name
-		? stripQuotes((node.children.name[0] as IToken).image)
-		: undefined;
+	const name = node.children.quotedName
+		? stripQuotes((node.children.quotedName[0] as IToken).image)
+		: node.children.nameWord
+			? (node.children.nameWord[0] as IToken).image
+			: undefined;
 
 	const x = node.children.x
 		? parseFloat((node.children.x[0] as IToken).image)
@@ -342,7 +355,9 @@ function extractRenameCommand(
 	node: CstNode,
 ): { command: UiRenameCommand } | { error: string } {
 	const target = extractTargetRef(asNode(node.children.target[0]));
-	const newName = stripQuotes((node.children.newName[0] as IToken).image);
+	const newName = node.children.quotedNewName
+		? stripQuotes((node.children.quotedNewName[0] as IToken).image)
+		: (node.children.newNameWords as IToken[]).map((t) => t.image).join(" ");
 	return { command: { type: "rename", target, newName } };
 }
 
