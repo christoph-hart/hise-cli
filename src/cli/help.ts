@@ -41,6 +41,7 @@ MODES
   -hise "<command>"        Runtime control            (--help for syntax)
   -publish "<command>"     Build & sign installers    (--help for syntax)
   -assets "<command>"      Install, manage, and publish asset packages (--help for syntax)
+  -api "<query>"           HiseScript API doc browser (--help for syntax)
 
   -wizard <subcommand>     Guided workflows          (--help for syntax)
 
@@ -833,6 +834,30 @@ NOTES
   - On macOS, the developer's Developer ID Application identity is used
     for both binary signing and AAX wraptool --signid.
   - HISE_AAX_PASSWORD env var is required when AAX is in the payload.`,
+
+	api: `hise-cli -api — HiseScript API doc browser
+
+SYNTAX
+  hise-cli -api "<Class>"
+  hise-cli -api "<Class>.<method>()"
+
+Renders HiseScript API docs as markdown (use --pretty to render ANSI).
+Static — no HISE connection required.
+
+QUERIES
+  <Class>             Class description + method index
+  <Class>.<method>    Method signature, description, parameters, code examples
+                      Trailing () is optional.
+
+EXAMPLES
+  hise-cli -api "Console"
+  hise-cli -api "Console.print()"
+  hise-cli -api "Engine.getSampleRate"
+  hise-cli -api "Console" --pretty
+
+OUTPUT
+  Markdown is returned in the JSON "result.content" field. Use --pretty to
+  render ANSI directly to stdout (syntax-highlighted code blocks).`,
 
 	assets: `hise-cli -assets — install, manage, and publish asset packages
 

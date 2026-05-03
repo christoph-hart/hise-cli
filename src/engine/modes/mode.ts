@@ -24,7 +24,8 @@ export type ModeId =
 	| "hise"
 	| "analyse"
 	| "publish"
-	| "assets";
+	| "assets"
+	| "api";
 
 export interface CompletionItem {
 	label: string;

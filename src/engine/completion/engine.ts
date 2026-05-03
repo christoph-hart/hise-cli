@@ -187,7 +187,7 @@ export function buildDatasets(
 					return {
 						label: m.name,
 						detail: brief,
-						insertText: m.parameters.length === 0
+						insertText: (m.parameters?.length ?? 0) === 0
 							? `${m.name}()`
 							: `${m.name}(`,
 					};

@@ -43,7 +43,11 @@ export const TOKEN_COLORS: Record<TokenType, string> = {
 	integer: "#DDAADD",
 	float: "#EEAA00",
 	string: "#DDAAAA",
-	comment: "#666666",
+	// Bumped from #666666 → on 256-color terminals chalk maps both #272822
+	// (code-block bg) and #666666 to the cube cell (95,95,95). #909090 has
+	// R==G==B so chalk picks the grayscale ramp (idx 245 ≈ rgb 138), well
+	// above the cube cell. Truecolor still reads as muted vs identifier text.
+	comment: "#909090",
 	operator: "#CCCCCC",
 	bracket: "#FFFFFF",
 	punctuation: "#CCCCCC",

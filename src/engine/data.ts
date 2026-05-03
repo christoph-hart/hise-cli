@@ -130,6 +130,7 @@ export type ScriptnodeList = Record<string, ScriptnodeDefinition>;
 export interface ApiParameter {
 	name: string;
 	type: string;
+	description?: string;
 }
 
 export interface ApiExample {
@@ -141,8 +142,12 @@ export interface ApiMethod {
 	name: string;
 	returnType: string;
 	description: string;
-	parameters: ApiParameter[];
-	examples: ApiExample[];
+	parameters?: ApiParameter[];
+	examples?: ApiExample[];
+	callScope?: string;
+	crossReferences?: string[];
+	pitfalls?: string[];
+	llmRef?: string;
 }
 
 export type ApiClassCategory =
@@ -151,10 +156,19 @@ export type ApiClassCategory =
 	| "scriptnode"
 	| "component";
 
+export interface ApiCommonMistake {
+	wrong: string;
+	right: string;
+	explanation: string;
+}
+
 export interface ApiClass {
 	description: string;
 	category: ApiClassCategory;
 	methods: ApiMethod[];
+	obtainedVia?: string;
+	llmRef?: string;
+	commonMistakes?: ApiCommonMistake[];
 }
 
 export interface ScriptingApi {

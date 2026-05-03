@@ -33,6 +33,7 @@ export async function launchInlineRepl(
 	const scriptnodeListRef: { current?: import("../engine/data.js").ScriptnodeList } = {};
 	const componentPropsRef: { current?: import("../engine/modes/ui.js").ComponentPropertyMap } = {};
 	const preprocessorListRef: { current?: import("../engine/data.js").PreprocessorList } = {};
+	const scriptingApiRef: { current?: import("../engine/data.js").ScriptingApi } = {};
 
 	const copyToClipboard = (text: string) => {
 		process.stdout.write(`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`);
@@ -51,6 +52,7 @@ export async function launchInlineRepl(
 		getScriptnodeList: () => scriptnodeListRef.current,
 		getComponentProperties: () => componentPropsRef.current,
 		getPreprocessorList: () => preprocessorListRef.current,
+		getScriptingApi: () => scriptingApiRef.current,
 		handlerRegistry: runtime.handlerRegistry,
 		launcher: runtime.hiseLauncher,
 		assetEnvironment,
@@ -81,6 +83,7 @@ export async function launchInlineRepl(
 		scriptnodeListRef.current = datasets.scriptnodeList;
 		componentPropsRef.current = datasets.componentProperties;
 		preprocessorListRef.current = datasets.preprocessorList;
+		scriptingApiRef.current = datasets.scriptingApi;
 		if (datasets.moduleList) {
 			for (const mode of session.modeStack) {
 				if (mode instanceof BuilderMode) {

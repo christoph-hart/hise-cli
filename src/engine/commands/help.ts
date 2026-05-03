@@ -69,6 +69,7 @@ Enter a mode to start working, or use /wizard for guided workflows.
 - **/ui** — UI component editor (add, remove, set properties, reparent)
 - **/script** — HiseScript REPL (evaluate expressions live)
 - **/inspect** — Runtime monitor (version, project info)
+- **/api** — HiseScript API doc browser (\`/api Console\`, \`/api Console.print()\`)
 - **/assets** — Install, manage, and publish HISE asset packages
 - **/export** — Build targets and export settings
 - **/undo** — Undo history and plan groups
@@ -411,6 +412,29 @@ Compose and execute timed MIDI sequences via HISE's inject_midi endpoint.
 - Notes: \`C3\` (=60), \`C#4\`, \`Db3\`, or raw MIDI numbers
 - Velocity: 0-127 (auto-normalized to 0.0-1.0)
 - Signals: sine, saw, sweep, dirac, noise, silence`,
+
+	api: `# API Mode
+
+HiseScript API doc browser — render class and method documentation as
+markdown. Static; no HISE connection needed.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| \`<Class>\` | Show class description and method index |
+| \`<Class>.<method>()\` | Show method signature, description, parameters, examples |
+| \`help\` | Show the class index |
+
+## Examples
+
+- \`Console\` — class-level docs for the \`Console\` namespace
+- \`Console.print()\` — full doc for \`Console.print\`, with code examples
+- \`Engine.getSampleRate\` — trailing \`()\` is optional
+
+## Completion
+
+**Tab** completes class names; after the dot, completes method names.`,
 
 	hise: `# HISE Control Mode
 

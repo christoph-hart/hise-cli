@@ -1,4 +1,4 @@
-import type { DataLoader, ModuleList, PreprocessorList, ScriptnodeList } from "./engine/data.js";
+import type { DataLoader, ModuleList, PreprocessorList, ScriptingApi, ScriptnodeList } from "./engine/data.js";
 import type { HiseConnection } from "./engine/hise.js";
 import { CompletionEngine } from "./engine/completion/engine.js";
 import { Session } from "./engine/session.js";
@@ -14,12 +14,13 @@ import { HiseMode, type HiseLauncher } from "./engine/modes/hise.js";
 import { AnalyseMode } from "./engine/modes/analyse.js";
 import { PublishMode } from "./engine/modes/publish.js";
 import { AssetsMode } from "./engine/modes/assets.js";
+import { ApiMode } from "./engine/modes/api.js";
 import type { AssetEnvironment } from "./engine/assets/environment.js";
 import { WizardRegistry } from "./engine/wizard/registry.js";
 import type { WizardHandlerRegistry } from "./engine/wizard/handler-registry.js";
 import { registerWizardAliases } from "./engine/commands/slash.js";
 
-export const SUPPORTED_MODE_IDS = ["script", "inspect", "builder", "dsp", "project", "undo", "ui", "sequence", "hise", "analyse", "publish", "assets"] as const;
+export const SUPPORTED_MODE_IDS = ["script", "inspect", "builder", "dsp", "project", "undo", "ui", "sequence", "hise", "analyse", "publish", "assets", "api"] as const;
 
 export interface CreateSessionOptions {
 	connection: HiseConnection | null;
@@ -28,6 +29,10 @@ export interface CreateSessionOptions {
 	getScriptnodeList?: () => ScriptnodeList | undefined;
 	getComponentProperties?: () => ComponentPropertyMap | undefined;
 	getPreprocessorList?: () => PreprocessorList | undefined;
+	getScriptingApi?: () => ScriptingApi | undefined;
+	/** When true, the `/api` mode renders `llmRef` instead of the terse
+	 *  human description. CLI/agent route sets this. */
+	apiForLlm?: boolean;
 	handlerRegistry?: WizardHandlerRegistry;
 	launcher?: HiseLauncher;
 	/** Asset environment for the `/assets` mode. Optional — when absent, the
@@ -45,6 +50,8 @@ export function createSession({
 	getScriptnodeList,
 	getComponentProperties,
 	getPreprocessorList,
+	getScriptingApi,
+	apiForLlm,
 	handlerRegistry,
 	launcher,
 	assetEnvironment,
@@ -77,6 +84,7 @@ export function createSession({
 	session.registerMode("analyse", () => new AnalyseMode(completionEngine));
 	session.registerMode("publish", () => new PublishMode());
 	session.registerMode("assets", () => new AssetsMode(assetEnvironment ?? null, completionEngine));
+	session.registerMode("api", () => new ApiMode(getScriptingApi?.(), { forLlm: apiForLlm ?? false }));
 	return { session, completionEngine };
 }
 
@@ -85,6 +93,7 @@ export interface SessionDatasets {
 	scriptnodeList?: ScriptnodeList;
 	componentProperties?: ComponentPropertyMap;
 	preprocessorList?: PreprocessorList;
+	scriptingApi?: ScriptingApi;
 }
 
 export async function loadSessionDatasets(
@@ -134,6 +143,12 @@ export async function loadSessionDatasets(
 		result.preprocessorList = await dataLoader.loadPreprocessorDefinitions();
 	} catch {
 		// preprocessor definitions not available
+	}
+
+	try {
+		result.scriptingApi = await dataLoader.loadScriptingApi();
+	} catch {
+		// scripting api not available
 	}
 
 	return result;

@@ -7,6 +7,7 @@ import type { ColorScheme } from "./theme.js";
 import { darkenHex, lerpHex } from "./theme.js";
 import { TOKEN_COLORS } from "../engine/highlight/tokens.js";
 import { tokenize as tokenizeHiseScript } from "../engine/highlight/hisescript.js";
+import { bgHex as engineBgHex } from "../engine/ansi.js";
 
 import { Marked } from "marked";
 import { markedTerminal } from "marked-terminal";
@@ -88,7 +89,13 @@ export function renderMarkdown(source: string, opts: RenderMarkdownOptions): str
 
 	const baseBg = scheme.backgrounds.standard;
 	const codeBg = darkenHex(baseBg, 0.85);
-	const codeBgChalk = chalk.bgHex(codeBg);
+	// engineBgHex routes through rgbTo256 which checks the grayscale ramp
+	// for low-saturation colors. chalk.bgHex picks cube cell (95,95,95) for
+	// any dark hex in the 13–47 range, making the bg look 50% gray on
+	// 256-color terminals. Engine helper picks ramp idx 234 (rgb 28, ~11%).
+	const codeBgOpen = engineBgHex(codeBg);
+	const codeBgClose = "\x1b[49m";
+	const wrapCodeBg = (s: string) => `${codeBgOpen}${s}${codeBgClose}`;
 	const codeIndent = "  ";
 
 	const localMarked = new Marked();
@@ -121,10 +128,10 @@ export function renderMarkdown(source: string, opts: RenderMarkdownOptions): str
 				const withBg = lines.map(line => {
 					const visible = line.replace(/\x1b\[[0-9;]*m/g, "");
 					const padding = Math.max(0, codeBlockWidth - codeIndent.length - visible.length);
-					return codeBgChalk(codeIndent + line + " ".repeat(padding));
+					return wrapCodeBg(codeIndent + line + " ".repeat(padding));
 				}).join("\n");
 
-				const padLine = codeBgChalk(" ".repeat(codeBlockWidth));
+				const padLine = wrapCodeBg(" ".repeat(codeBlockWidth));
 				return "\n" + padLine + "\n" + withBg + "\n" + padLine + "\n\n";
 			},
 		},
