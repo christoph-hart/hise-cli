@@ -254,6 +254,35 @@ describe("publishBuildInstaller (Windows)", () => {
 		expect(argString).toMatch(/\/DStandaloneSource=(\s|$)/);
 	});
 
+	it("quotes /D values containing spaces so iscc parses them as one token", async () => {
+		if (process.platform !== "win32") return;
+		const { executor, calls } = makeExecutor(() => ({ exitCode: 0 }));
+		const handler = createBuildInstallerHandler({
+			executor,
+			issTemplatePath: issPath,
+		});
+		await handler(
+			{
+				projectName: "Demo Project",
+				version: "1.0.0",
+				payload: "VST3",
+			},
+			noProgress,
+			undefined,
+			{
+				stagingDir: "D:\\HISE modules\\demo\\dist\\payload",
+				outputDir: "D:\\HISE modules\\demo\\dist",
+				stagedVst3: "Demo Project.vst3",
+			},
+		);
+		const args = calls[0]!.args;
+		expect(args).toContain('/DAppName="Demo Project"');
+		expect(args.some((a) => a.startsWith('/DVst3Source="') && a.endsWith('"'))).toBe(true);
+		expect(args.some((a) => a.startsWith('/DOutputDir="') && a.endsWith('"'))).toBe(true);
+		// AppVersion has no spaces — must remain unquoted.
+		expect(args).toContain("/DAppVersion=1.0.0");
+	});
+
 	it("returns failure on non-zero iscc exit", async () => {
 		if (process.platform !== "win32") return;
 		const { executor } = makeExecutor(() => ({

@@ -104,7 +104,7 @@ export async function runWindowsJuceCompile(
 	// .vcxproj. Newer VS2022 installs (14.43+) don't ship that exact
 	// subversion → MSB8070. Strip the pin so MSBuild picks the latest
 	// installed toolset.
-	const vsVersion = spec.vsVersion ?? "2022";
+	const vsVersion = spec.vsVersion ?? "2026";
 	const slnDir = spec.slnFile.replace(/\\[^\\]+\.sln$/i, "");
 	await stripPinnedToolsetVersions(executor, slnDir);
 
@@ -160,7 +160,7 @@ export interface JuceCompileSpec {
 	 *  inherit the Makefile's default. */
 	readonly macArchitecture?: "arm64" | "x86_64" | "universal";
 	/** Visual Studio major year — picks the Projucer exporter folder
-	 *  on Windows. Defaults to "2022" (the year aka.ms/vs/stable installs). */
+	 *  on Windows. Defaults to "2026" (the year aka.ms/vs/stable installs). */
 	readonly vsVersion?: VsVersion;
 }
 
@@ -175,7 +175,7 @@ export async function runJuceCompile(
 	emit: CompileEmit,
 ): Promise<CompileOutcome> {
 	if (process.platform === "win32") {
-		const vsVersion = spec.vsVersion ?? await detectVsVersion(executor) ?? "2022";
+		const vsVersion = spec.vsVersion ?? await detectVsVersion(executor) ?? "2026";
 		const slnFile = `${spec.binaryFolder}\\Builds\\VisualStudio${vsVersion}\\${spec.projectName}.sln`;
 		const projucerPath = `${spec.hisePath}\\JUCE\\Projucer\\Projucer.exe`;
 		return runWindowsJuceCompile(executor, {

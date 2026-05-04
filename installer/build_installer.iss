@@ -78,29 +78,34 @@ LicenseFile={#EulaSource}
 #endif
 
 [Files]
-; VST3 — installs into the system VST3 folder. Bundle is a directory; use
-; recursesubdirs so the entire .vst3 plugin is copied.
+; VST3 — modern VST3 SDK ships a bundle (directory) on every platform,
+; but HISE/Projucer on Windows still emits a single-file .vst3 (DLL with
+; renamed extension). Detect at compile time and emit the matching
+; Source: entry. Bundle case copies into a per-plugin subfolder so the
+; .vst3 directory name lands at <CommonFiles>\VST3\<AppName>.vst3.
+#if Vst3Source != ""
+  #if DirExists(Vst3Source)
 Source: "{#Vst3Source}\*"; DestDir: "{commoncf64}\VST3\{#AppName}.vst3"; \
-  Flags: ignoreversion recursesubdirs createallsubdirs; \
-  Check: HasSource('{#Vst3Source}')
+  Flags: ignoreversion recursesubdirs createallsubdirs
+  #else
+Source: "{#Vst3Source}"; DestDir: "{commoncf64}\VST3"; Flags: ignoreversion
+  #endif
+#endif
 
-; AAX — installs into Avid's plug-in folder. Bundle is also a directory.
+; AAX — Avid's .aaxplugin is always a bundle (directory) on Windows.
+; Same file/dir guard kept for parity in case a future format ships a
+; single-file variant.
+#if AaxSource != ""
+  #if DirExists(AaxSource)
 Source: "{#AaxSource}\*"; DestDir: "{commoncf64}\Avid\Audio\Plug-Ins\{#AppName}.aaxplugin"; \
-  Flags: ignoreversion recursesubdirs createallsubdirs; \
-  Check: HasSource('{#AaxSource}')
+  Flags: ignoreversion recursesubdirs createallsubdirs
+  #else
+Source: "{#AaxSource}"; DestDir: "{commoncf64}\Avid\Audio\Plug-Ins"; \
+  Flags: ignoreversion
+  #endif
+#endif
 
 ; Standalone .exe — installed alongside other app artifacts in {app}.
-Source: "{#StandaloneSource}"; DestDir: "{app}"; Flags: ignoreversion; \
-  Check: HasSource('{#StandaloneSource}')
-
-[Code]
-function HasSource(P: string): Boolean;
-begin
-  if Length(P) = 0 then
-  begin
-    Result := False;
-    exit;
-  end;
-  // Bundles are directories; standalone is a single file. Accept either.
-  Result := DirExists(P) or FileExists(P);
-end;
+#if StandaloneSource != ""
+Source: "{#StandaloneSource}"; DestDir: "{app}"; Flags: ignoreversion
+#endif

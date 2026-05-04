@@ -425,6 +425,27 @@ export function createSetupAdaptVsVersionHandler(_executor: PhaseExecutor): Inte
 			return ok("✓ VS exporter adaptation not needed.");
 		}
 
+		// Re-probe — compilerInstall may have just installed a different VS
+		// major year than the init snapshot saw (aka.ms/vs/stable currently
+		// ships VS2026 BuildTools, but a clean VM had no VS at init time).
+		// Mutate answers so downstream tasks (setupCompile, verify) see the
+		// post-install version.
+		const probed = await detectVsVersion(executor);
+		if (!probed) {
+			return fail(
+				"No Visual Studio installation found via vswhere after compilerInstall. " +
+				"Cannot adapt the Projucer file without knowing the installed VS major year. " +
+				"Verify the VS Build Tools install completed (re-run /setup or install manually).",
+			);
+		}
+		if (probed !== answers.vsVersion) {
+			onProgress({
+				phase: "adapt-vs",
+				message: `Detected VS ${probed} (init had ${answers.vsVersion ?? "none"}); updating answers.`,
+			});
+			answers.vsVersion = probed;
+		}
+
 		const installPath = answers.installPath!;
 		const vsVersion = normaliseVsVersion(answers.vsVersion);
 		const jucerPath = `${installPath}\\projects\\standalone\\HISE Standalone.jucer`;
@@ -890,7 +911,7 @@ export async function compileHise(
 		if (!msbuild) {
 			return fail("Could not locate a Visual Studio installation with MSBuild. Re-run the setup wizard.");
 		}
-		const vsVersion = spec.vsVersion ?? "2022";
+		const vsVersion = spec.vsVersion ?? "2026";
 		const buildsRoot = `${installPath}\\projects\\standalone\\Builds\\VisualStudio${vsVersion}`;
 		const sln = `${buildsRoot}\\HISE Standalone.sln`;
 		const config = buildConfig;
@@ -946,10 +967,10 @@ export function createSetupCompileHandler(_executor: PhaseExecutor): InternalTas
 }
 
 /** Coerce a free-form answers value to a known VsVersion, defaulting to
- *  "2022" (the year aka.ms/vs/stable currently installs). Centralises the
+ *  "2026" (the year aka.ms/vs/stable currently installs). Centralises the
  *  fallback so every consumer agrees on the same default. */
 export function normaliseVsVersion(raw: string | undefined): VsVersion {
-	return raw === "2026" ? "2026" : "2022";
+	return raw === "2022" ? "2022" : "2026";
 }
 
 // ── 7. Add to PATH ───────────────────────────────────────────────────

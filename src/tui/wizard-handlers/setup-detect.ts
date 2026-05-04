@@ -38,15 +38,15 @@ export function createSetupDetectHandler(executor: PhaseExecutor): InternalInitH
 		defaults.hasVs =
 			platform === "Windows" && defaults.compilerVersion !== "Not detected" ? "1" : "0";
 
-		// Visual Studio major year (Windows only). Defaults to "2022" — the
+		// Visual Studio major year (Windows only). Defaults to "2026" — the
 		// year aka.ms/vs/stable installs when compilerInstall has to fetch
 		// VS Build Tools — so first-time setups on a clean VM end up with
-		// VS2022 paths. The adaptVsVersion task re-probes after install in
-		// case the detected version changed.
+		// VS2026 paths. The adaptVsVersion task re-probes after install and
+		// mutates answers.vsVersion if the post-install year differs.
 		if (platform === "Windows") {
-			defaults.vsVersion = (await detectVsVersion(executor)) ?? "2022";
+			defaults.vsVersion = (await detectVsVersion(executor)) ?? "2026";
 		} else {
-			defaults.vsVersion = "2022";
+			defaults.vsVersion = "2026";
 		}
 
 		// Intel IPP detection (Windows only)

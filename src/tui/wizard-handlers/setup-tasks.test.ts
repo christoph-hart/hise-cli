@@ -426,13 +426,13 @@ describe("adaptJucerToVsVersion", () => {
 });
 
 describe("normaliseVsVersion", () => {
-	it("returns 2022 by default for missing / unknown values", () => {
-		expect(normaliseVsVersion(undefined)).toBe("2022");
-		expect(normaliseVsVersion("")).toBe("2022");
-		expect(normaliseVsVersion("garbage")).toBe("2022");
+	it("returns 2026 by default for missing / unknown values", () => {
+		expect(normaliseVsVersion(undefined)).toBe("2026");
+		expect(normaliseVsVersion("")).toBe("2026");
+		expect(normaliseVsVersion("garbage")).toBe("2026");
 	});
-	it("returns 2026 only for an exact match", () => {
-		expect(normaliseVsVersion("2026")).toBe("2026");
+	it("returns 2022 only for an exact match", () => {
+		expect(normaliseVsVersion("2022")).toBe("2022");
 	});
 });
 

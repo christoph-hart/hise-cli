@@ -63,10 +63,10 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		}
 		defaults.installPath = installPath;
 
-		// VS version — for the Windows MSBuild path. Falls back to "2022"
+		// VS version — for the Windows MSBuild path. Falls back to "2026"
 		// (the year aka.ms/vs/stable installs) when compilerSettings.xml
 		// has no VisualStudioVersion element.
-		defaults.vsVersion = (settingsXml && parseVsVersion(settingsXml)) ?? "2022";
+		defaults.vsVersion = (settingsXml && parseVsVersion(settingsXml)) ?? "2026";
 
 		// Running build SHA + reachability. When HISE is running we trust
 		// /api/status; when it's offline we fall back to the currentGitHash.txt

@@ -315,6 +315,16 @@ interface IsccOptions {
 	readonly onLog: (line: string) => void;
 }
 
+// iscc parses /D values up to the next whitespace — quote values that
+// contain spaces so the whole value reaches the preprocessor. Empty
+// values stay unquoted (`/DName=`) so #ifdef-guarded sections still
+// detect "no value provided".
+function isccDefine(name: string, value: string): string {
+	if (value.length === 0) return `/D${name}=`;
+	if (/\s/.test(value)) return `/D${name}="${value}"`;
+	return `/D${name}=${value}`;
+}
+
 async function runIscc(opts: IsccOptions): Promise<WizardExecResult> {
 	// Resolve the source path each target points to inside stagingDir.
 	const vst3Source = opts.targets.includes("VST3") && opts.stagedVst3Name
@@ -329,14 +339,14 @@ async function runIscc(opts: IsccOptions): Promise<WizardExecResult> {
 			: "";
 
 	const args = [
-		`/DAppName=${opts.projectName}`,
-		`/DAppVersion=${opts.version}`,
-		`/DOutputDir=${opts.outputDir}`,
-		`/DVst3Source=${vst3Source}`,
-		`/DAaxSource=${aaxSource}`,
-		`/DStandaloneSource=${standaloneSource}`,
+		isccDefine("AppName", opts.projectName),
+		isccDefine("AppVersion", opts.version),
+		isccDefine("OutputDir", opts.outputDir),
+		isccDefine("Vst3Source", vst3Source),
+		isccDefine("AaxSource", aaxSource),
+		isccDefine("StandaloneSource", standaloneSource),
 	];
-	if (opts.eulaPath) args.push(`/DEulaSource=${opts.eulaPath}`);
+	if (opts.eulaPath) args.push(isccDefine("EulaSource", opts.eulaPath));
 	args.push(opts.issTemplatePath);
 
 	opts.onLog(`Running iscc with: ${args.join(" ")}`);
