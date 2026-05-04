@@ -743,6 +743,39 @@ export interface CompileHiseSpec {
 	 *  intermediate dir switches case), orphaning the `.d` dependency files
 	 *  so make fails to detect source changes. */
 	readonly clean?: boolean;
+	/** Explicit build configuration. Overrides the includeFaust-derived
+	 *  default of Release/ReleaseWithFaust. Accepts any CONFIG value the
+	 *  Projucer-generated Makefile / .sln knows about (Minimal, Debug,
+	 *  DebugWithFaust, Release, ReleaseWithFaust). */
+	readonly buildConfiguration?: string;
+}
+
+/** Known build configurations exposed by HISE's Projucer project. */
+export type BuildConfiguration = "Minimal" | "Debug" | "DebugWithFaust" | "Release" | "ReleaseWithFaust";
+
+const BUILD_CONFIGURATIONS: readonly BuildConfiguration[] = [
+	"Minimal", "Debug", "DebugWithFaust", "Release", "ReleaseWithFaust",
+];
+
+/** Coerce a free-form answers value to a known BuildConfiguration. Falls
+ *  back to includeFaust-derived Release/ReleaseWithFaust when the input is
+ *  empty or unrecognised, matching the wizard's pre-config-field behaviour. */
+export function normaliseBuildConfiguration(
+	raw: string | undefined,
+	includeFaust: boolean,
+): BuildConfiguration {
+	if (raw && (BUILD_CONFIGURATIONS as readonly string[]).includes(raw)) {
+		return raw as BuildConfiguration;
+	}
+	return includeFaust ? "ReleaseWithFaust" : "Release";
+}
+
+/** True when the configuration produces a "HISE Debug" binary rather than
+ *  the standard "HISE". Minimal counts as a debug build — Projucer's
+ *  HISE Standalone.jucer marks Minimal/Debug/DebugWithFaust with the
+ *  `isDebug` flag, all three emit `HISE Debug.exe` / `HISE Debug.app`. */
+export function isDebugBuildConfiguration(config: string): boolean {
+	return config === "Debug" || config === "DebugWithFaust" || config === "Minimal";
 }
 
 /**
@@ -759,9 +792,12 @@ export async function compileHise(
 	const { installPath, platform, architecture, includeFaust, parallelJobs } = spec;
 	const phase = spec.phase ?? "compile";
 
-	// Windows MSBuild uses the spaced form; macOS + Linux Makefiles use
-	// the space-free form (config names are strict string compares).
-	const buildConfig = includeFaust ? "ReleaseWithFaust" : "Release";
+	// Build config: explicit spec value if supplied, otherwise the legacy
+	// includeFaust-derived Release/ReleaseWithFaust default. Same string
+	// drives both the POSIX Makefile CONFIG= variable and Windows MSBuild
+	// /p:Configuration — Projucer generates matching target names for all
+	// of Minimal / Debug / DebugWithFaust / Release / ReleaseWithFaust.
+	const buildConfig = normaliseBuildConfiguration(spec.buildConfiguration, includeFaust);
 
 	onProgress({ phase, percent: 0, message: "Running Projucer resave..." });
 
@@ -857,7 +893,7 @@ export async function compileHise(
 		const vsVersion = spec.vsVersion ?? "2022";
 		const buildsRoot = `${installPath}\\projects\\standalone\\Builds\\VisualStudio${vsVersion}`;
 		const sln = `${buildsRoot}\\HISE Standalone.sln`;
-		const config = includeFaust ? "ReleaseWithFaust" : "Release";
+		const config = buildConfig;
 
 		// Projucer's VS2022 exporter pins MSVC toolset 14.36.32532 in the
 		// .vcxproj. Newer VS2022 installs (14.43+) don't ship that exact

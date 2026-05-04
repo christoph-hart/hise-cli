@@ -126,40 +126,34 @@ describe("fetchDevelopHead", () => {
 });
 
 describe("createUpdateDetectHandler", () => {
-	// Shared stubs for the environment probes that update-detect runs
-	// regardless of state. `cat` is dispatched by path because the handler
-	// reads two different files (compilerSettings.xml + currentGitHash.txt)
-	// and MockPhaseExecutor only keys stubs by command name.
+	// Shared stubs for the environment probes. `readTextFile` is dispatched
+	// by suffix because the handler reads two different files
+	// (compilerSettings.xml + currentGitHash.txt).
 	function stubEnvironment(
 		executor: MockPhaseExecutor,
 		hisePath = "/Users/test/HISE",
 		gitHash: string | null = "abcdef1234567890",
-	): void {
-		const original = executor.spawn.bind(executor);
-		executor.spawn = async (cmd, args, opts) => {
-			if (cmd === "cat" && args[0]?.endsWith("compilerSettings.xml")) {
-				executor.calls.push({ command: cmd, args, env: opts.env });
-				return { exitCode: 0, stdout: `<HisePath value="${hisePath}"/>`, stderr: "" };
-			}
-			if (cmd === "cat" && args[0]?.endsWith("currentGitHash.txt")) {
-				executor.calls.push({ command: cmd, args, env: opts.env });
-				return gitHash
-					? { exitCode: 0, stdout: `${gitHash}\n`, stderr: "" }
-					: { exitCode: 1, stdout: "", stderr: "No such file" };
-			}
-			return original(cmd, args, opts);
-		};
+	): (path: string) => Promise<string | null> {
 		executor.onSpawn("sysctl", { exitCode: 0, stdout: "8\n", stderr: "" });
 		executor.onSpawn("nproc", { exitCode: 0, stdout: "8\n", stderr: "" });
 		executor.onSpawn("wmic", { exitCode: 0, stdout: "NumberOfCores=8\n", stderr: "" });
 		executor.onSpawn("faust", { exitCode: 1, stdout: "", stderr: "" });
 		executor.onSpawn("test", { exitCode: 1, stdout: "", stderr: "" });
 		executor.onSpawn("cmd", { exitCode: 0, stdout: "", stderr: "" });
+		return async (path: string) => {
+			if (path.endsWith("compilerSettings.xml")) {
+				return `<HisePath value="${hisePath}"/>`;
+			}
+			if (path.endsWith("currentGitHash.txt")) {
+				return gitHash ? `${gitHash}\n` : null;
+			}
+			return null;
+		};
 	}
 
 	it("flags updateAvailable=0 when current and latest SHAs match; latestCommitPassedCi=1 when HEAD equals green", async () => {
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor);
+		const readTextFile = stubEnvironment(executor);
 		const SAME_SHA = "98a75d8ee4ff0db43e3de4b3aca3f4e53d16785c";
 		const connection = new MockHiseConnection();
 		connection.onGet("/api/status", () => ({
@@ -175,7 +169,7 @@ describe("createUpdateDetectHandler", () => {
 			{ workflow_runs: [{ head_sha: SAME_SHA, display_title: "nothing new", created_at: "", html_url: "" }] },
 			{ sha: SAME_SHA },
 		);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 		const defaults = await handler("update") as Record<string, string>;
 
 		expect(defaults.installPath).toBe("/Users/test/HISE");
@@ -190,7 +184,7 @@ describe("createUpdateDetectHandler", () => {
 
 	it("flags updateAvailable=1 and targetCommit=green when current differs", async () => {
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor);
+		const readTextFile = stubEnvironment(executor);
 		const CUR = "aaaa11111111111111111111111111111111aaaa";
 		const LATEST = "bbbb22222222222222222222222222222222bbbb";
 		const connection = new MockHiseConnection();
@@ -206,7 +200,7 @@ describe("createUpdateDetectHandler", () => {
 			{ workflow_runs: [{ head_sha: LATEST, display_title: "new commit", created_at: "", html_url: "" }] },
 			{ sha: LATEST },
 		);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 		const defaults = await handler("update") as Record<string, string>;
 
 		expect(defaults.updateAvailable).toBe("1");
@@ -218,7 +212,7 @@ describe("createUpdateDetectHandler", () => {
 	it("falls back to currentGitHash.txt when /api/status lacks buildCommit", async () => {
 		const FILE_SHA = "ccccccccccccccccccccccccccccccccccccdddd";
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor, "/Users/test/HISE", FILE_SHA);
+		const readTextFile = stubEnvironment(executor, "/Users/test/HISE", FILE_SHA);
 		const GREEN = "bbbb22222222222222222222222222222222bbbb";
 		const connection = new MockHiseConnection();
 		// Old HISE: /api/status responds but does not carry server.buildCommit.
@@ -234,7 +228,7 @@ describe("createUpdateDetectHandler", () => {
 			{ workflow_runs: [{ head_sha: GREEN, display_title: "x", created_at: "", html_url: "" }] },
 			{ sha: GREEN },
 		);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 		const defaults = await handler("update") as Record<string, string>;
 
 		expect(defaults.currentSha).toBe(FILE_SHA);
@@ -244,7 +238,7 @@ describe("createUpdateDetectHandler", () => {
 	it("falls back to currentGitHash.txt when HISE is not running", async () => {
 		const FILE_SHA = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee";
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor, "/Users/test/HISE", FILE_SHA);
+		const readTextFile = stubEnvironment(executor, "/Users/test/HISE", FILE_SHA);
 		const GREEN = "bbbb22222222222222222222222222222222bbbb";
 		const connection = new MockHiseConnection();
 		connection.onGet("/api/status", () => ({ error: true, message: "offline" }));
@@ -252,7 +246,7 @@ describe("createUpdateDetectHandler", () => {
 			{ workflow_runs: [{ head_sha: GREEN, display_title: "x", created_at: "", html_url: "" }] },
 			{ sha: GREEN },
 		);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 		const defaults = await handler("update") as Record<string, string>;
 
 		expect(defaults.hiseRunning).toBe("0");
@@ -262,7 +256,7 @@ describe("createUpdateDetectHandler", () => {
 
 	it("flags latestCommitPassedCi=0 when develop HEAD is ahead of the latest green run", async () => {
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor);
+		const readTextFile = stubEnvironment(executor);
 		const GREEN = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 		const HEAD = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
 		const connection = new MockHiseConnection();
@@ -278,7 +272,7 @@ describe("createUpdateDetectHandler", () => {
 			{ workflow_runs: [{ head_sha: GREEN, display_title: "last green", created_at: "", html_url: "" }] },
 			{ sha: HEAD },
 		);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 		const defaults = await handler("update") as Record<string, string>;
 
 		expect(defaults.latestCommitPassedCi).toBe("0");
@@ -288,12 +282,12 @@ describe("createUpdateDetectHandler", () => {
 
 	it("aborts with a 'run /setup' message when compilerSettings.xml is missing", async () => {
 		const executor = new MockPhaseExecutor();
-		executor.onSpawn("cat", { exitCode: 1, stdout: "", stderr: "No such file" });
 		executor.onSpawn("cmd", { exitCode: 1, stdout: "", stderr: "" });
 		const connection = new MockHiseConnection();
 		connection.onGet("/api/status", () => ({ error: true, message: "offline" }));
 		const fetchImpl = mockGithubFetch(null, null);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const readTextFile = async () => null;
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 
 		await expect(handler("update")).rejects.toThrow(WizardInitAbortError);
 		await expect(handler("update")).rejects.toThrow(/Run \/setup/);
@@ -301,11 +295,11 @@ describe("createUpdateDetectHandler", () => {
 
 	it("aborts when HISE is offline AND currentGitHash.txt is missing", async () => {
 		const executor = new MockPhaseExecutor();
-		stubEnvironment(executor, "/Users/test/HISE", null);
+		const readTextFile = stubEnvironment(executor, "/Users/test/HISE", null);
 		const connection = new MockHiseConnection();
 		connection.onGet("/api/status", () => ({ error: true, message: "offline" }));
 		const fetchImpl = mockGithubFetch(null, null);
-		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl });
+		const handler = createUpdateDetectHandler({ executor, connection, fetchImpl, readTextFile });
 
 		await expect(handler("update")).rejects.toThrow(WizardInitAbortError);
 		await expect(handler("update")).rejects.toThrow(/currentGitHash\.txt/);

@@ -40,6 +40,10 @@ function needsProjectFolder(path: string): boolean {
 import { wireScriptFileOps, wireExtendedFileOps } from "../node-io.js";
 import { createNodeAssetEnvironment } from "../tui/nodeAssetIo.js";
 import { registerAssetsWizardHandlers } from "../tui/wizard-handlers/index.js";
+import { readFile as fsReadFile } from "node:fs/promises";
+import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js";
+import { extractStatusPayload } from "../engine/modes/inspect.js";
+import { isErrorResponse, isSuccessResponse } from "../engine/hise.js";
 
 export interface CliCommandOptions {
 	connectionOverride?: HiseConnection;
@@ -61,6 +65,12 @@ export async function executeCliCommand(
 	const parsed = parseCliArgs(argv, commands);
 	if (parsed.kind === "run") {
 		return executeRunCommand(parsed, dataLoader, opts);
+	}
+	if (parsed.kind === "version") {
+		return { kind: "json", payload: { ok: true, value: { version: cliVersion() } } };
+	}
+	if (parsed.kind === "status") {
+		return { kind: "json", payload: { ok: true, value: await collectStatus(opts) } };
 	}
 	if (parsed.kind !== "execute") return parsed;
 
@@ -390,6 +400,61 @@ async function readRunSource(source: RunSource): Promise<string> {
 			return source.content;
 		case "stdin":
 			return readStdin();
+	}
+}
+
+function cliVersion(): string {
+	return typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
+}
+
+interface StatusReport {
+	cliVersion: string;
+	hisePath: string | null;
+	connected: boolean;
+	hiseVersion: string | null;
+	buildCommit: string | null;
+	project: { name: string; projectFolder: string } | null;
+}
+
+async function collectStatus(opts: CliCommandOptions): Promise<StatusReport> {
+	const report: StatusReport = {
+		cliVersion: cliVersion(),
+		hisePath: await detectHisePath(),
+		connected: false,
+		hiseVersion: null,
+		buildCommit: null,
+		project: null,
+	};
+
+	const connection = opts.connectionOverride ?? new HttpHiseConnection();
+	try {
+		report.connected = await connection.probe();
+		if (!report.connected) return report;
+
+		const response = await connection.get("/api/status");
+		if (isErrorResponse(response) || !isSuccessResponse(response)) return report;
+
+		try {
+			const data = extractStatusPayload(response as unknown as Record<string, unknown>);
+			report.hiseVersion = data.server.version;
+			report.buildCommit = data.server.buildCommit ?? null;
+			report.project = { name: data.project.name, projectFolder: data.project.projectFolder };
+		} catch {
+			// status payload missing/malformed — leave nulls
+		}
+	} finally {
+		if (!opts.connectionOverride) connection.destroy();
+	}
+
+	return report;
+}
+
+async function detectHisePath(): Promise<string | null> {
+	try {
+		const xml = await fsReadFile(compilerSettingsPath(process.platform), "utf8");
+		return parseHisePath(xml);
+	} catch {
+		return null;
 	}
 }
 

@@ -7,6 +7,8 @@ export type CliParseResult =
 	| { kind: "diagnose"; filePath: string }
 	| { kind: "run"; source: { type: "file"; path: string } | { type: "stdin" } | { type: "inline"; content: string }; dryRun: boolean; useMock: boolean; watch: boolean; verbosity: import("../engine/run/executor.js").RunReportVerbosity }
 	| { kind: "update"; check: boolean }
+	| { kind: "version" }
+	| { kind: "status" }
 	| {
 		kind: "execute";
 		entry: CommandEntry;
@@ -100,6 +102,14 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	}
 
 	const first = args[0]!;
+
+	if (first === "--version" || first === "-version") {
+		return { kind: "version" };
+	}
+
+	if (first === "--status" || first === "-status") {
+		return { kind: "status" };
+	}
 
 	// --run <file.hsc | - | --inline "script"> [--mock] [--dry-run] [--verbosity=<level>]
 	if (first === "--run" || first === "-run" || first === "run") {

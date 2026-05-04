@@ -80,6 +80,11 @@ tabs:
         label: Shutdown HISE
         help: POST /api/shutdown and wait for disconnect before pulling
         defaultValue: "0"
+      - id: pullUpdate
+        type: toggle
+        label: Pull update with git
+        help: Fetch and check out the target commit. Turn off to recompile the current working tree without changing the SHA.
+        defaultValue: "1"
       - id: cleanBuilds
         type: toggle
         label: Clean HISE Builds
@@ -90,6 +95,17 @@ tabs:
         label: Compile HISE
         help: Re-run Projucer + make / MSBuild after checkout
         defaultValue: "1"
+      - id: buildConfiguration
+        type: choice
+        label: Build Configuration
+        help: Build configuration passed to make / MSBuild. Defaults to Release / ReleaseWithFaust depending on whether HISE was originally built with Faust. Pick Debug / DebugWithFaust to launch "HISE Debug" instead.
+        items:
+          - Minimal
+          - Debug
+          - DebugWithFaust
+          - Release
+          - ReleaseWithFaust
+        valueMode: text
       - id: launchHise
         type: toggle
         label: Launch HISE

@@ -13,7 +13,7 @@ import type { PhaseExecutor } from "../../engine/wizard/phase-executor.js";
 import type { WizardExecResult } from "../../engine/wizard/types.js";
 import { isOn } from "../../engine/wizard/types.js";
 import { extractStatusPayload } from "../../engine/modes/inspect.js";
-import { compileHise, normaliseVsVersion } from "./setup-tasks.js";
+import { compileHise, isDebugBuildConfiguration, normaliseBuildConfiguration, normaliseVsVersion } from "./setup-tasks.js";
 
 export interface UpdateHandlerDeps {
 	readonly executor: PhaseExecutor;
@@ -105,6 +105,11 @@ export function createUpdateShutdownHandler(deps: UpdateHandlerDeps): InternalTa
 
 export function createUpdateCheckoutHandler(deps: UpdateHandlerDeps): InternalTaskHandler {
 	return async (answers, onProgress, signal) => {
+		if (!isOn(answers.pullUpdate)) {
+			onProgress({ phase: "checkout", percent: 100, message: "Skipped (pullUpdate off)." });
+			return ok("Checkout skipped — recompiling current working tree.");
+		}
+
 		const executor = withSignal(deps.executor, signal);
 		const installPath = answers.installPath;
 		if (!installPath) return fail("Install path is empty — cannot check out.");
@@ -206,6 +211,10 @@ export function createUpdateCompileHandler(deps: UpdateHandlerDeps): InternalTas
 			return ok("Compile skipped.");
 		}
 		const executor = withSignal(deps.executor, signal);
+		const buildConfiguration = normaliseBuildConfiguration(
+			answers.buildConfiguration,
+			isOn(answers.includeFaust),
+		);
 		return compileHise(executor, {
 			installPath: answers.installPath!,
 			platform: answers.platform ?? "Linux",
@@ -213,6 +222,7 @@ export function createUpdateCompileHandler(deps: UpdateHandlerDeps): InternalTas
 			includeFaust: isOn(answers.includeFaust),
 			parallelJobs: Math.max(1, parseInt(answers.parallelJobs ?? "1", 10) || 1),
 			vsVersion: normaliseVsVersion(answers.vsVersion),
+			buildConfiguration,
 			// No `clean: true` here — when the cleanBuilds toggle is on the
 			// previous task wiped the entire Builds folder; when it's off the
 			// user explicitly asked for an incremental build, and running
@@ -230,9 +240,19 @@ export function createUpdateLaunchHandler(deps: UpdateHandlerDeps): InternalTask
 			return ok("Launch skipped.");
 		}
 
-		onProgress({ phase: "launch", percent: 0, message: "Launching HISE..." });
+		// Debug / DebugWithFaust produce a "HISE Debug" binary (separate
+		// .app bundle on macOS, separate exe under x64\Debug\App on Windows).
+		// Pick the matching launcher name so we don't accidentally launch a
+		// stale Release build sitting alongside it.
+		const buildConfiguration = normaliseBuildConfiguration(
+			answers.buildConfiguration,
+			isOn(answers.includeFaust),
+		);
+		const launchCommand = isDebugBuildConfiguration(buildConfiguration) ? "HISE Debug" : "HISE";
+
+		onProgress({ phase: "launch", percent: 0, message: `Launching ${launchCommand}...` });
 		try {
-			await deps.launcher.spawnDetached("HISE", ["start_server"]);
+			await deps.launcher.spawnDetached(launchCommand, ["start_server"]);
 		} catch (err) {
 			return fail(`Failed to launch HISE: ${err instanceof Error ? err.message : String(err)}`);
 		}
@@ -259,9 +279,14 @@ export function createUpdateVerifyHandler(deps: UpdateHandlerDeps): InternalTask
 			return ok("Verify skipped.");
 		}
 
-		const expected = (answers.targetCommit?.trim() || answers.latestSha?.trim() || "").trim();
+		// When the user opted out of pulling we just rebuilt the working tree
+		// in place, so the expected SHA is whatever was checked out before
+		// the run (currentSha from update-detect), not the target.
+		const expected = isOn(answers.pullUpdate)
+			? (answers.targetCommit?.trim() || answers.latestSha?.trim() || "").trim()
+			: (answers.currentSha?.trim() || "").trim();
 		if (!expected) {
-			return fail("No target commit to verify against.");
+			return fail("No commit to verify against.");
 		}
 
 		onProgress({ phase: "verify", percent: 50, message: "Querying /api/status..." });

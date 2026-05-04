@@ -23,6 +23,8 @@ USAGE
   hise-cli -wizard <subcommand>             Wizard operations (JSON output)
   hise-cli diagnose <filepath>              Diagnose HiseScript file (JSON output)
   hise-cli update [--check]                 Self-update to latest GitHub release
+  hise-cli -version                         Print the CLI version (JSON)
+  hise-cli -status                          Print CLI + HISE status (JSON)
   hise-cli --help                           Show this help
   hise-cli -<mode> --help                   Show mode-specific help
 

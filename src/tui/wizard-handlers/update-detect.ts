@@ -6,6 +6,7 @@
 // `develop` branch. Also fetches the HEAD of develop so the wizard can flag
 // whether the newest commit has actually passed CI.
 
+import { readFile } from "node:fs/promises";
 import type { HiseConnection } from "../../engine/hise.js";
 import { isEnvelopeResponse } from "../../engine/hise.js";
 import type { InternalInitHandler } from "../../engine/wizard/handler-registry.js";
@@ -26,9 +27,21 @@ export interface UpdateDetectDeps {
 	readonly connection: HiseConnection;
 	/** Injectable GitHub fetcher for tests. Defaults to globalThis.fetch. */
 	readonly fetchImpl?: typeof globalThis.fetch;
+	/** Injectable text-file reader for tests. Defaults to fs.readFile.
+	 *  Returns null when the file is missing/unreadable. */
+	readonly readTextFile?: (path: string) => Promise<string | null>;
+}
+
+async function defaultReadTextFile(path: string): Promise<string | null> {
+	try {
+		return await readFile(path, "utf-8");
+	} catch {
+		return null;
+	}
 }
 
 export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitHandler {
+	const readTextFile = deps.readTextFile ?? defaultReadTextFile;
 	return async (_wizardId) => {
 		const defaults: Record<string, string> = {};
 
@@ -40,7 +53,8 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		// HISE install path — read from <appData>/HISE/compilerSettings.xml.
 		// Without it we can't locate currentGitHash.txt below, and the user
 		// almost certainly hasn't run /setup yet.
-		const installPath = await readHisePathFromCompilerSettings(deps.executor, platform);
+		const settingsXml = await readTextFile(compilerSettingsPath(platform));
+		const installPath = settingsXml ? parseHisePath(settingsXml) : null;
 		if (!installPath) {
 			throw new WizardInitAbortError(
 				"HISE install path not found (compilerSettings.xml missing HisePath). " +
@@ -52,7 +66,7 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		// VS version — for the Windows MSBuild path. Falls back to "2022"
 		// (the year aka.ms/vs/stable installs) when compilerSettings.xml
 		// has no VisualStudioVersion element.
-		defaults.vsVersion = (await readVsVersionFromCompilerSettings(deps.executor, platform)) ?? "2022";
+		defaults.vsVersion = (settingsXml && parseVsVersion(settingsXml)) ?? "2022";
 
 		// Running build SHA + reachability. When HISE is running we trust
 		// /api/status; when it's offline we fall back to the currentGitHash.txt
@@ -62,7 +76,7 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		defaults.hiseRunning = status.running ? "1" : "0";
 		let currentSha = status.buildCommit ?? "";
 		if (!currentSha) {
-			const fromFile = await readCurrentGitHash(deps.executor, installPath, platform);
+			const fromFile = await readCurrentGitHash(readTextFile, installPath, platform);
 			if (fromFile) {
 				currentSha = fromFile;
 			} else {
@@ -85,6 +99,11 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		defaults.includeFaust = installPath
 			? (await detectFaust(deps.executor, platform, installPath) ? "1" : "0")
 			: "0";
+
+		// Default build configuration mirrors the originally-built variant.
+		// User can override on the Actions tab (Minimal / Debug /
+		// DebugWithFaust / Release / ReleaseWithFaust).
+		defaults.buildConfiguration = defaults.includeFaust === "1" ? "ReleaseWithFaust" : "Release";
 
 		// Latest CI-green develop SHA + develop HEAD. The green SHA drives
 		// the checkout target; the HEAD comparison tells the user whether
@@ -144,18 +163,6 @@ function compilerSettingsPath(platform: string): string {
 	return `${appData}\\HISE\\compilerSettings.xml`;
 }
 
-export async function readHisePathFromCompilerSettings(
-	executor: PhaseExecutor,
-	platform: string,
-): Promise<string | null> {
-	const path = compilerSettingsPath(platform);
-	const read = platform === "Windows"
-		? await executor.spawn("cmd", ["/c", "type", path], {})
-		: await executor.spawn("cat", [path], {});
-	if (read.exitCode !== 0) return null;
-	return parseHisePath(read.stdout);
-}
-
 /** Extract `<HisePath value="..."/>` from a compilerSettings.xml blob.
  *  The file is flat — one element per setting — so a regex is sufficient. */
 export function parseHisePath(xml: string): string | null {
@@ -173,33 +180,18 @@ export function parseVsVersion(xml: string): "2022" | "2026" | null {
 	return null;
 }
 
-export async function readVsVersionFromCompilerSettings(
-	executor: PhaseExecutor,
-	platform: string,
-): Promise<"2022" | "2026" | null> {
-	const path = compilerSettingsPath(platform);
-	const read = platform === "Windows"
-		? await executor.spawn("cmd", ["/c", "type", path], {})
-		: await executor.spawn("cat", [path], {});
-	if (read.exitCode !== 0) return null;
-	return parseVsVersion(read.stdout);
-}
-
 /** Read `<installPath>/currentGitHash.txt` — a plain SHA that the HISE build
  *  writes at repo root (visible in the hise-source tree listing). Used as a
  *  fallback when /api/status is unreachable because HISE isn't running. */
 export async function readCurrentGitHash(
-	executor: PhaseExecutor,
+	readTextFile: (path: string) => Promise<string | null>,
 	installPath: string,
 	platform: string,
 ): Promise<string | null> {
 	const sep = platform === "Windows" ? "\\" : "/";
-	const path = `${installPath}${sep}currentGitHash.txt`;
-	const read = platform === "Windows"
-		? await executor.spawn("cmd", ["/c", "type", path], {})
-		: await executor.spawn("cat", [path], {});
-	if (read.exitCode !== 0) return null;
-	const sha = read.stdout.trim();
+	const text = await readTextFile(`${installPath}${sep}currentGitHash.txt`);
+	if (text === null) return null;
+	const sha = text.trim();
 	// Accept anything that looks like a SHA — 7 to 40 hex chars. Guards
 	// against accidentally returning an empty file's trim() == "".
 	return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;

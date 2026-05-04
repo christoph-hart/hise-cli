@@ -140,9 +140,15 @@ export function hiseBinaryCandidates(
 	command: string,
 	platform: NodeJS.Platform,
 ): string[] {
-	const configs = command === "HISE Debug" ? ["Debug"] : ["Release", "ReleaseWithFaust"];
+	const isDebug = command === "HISE Debug";
+	// Projucer's HISE Standalone.jucer marks Minimal / Debug / DebugWithFaust
+	// with isDebug — all three emit a "HISE Debug" binary. Probe in the order
+	// users typically pick (DebugWithFaust > Debug > Minimal) so a freshly
+	// built variant wins over an older sibling.
+	const configs = isDebug
+		? ["DebugWithFaust", "Debug", "Minimal"]
+		: ["ReleaseWithFaust", "Release"];
 	if (platform === "darwin") {
-		const isDebug = command === "HISE Debug";
 		const xcodeConfigs = isDebug ? ["Debug", "Minimal"] : ["Release", "ReleaseWithFaust", "CI", "Minimal"];
 		const appName = isDebug ? "HISE Debug.app" : "HISE.app";
 		const binaryName = isDebug ? "HISE Debug" : "HISE";
@@ -162,6 +168,7 @@ export function hiseBinaryCandidates(
 			"HISE Standalone",
 		)];
 	}
+	const exeName = isDebug ? "HISE Debug.exe" : "HISE.exe";
 	const vsVersions = ["2022", "2026"];
 	return vsVersions.flatMap((vsVersion) => configs.map((config) => win32.join(
 		installPath,
@@ -172,7 +179,7 @@ export function hiseBinaryCandidates(
 		"x64",
 		config,
 		"App",
-		"HISE.exe",
+		exeName,
 	)));
 }
 

@@ -51,7 +51,7 @@ describe("updateCheckout", () => {
 		const executor = new MockPhaseExecutor();
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler({ installPath: "", targetCommit: "abc" }, noopProgress);
+		const result = await handler({ installPath: "", targetCommit: "abc", pullUpdate: "1" }, noopProgress);
 		expect(result.success).toBe(false);
 		expect(result.message).toContain("Install path");
 	});
@@ -60,7 +60,7 @@ describe("updateCheckout", () => {
 		const executor = new MockPhaseExecutor();
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler({ installPath: "/HISE" }, noopProgress);
+		const result = await handler({ installPath: "/HISE", pullUpdate: "1" }, noopProgress);
 		expect(result.success).toBe(false);
 		expect(result.message).toContain("target commit");
 	});
@@ -71,7 +71,7 @@ describe("updateCheckout", () => {
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "1" },
+			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "1", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(true);
@@ -97,7 +97,7 @@ describe("updateCheckout", () => {
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "0" },
+			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "0", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(true);
@@ -114,7 +114,7 @@ describe("updateCheckout", () => {
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ installPath: "/HISE", targetCommit: "", latestSha: "bbbbbbb", cleanBuilds: "1" },
+			{ installPath: "/HISE", targetCommit: "", latestSha: "bbbbbbb", cleanBuilds: "1", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(true);
@@ -122,6 +122,19 @@ describe("updateCheckout", () => {
 			(c) => c.command === "git" && c.args.includes("checkout") && c.args.includes("bbbbbbb"),
 		);
 		expect(checkoutCall).toBeDefined();
+	});
+
+	it("skips git invocations entirely when pullUpdate is off", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawn("git", { exitCode: 0, stdout: "", stderr: "" });
+		const connection = new MockHiseConnection();
+		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
+		const result = await handler(
+			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "1", pullUpdate: "0" },
+			noopProgress,
+		);
+		expect(result.success).toBe(true);
+		expect(executor.calls.filter((c) => c.command === "git").length).toBe(0);
 	});
 
 	it("strips ANSI escape sequences from streamed git output", async () => {
@@ -143,7 +156,7 @@ describe("updateCheckout", () => {
 		const connection = new MockHiseConnection();
 		const handler = createUpdateCheckoutHandler({ executor, connection, launcher: stubLauncher() });
 		await handler(
-			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "1" },
+			{ installPath: "/HISE", targetCommit: "98a75d8", cleanBuilds: "1", pullUpdate: "1" },
 			(p) => { if (p.message) received.push(p.message); },
 		);
 		const leaked = received.filter((m) => /\x1b\[/.test(m));
@@ -264,7 +277,7 @@ describe("updateVerify", () => {
 		}));
 		const handler = createUpdateVerifyHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ launchHise: "1", targetCommit: "98a75d8" },
+			{ launchHise: "1", targetCommit: "98a75d8", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(true);
@@ -283,11 +296,32 @@ describe("updateVerify", () => {
 		}));
 		const handler = createUpdateVerifyHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ launchHise: "1", targetCommit: "aaaaaaa" },
+			{ launchHise: "1", targetCommit: "aaaaaaa", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(false);
 		expect(result.message).toContain("mismatch");
+	});
+
+	it("verifies against currentSha when pullUpdate is off", async () => {
+		const SAME = "abcdef1234567890abcdef1234567890abcdef12";
+		const executor = new MockPhaseExecutor();
+		const connection = new MockHiseConnection();
+		connection.onGet("/api/status", () => ({
+			success: true,
+			server: { version: "4.1.0", buildCommit: SAME },
+			project: { name: "P", projectFolder: "/p", scriptsFolder: "/p/Scripts" },
+			scriptProcessors: [],
+			logs: [],
+			errors: [],
+		}));
+		const handler = createUpdateVerifyHandler({ executor, connection, launcher: stubLauncher() });
+		const result = await handler(
+			// targetCommit deliberately wrong — must be ignored when pullUpdate=0.
+			{ launchHise: "1", pullUpdate: "0", currentSha: SAME, targetCommit: "ffffffffff" },
+			noopProgress,
+		);
+		expect(result.success).toBe(true);
 	});
 
 	it("fails when status response lacks buildCommit", async () => {
@@ -303,7 +337,7 @@ describe("updateVerify", () => {
 		}));
 		const handler = createUpdateVerifyHandler({ executor, connection, launcher: stubLauncher() });
 		const result = await handler(
-			{ launchHise: "1", targetCommit: "abc" },
+			{ launchHise: "1", targetCommit: "abc", pullUpdate: "1" },
 			noopProgress,
 		);
 		expect(result.success).toBe(false);
