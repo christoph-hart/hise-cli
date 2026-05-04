@@ -70,9 +70,17 @@ tabs:
         help: signtool (Windows) / codesign (macOS). Pre-filled true when a cert is detected.
       - id: signingIdentity
         type: text
-        label: Signing identity
-        help: 'Developer ID Application: <Name> (<TeamID>) — leave blank to use the first one found.'
-        emptyText: "(first Developer ID in keychain)"
+        label: Application signing identity
+        help: 'Developer ID Application: <Name> (<TeamID>) — used to codesign each plugin bundle. Leave blank to use the first one found.'
+        emptyText: "(first Developer ID Application in keychain)"
+        visibleIf:
+          fieldId: platform
+          value: macOS
+      - id: installerIdentity
+        type: text
+        label: Installer signing identity
+        help: 'Developer ID Installer: <Name> (<TeamID>) — used by pkgbuild to sign the .pkg. Required for notarization.'
+        emptyText: "(first Developer ID Installer in keychain)"
         visibleIf:
           fieldId: platform
           value: macOS
@@ -196,6 +204,13 @@ tabs:
       - id: hasDevId
         type: toggle
         label: Developer ID Application detected
+        disabled: true
+        visibleIf:
+          fieldId: platform
+          value: macOS
+      - id: hasInstallerIdentity
+        type: toggle
+        label: Developer ID Installer detected
         disabled: true
         visibleIf:
           fieldId: platform

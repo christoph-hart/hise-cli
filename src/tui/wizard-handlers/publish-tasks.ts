@@ -5,9 +5,11 @@
 // toggle is off or the platform doesn't apply, so the YAML stays
 // linear.
 //
-// PR3 cut: Windows iscc + staging only. macOS pkgbuild, codesigning,
-// AAX wraptool, and notarization are stubbed (return ok skipped) and
-// land in PR4.
+// AAX wraptool signing (publishEnsureAaxKeyfile / publishSignAax) is
+// still stubbed pending PR5. Until then AAX bundles in the payload get
+// codesigned (on macOS) and bundled into the installer, but PACE wrap
+// is skipped — the resulting AAX won't load in ProTools without the
+// follow-up wraptool step.
 
 import { mkdir, rm, copyFile, cp, stat } from "node:fs/promises";
 import { join, basename, resolve } from "node:path";
@@ -200,13 +202,113 @@ export function createStagePayloadHandler(): InternalTaskHandler {
 	};
 }
 
-// ── Task: publishSignBinaries (PR4) ──────────────────────────────────
+// ── Task: publishSignBinaries ────────────────────────────────────────
 
-export function createSignBinariesHandler(_executor: PhaseExecutor): InternalTaskHandler {
-	return async (answers) => {
+// DigiCert root timestamp service — the de-facto safe pick for
+// Authenticode timestamping. Hardcoded for v1; revisit if a customer
+// needs configurability.
+const WIN_TIMESTAMP_URL = "http://timestamp.digicert.com";
+
+interface StagedBinary {
+	readonly target: PayloadTarget;
+	readonly path: string;
+}
+
+function stagedBinariesIn(
+	context: Record<string, string> | undefined,
+	targets: PayloadTarget[],
+): StagedBinary[] {
+	if (!context) return [];
+	const list: StagedBinary[] = [];
+	for (const target of targets) {
+		const path =
+			target === "VST3" ? context.stagedVst3
+			: target === "AU" ? context.stagedAu
+			: target === "AAX" ? context.stagedAax
+			: target === "Standalone" ? context.stagedStandalone
+			: undefined;
+		if (path) list.push({ target, path });
+	}
+	return list;
+}
+
+export function createSignBinariesHandler(executor: PhaseExecutor): InternalTaskHandler {
+	return async (answers, onProgress, signal, context) => {
 		if (!isOn(answers.codesign)) return skipped("codesign disabled");
-		// Full signtool / codesign implementation lands in PR4.
-		return skipped("binary codesigning lands in PR4");
+		const platform = detectPlatform();
+		const targets = getPayloadTargets(answers);
+		const staged = stagedBinariesIn(context, targets);
+		if (staged.length === 0) {
+			return fail("No staged binaries to sign — stagePayload must run first.");
+		}
+		const exec = withSignal(executor, signal);
+
+		if (platform === "macOS") {
+			const identity = (answers.signingIdentity ?? "").trim();
+			if (!identity) {
+				return fail(
+					"macOS code-signing requires `signingIdentity` (Developer ID Application).",
+				);
+			}
+			for (const { target, path } of staged) {
+				onProgress({ phase: "codesign", message: `Signing ${target}: ${basename(path)}` });
+				const result = await exec.spawn(
+					"codesign",
+					[
+						"--force",
+						"--timestamp",
+						"--options", "runtime",
+						"--deep",
+						"--sign", identity,
+						path,
+					],
+					{ onLog: (line) => onProgress({ phase: "codesign", message: line }) },
+				);
+				if (result.exitCode !== 0) {
+					return fail(
+						`codesign failed for ${target} (exit ${result.exitCode}).`,
+						result.stderr ? [result.stderr] : undefined,
+					);
+				}
+			}
+			return ok(`Signed ${staged.length} bundle(s) with ${identity}.`);
+		}
+
+		if (platform === "Windows") {
+			const thumbprint = (answers.codesignThumbprint ?? "").trim();
+			if (!thumbprint) {
+				return fail(
+					"Windows code-signing requires `codesignThumbprint` (Authenticode cert).",
+				);
+			}
+			let signedCount = 0;
+			for (const { target, path } of staged) {
+				if (target === "AAX") continue; // AAX uses wraptool/PACE, not signtool.
+				onProgress({ phase: "signtool", message: `Signing ${target}: ${basename(path)}` });
+				const result = await exec.spawn(
+					"signtool",
+					[
+						"sign",
+						"/fd", "SHA256",
+						"/tr", WIN_TIMESTAMP_URL,
+						"/td", "SHA256",
+						"/sha1", thumbprint,
+						path,
+					],
+					{ onLog: (line) => onProgress({ phase: "signtool", message: line }) },
+				);
+				if (result.exitCode !== 0) {
+					return fail(
+						`signtool failed for ${target} (exit ${result.exitCode}).`,
+						result.stderr ? [result.stderr] : undefined,
+					);
+				}
+				signedCount++;
+			}
+			return ok(`Signed ${signedCount} binary file(s) with cert ${thumbprint}.`);
+		}
+
+		return skipped("unsupported platform");
 	};
 }
 
@@ -275,8 +377,123 @@ export function createBuildInstallerHandler(
 			});
 		}
 
-		// macOS pkgbuild lands in PR4.
-		return skipped("macOS pkgbuild lands in PR4");
+		if (platform === "macOS") {
+			const bundleId =
+				(answers.bundleIdentifier ?? "").trim() ||
+				`com.unknown.${projectName.toLowerCase().replace(/[^a-z0-9]/g, "")}`;
+			return runPkgbuild({
+				executor: withSignal(deps.executor, signal),
+				outputDir,
+				targets,
+				version,
+				projectName,
+				bundleIdentifier: bundleId,
+				installerIdentity: isOn(answers.codesign)
+					? (answers.installerIdentity ?? "").trim() || null
+					: null,
+				stagedVst3: context?.stagedVst3 ?? null,
+				stagedAu: context?.stagedAu ?? null,
+				stagedAax: context?.stagedAax ?? null,
+				stagedStandalone: context?.stagedStandalone ?? null,
+				onLog: (line) => onProgress({ phase: "pkgbuild", message: line }),
+			});
+		}
+
+		return skipped("unsupported platform");
+	};
+}
+
+// ── macOS pkgbuild ───────────────────────────────────────────────────
+
+// Where each format installs on macOS. Used to lay out the pkgbuild
+// install-root so a single `--install-location /` invocation handles
+// every format in the payload.
+const MAC_INSTALL_PATHS: Record<PayloadTarget, string> = {
+	VST3: "/Library/Audio/Plug-Ins/VST3",
+	AU: "/Library/Audio/Plug-Ins/Components",
+	AAX: "/Library/Application Support/Avid/Audio/Plug-Ins",
+	Standalone: "/Applications",
+};
+
+interface PkgbuildOptions {
+	readonly executor: PhaseExecutor;
+	readonly outputDir: string;
+	readonly targets: PayloadTarget[];
+	readonly version: string;
+	readonly projectName: string;
+	readonly bundleIdentifier: string;
+	readonly installerIdentity: string | null;
+	readonly stagedVst3: string | null;
+	readonly stagedAu: string | null;
+	readonly stagedAax: string | null;
+	readonly stagedStandalone: string | null;
+	readonly onLog: (line: string) => void;
+}
+
+async function runPkgbuild(opts: PkgbuildOptions): Promise<WizardExecResult> {
+	// Build a synthetic install root that mirrors the absolute paths each
+	// format installs to. Then `pkgbuild --install-location /` copies
+	// every staged bundle to its proper destination in a single pkg.
+	const installRoot = join(opts.outputDir, "install-root");
+	await rm(installRoot, { recursive: true, force: true });
+	await mkdir(installRoot, { recursive: true });
+
+	const placements: Array<[PayloadTarget, string | null]> = [
+		["VST3", opts.stagedVst3],
+		["AU", opts.stagedAu],
+		["AAX", opts.stagedAax],
+		["Standalone", opts.stagedStandalone],
+	];
+	let copied = 0;
+	for (const [target, src] of placements) {
+		if (!opts.targets.includes(target) || !src) continue;
+		// Strip the leading "/" so join keeps the path inside installRoot.
+		const subdir = MAC_INSTALL_PATHS[target].replace(/^\/+/, "");
+		const destDir = join(installRoot, subdir);
+		await mkdir(destDir, { recursive: true });
+		const dest = join(destDir, basename(src));
+		const srcStat = await stat(src);
+		if (srcStat.isDirectory()) {
+			await cp(src, dest, { recursive: true });
+		} else {
+			await copyFile(src, dest);
+		}
+		copied++;
+	}
+	if (copied === 0) {
+		return fail("pkgbuild: no staged binaries to package.");
+	}
+
+	const installerName = `${opts.projectName}-${opts.version}.pkg`;
+	const installerPath = join(opts.outputDir, installerName);
+
+	const args: string[] = [
+		"--root", installRoot,
+		"--identifier", `${opts.bundleIdentifier}.installer`,
+		"--version", opts.version,
+		"--install-location", "/",
+	];
+	if (opts.installerIdentity) {
+		args.push("--sign", opts.installerIdentity);
+	}
+	args.push(installerPath);
+
+	opts.onLog(`Running pkgbuild ${args.join(" ")}`);
+	const result = await opts.executor.spawn("pkgbuild", args, {
+		onLog: (line) => opts.onLog(line),
+	});
+	if (result.exitCode !== 0) {
+		return fail(
+			`pkgbuild exited ${result.exitCode}.`,
+			result.stderr ? [result.stderr] : undefined,
+		);
+	}
+	return {
+		success: true,
+		message: opts.installerIdentity
+			? `Built & signed installer: ${installerPath}`
+			: `Built installer (unsigned): ${installerPath}`,
+		data: { installerPath },
 	};
 }
 
@@ -373,28 +590,76 @@ async function runIscc(opts: IsccOptions): Promise<WizardExecResult> {
 	};
 }
 
-// ── Task: publishSignInstaller (PR4) ─────────────────────────────────
+// ── Task: publishSignInstaller ───────────────────────────────────────
 
-export function createSignInstallerHandler(_executor: PhaseExecutor): InternalTaskHandler {
-	return async (answers) => {
+export function createSignInstallerHandler(executor: PhaseExecutor): InternalTaskHandler {
+	return async (answers, onProgress, signal, context) => {
 		if (!isOn(answers.codesign)) return skipped("codesign disabled");
-		// signtool / productsign on installer lands in PR4.
-		return skipped("installer codesigning lands in PR4");
+		const installerPath = context?.installerPath;
+		if (!installerPath) {
+			return fail("Missing installerPath in context — buildInstaller must run first.");
+		}
+		const platform = detectPlatform();
+		const exec = withSignal(executor, signal);
+
+		if (platform === "macOS") {
+			// pkgbuild --sign already signed the .pkg inline. No separate
+			// productsign step needed when buildInstaller had the Installer
+			// identity available.
+			return skipped("installer signed inline by pkgbuild --sign");
+		}
+
+		if (platform === "Windows") {
+			const thumbprint = (answers.codesignThumbprint ?? "").trim();
+			if (!thumbprint) {
+				return fail(
+					"Windows code-signing requires `codesignThumbprint` (Authenticode cert).",
+				);
+			}
+			onProgress({ phase: "signtool", message: `Signing installer: ${basename(installerPath)}` });
+			const result = await exec.spawn(
+				"signtool",
+				[
+					"sign",
+					"/fd", "SHA256",
+					"/tr", WIN_TIMESTAMP_URL,
+					"/td", "SHA256",
+					"/sha1", thumbprint,
+					installerPath,
+				],
+				{ onLog: (line) => onProgress({ phase: "signtool", message: line }) },
+			);
+			if (result.exitCode !== 0) {
+				return fail(
+					`signtool failed on installer (exit ${result.exitCode}).`,
+					result.stderr ? [result.stderr] : undefined,
+				);
+			}
+			return ok(`Signed installer with cert ${thumbprint}.`);
+		}
+
+		return skipped("unsupported platform");
 	};
 }
 
-// ── Task: publishNotarize (PR4) ──────────────────────────────────────
+// ── Task: publishNotarize ────────────────────────────────────────────
 
 export function createNotarizeHandler(executor: PhaseExecutor): InternalTaskHandler {
-	return async (answers) => {
+	return async (answers, onProgress, signal, context) => {
 		if (!isOn(answers.notarize)) return skipped("notarize disabled");
 		if (process.platform !== "darwin") return skipped("not macOS");
+		const installerPath = context?.installerPath;
+		if (!installerPath) {
+			return fail("Missing installerPath in context — buildInstaller must run first.");
+		}
+		const profile = (answers.notarizeProfile ?? "notarize").trim() || "notarize";
+		const exec = withSignal(executor, signal);
 
 		// Re-probe at task time. The form gates the notarize toggle on the
 		// init-time `hasNotaryProfile` flag, but `--answers` JSON in CLI
 		// single-shot mode can bypass the gate, and the keychain state may
 		// have changed since init ran.
-		const probe = await detectNotaryProfile(executor, "notarize");
+		const probe = await detectNotaryProfile(executor, profile);
 		if (probe === "network-error") {
 			return fail(
 				"Cannot notarize — could not reach Apple's notary service. " +
@@ -403,14 +668,47 @@ export function createNotarizeHandler(executor: PhaseExecutor): InternalTaskHand
 		}
 		if (probe === "missing") {
 			return fail(
-				"Cannot notarize — the `notarize` keychain profile is not " +
+				`Cannot notarize — the "${profile}" keychain profile is not ` +
 					"registered (or its stored credentials are invalid).\n\n" +
 					NOTARIZE_SETUP_INSTRUCTIONS,
 			);
 		}
 
-		// xcrun notarytool submit + stapler staple lands in PR4.
-		return skipped("notarization lands in PR4");
+		onProgress({
+			phase: "notarize",
+			message: `Submitting ${basename(installerPath)} to Apple notarization (this may take several minutes)…`,
+		});
+		const submit = await exec.spawn(
+			"xcrun",
+			[
+				"notarytool", "submit", installerPath,
+				"--keychain-profile", profile,
+				"--wait",
+			],
+			{ onLog: (line) => onProgress({ phase: "notarize", message: line }) },
+		);
+		if (submit.exitCode !== 0) {
+			return fail(
+				`notarytool submit failed (exit ${submit.exitCode}). The submission ` +
+					"log above usually contains the rejected component — most often " +
+					"an unsigned bundle or a bundle without the hardened runtime.",
+				submit.stderr ? [submit.stderr] : undefined,
+			);
+		}
+
+		onProgress({ phase: "staple", message: "Stapling notarization ticket…" });
+		const staple = await exec.spawn(
+			"xcrun",
+			["stapler", "staple", installerPath],
+			{ onLog: (line) => onProgress({ phase: "staple", message: line }) },
+		);
+		if (staple.exitCode !== 0) {
+			return fail(
+				`stapler staple failed (exit ${staple.exitCode}).`,
+				staple.stderr ? [staple.stderr] : undefined,
+			);
+		}
+		return ok(`Notarized & stapled ${basename(installerPath)}.`);
 	};
 }
 

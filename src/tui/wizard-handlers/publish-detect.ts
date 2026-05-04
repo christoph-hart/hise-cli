@@ -224,6 +224,7 @@ async function detectWindows(
 	// macOS-only fields default to "0" / empty so the form has values to read.
 	defaults.hasPkgbuild = "0";
 	defaults.hasDevId = "0";
+	defaults.hasInstallerIdentity = "0";
 	defaults.hasNotaryProfile = "0";
 	defaults.notarize = "0";
 }
@@ -281,10 +282,18 @@ async function detectMacOS(
 		);
 	}
 
-	const identity = await detectDeveloperIdApplication(executor);
-	defaults.hasDevId = identity ? "1" : "0";
-	if (identity) defaults.signingIdentity = identity;
-	defaults.codesign = defaults.hasDevId === "1" ? "1" : "0";
+	const identities = await detectDeveloperIdentities(executor);
+	defaults.hasDevId = identities.application ? "1" : "0";
+	defaults.hasInstallerIdentity = identities.installer ? "1" : "0";
+	if (identities.application) defaults.signingIdentity = identities.application;
+	if (identities.installer) defaults.installerIdentity = identities.installer;
+	// Auto-enable codesign only when BOTH identities are present — pkgbuild
+	// signs the .pkg inline and that needs the Installer cert; without it
+	// the resulting installer can't be notarized.
+	defaults.codesign =
+		defaults.hasDevId === "1" && defaults.hasInstallerIdentity === "1"
+			? "1"
+			: "0";
 
 	const probe = await detectNotaryProfile(executor, "notarize");
 	if (probe === "network-error") {
@@ -305,17 +314,30 @@ async function detectMacOS(
 	defaults.hasWinCert = "0";
 }
 
-async function detectDeveloperIdApplication(
+interface DeveloperIdentities {
+	readonly application: string | null;
+	readonly installer: string | null;
+}
+
+async function detectDeveloperIdentities(
 	executor: PhaseExecutor,
-): Promise<string | null> {
+): Promise<DeveloperIdentities> {
+	// `find-identity -v` (no policy filter) returns ALL valid identities,
+	// including `Developer ID Installer` which the `codesigning` policy
+	// hides. The Installer identity is what pkgbuild --sign needs; the
+	// Application identity is what codesign --sign needs.
 	const result = await executor.spawn(
 		"security",
-		["find-identity", "-v", "-p", "codesigning"],
+		["find-identity", "-v"],
 		{},
 	);
-	if (result.exitCode !== 0) return null;
-	const match = /"(Developer ID Application: [^"]+)"/.exec(result.stdout);
-	return match?.[1] ?? null;
+	if (result.exitCode !== 0) return { application: null, installer: null };
+	const app = /"(Developer ID Application: [^"]+)"/.exec(result.stdout);
+	const inst = /"(Developer ID Installer: [^"]+)"/.exec(result.stdout);
+	return {
+		application: app?.[1] ?? null,
+		installer: inst?.[1] ?? null,
+	};
 }
 
 /** Exact instructions for registering a notarytool keychain profile. Reused

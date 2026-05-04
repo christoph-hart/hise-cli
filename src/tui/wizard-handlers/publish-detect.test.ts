@@ -170,7 +170,8 @@ describe("publishDetectEnvironment", () => {
 					return {
 						exitCode: 0,
 						stdout:
-							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"',
+							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"\n' +
+							'  2) DEF456 "Developer ID Installer: Acme Co. (ABCDE12345)"',
 					};
 				}
 				return { exitCode: 0 };
@@ -194,6 +195,10 @@ describe("publishDetectEnvironment", () => {
 				expect(defaults.platform).toBe("macOS");
 				expect(defaults.hasPkgbuild).toBe("1");
 				expect(defaults.signingIdentity).toContain("Developer ID Application");
+				expect(defaults.installerIdentity).toContain("Developer ID Installer");
+				expect(defaults.hasInstallerIdentity).toBe("1");
+				// codesign auto-enables only when BOTH identities are present.
+				expect(defaults.codesign).toBe("1");
 			}
 		} finally {
 			project.cleanup();
@@ -209,7 +214,8 @@ describe("publishDetectEnvironment", () => {
 					return {
 						exitCode: 0,
 						stdout:
-							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"',
+							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"\n' +
+							'  2) DEF456 "Developer ID Installer: Acme Co. (ABCDE12345)"',
 					};
 				}
 				if (cmd === "xcrun" && args[0] === "notarytool") {
@@ -241,7 +247,8 @@ describe("publishDetectEnvironment", () => {
 					return {
 						exitCode: 0,
 						stdout:
-							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"',
+							'  1) ABC123 "Developer ID Application: Acme Co. (ABCDE12345)"\n' +
+							'  2) DEF456 "Developer ID Installer: Acme Co. (ABCDE12345)"',
 					};
 				}
 				if (cmd === "xcrun" && args[0] === "notarytool") {
