@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { MockPhaseExecutor } from "../../engine/wizard/mock-phase-executor.js";
 import { MockHiseConnection } from "../../engine/hise.js";
 import type { HiseLauncher } from "../../engine/modes/hise.js";
@@ -8,7 +8,6 @@ import {
 	createUpdateCleanBuildsHandler,
 	createUpdateCompileHandler,
 	createUpdateLaunchHandler,
-	createUpdateSymlinkHandler,
 	createUpdateShutdownHandler,
 	createUpdateVerifyHandler,
 } from "./update-tasks.js";
@@ -216,154 +215,6 @@ describe("updateCompile", () => {
 	});
 });
 
-describe("updateSymlink", () => {
-	const ORIGINAL_PATH = process.env.PATH;
-	const ORIGINAL_HOME = process.env.HOME;
-
-	afterEach(() => {
-		if (ORIGINAL_PATH !== undefined) process.env.PATH = ORIGINAL_PATH;
-		else delete process.env.PATH;
-		if (ORIGINAL_HOME !== undefined) process.env.HOME = ORIGINAL_HOME;
-		else delete process.env.HOME;
-	});
-
-	it("skips when compile was off", async () => {
-		const executor = new MockPhaseExecutor();
-		const connection = new MockHiseConnection();
-		const handler = createUpdateSymlinkHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler({ compileHise: "0", installPath: "/HISE" }, noopProgress);
-		expect(result.success).toBe(true);
-		expect(executor.calls.length).toBe(0);
-	});
-
-	it("picks the first writable directory on PATH and installs the macOS LaunchServices wrapper there", async () => {
-		// Simulate a PATH where the first two entries are not writable (e.g.
-		// system dirs, or Homebrew not installed) and the third is. The
-		// wrapper must land in the third entry. macOS routes to a wrapper
-		// script (not a raw symlink) so GUI launches go through
-		// LaunchServices and CLI invocations exec the binary directly.
-		const executor = new MockPhaseExecutor();
-		const original = executor.spawn.bind(executor);
-		const writableDirs = new Set(["/home/tester/bin"]);
-		executor.spawn = async (cmd, args, opts) => {
-			executor.calls.push({ command: cmd, args, env: opts.env });
-			if (cmd === "test" && args[0] === "-d") {
-				// Every candidate pretends to exist.
-				return { exitCode: 0, stdout: "", stderr: "" };
-			}
-			if (cmd === "test" && args[0] === "-w") {
-				return writableDirs.has(args[1] ?? "")
-					? { exitCode: 0, stdout: "", stderr: "" }
-					: { exitCode: 1, stdout: "", stderr: "" };
-			}
-			if (cmd === "rm" || cmd === "chmod" || cmd === "sh") {
-				return { exitCode: 0, stdout: "", stderr: "" };
-			}
-			return original(cmd, args, opts);
-		};
-		process.env.PATH = "/opt/notwritable:/usr/local/bin:/home/tester/bin:/usr/bin";
-		process.env.HOME = "/home/tester";
-
-		const connection = new MockHiseConnection();
-		const handler = createUpdateSymlinkHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler(
-			{ compileHise: "1", installPath: "/HISE", platform: "macOS", includeFaust: "1" },
-			noopProgress,
-		);
-		expect(result.success).toBe(true);
-		expect(result.message).toContain("/home/tester/bin/HISE");
-		expect(result.message).toContain("LaunchServices wrapper");
-
-		const target = "/home/tester/bin/HISE";
-		const expectedApp = "/HISE/projects/standalone/Builds/MacOSXMakefile/build/ReleaseWithFaust/HISE.app";
-
-		// Stale-symlink-from-prior-install removed before write.
-		const rmCall = executor.calls.find((c) => c.command === "rm" && c.args.includes(target));
-		expect(rmCall?.args).toEqual(["-f", target]);
-
-		// Wrapper written via `sh -c 'printf "%s" "$1" > "$2"' sh <content> <target>`.
-		const writeCall = executor.calls.find((c) =>
-			c.command === "sh" && c.args[0] === "-c" && c.args[2] === "sh" && c.args[4] === target,
-		);
-		expect(writeCall).toBeDefined();
-		const wrapperContent = writeCall!.args[3]!;
-		expect(wrapperContent).toContain("#!/bin/bash");
-		expect(wrapperContent).toContain(`APP='${expectedApp}'`);
-		expect(wrapperContent).toContain('exec /usr/bin/open -a "$APP"');
-		expect(wrapperContent).toContain('exec "$APP/Contents/MacOS/HISE" "$@"');
-
-		// chmod +x makes it executable.
-		const chmodCall = executor.calls.find((c) => c.command === "chmod" && c.args.includes(target));
-		expect(chmodCall?.args).toEqual(["+x", target]);
-
-		// No raw symlink call on macOS.
-		expect(executor.calls.find((c) => c.command === "ln")).toBeUndefined();
-	});
-
-	it("skips system dirs like /usr/bin even if writable", async () => {
-		const executor = new MockPhaseExecutor();
-		const original = executor.spawn.bind(executor);
-		executor.spawn = async (cmd, args, opts) => {
-			executor.calls.push({ command: cmd, args, env: opts.env });
-			if (cmd === "test") return { exitCode: 0, stdout: "", stderr: "" };
-			if (cmd === "ln") return { exitCode: 0, stdout: "", stderr: "" };
-			if (cmd === "mkdir") return { exitCode: 0, stdout: "", stderr: "" };
-			return original(cmd, args, opts);
-		};
-		// /usr/bin is on PATH and our mock reports it writable, but the
-		// handler must refuse to pollute it.
-		process.env.PATH = "/usr/bin:/bin";
-		process.env.HOME = "/home/tester";
-
-		const connection = new MockHiseConnection();
-		const handler = createUpdateSymlinkHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler(
-			{ compileHise: "1", installPath: "/HISE", platform: "Linux", includeFaust: "0" },
-			noopProgress,
-		);
-		expect(result.success).toBe(true);
-		// Fallback path chosen — system dirs refused.
-		expect(result.message).toContain("/home/tester/.local/bin/HISE");
-		const lnCalls = executor.calls.filter((c) => c.command === "ln");
-		expect(lnCalls.every((c) => !c.args.includes("/usr/bin/HISE"))).toBe(true);
-	});
-
-	it("falls back to ~/.local/bin when nothing on PATH is writable", async () => {
-		const executor = new MockPhaseExecutor();
-		const original = executor.spawn.bind(executor);
-		executor.spawn = async (cmd, args, opts) => {
-			executor.calls.push({ command: cmd, args, env: opts.env });
-			if (cmd === "test" && args[0] === "-d") return { exitCode: 0, stdout: "", stderr: "" };
-			if (cmd === "test" && args[0] === "-w") return { exitCode: 1, stdout: "", stderr: "denied" };
-			if (cmd === "mkdir") return { exitCode: 0, stdout: "", stderr: "" };
-			if (cmd === "ln") return { exitCode: 0, stdout: "", stderr: "" };
-			return original(cmd, args, opts);
-		};
-		process.env.PATH = "/opt/readonly:/usr/local/bin";
-		process.env.HOME = "/home/tester";
-
-		const connection = new MockHiseConnection();
-		const handler = createUpdateSymlinkHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler(
-			{ compileHise: "1", installPath: "/HISE", platform: "Linux", includeFaust: "0" },
-			noopProgress,
-		);
-		expect(result.success).toBe(true);
-		expect(result.message).toContain("/home/tester/.local/bin/HISE");
-		expect(result.message).toContain("is not on your PATH");
-		const mkdirCall = executor.calls.find((c) => c.command === "mkdir");
-		expect(mkdirCall?.args).toEqual(["-p", "/home/tester/.local/bin"]);
-	});
-
-	it("fails when installPath is empty", async () => {
-		const executor = new MockPhaseExecutor();
-		const connection = new MockHiseConnection();
-		const handler = createUpdateSymlinkHandler({ executor, connection, launcher: stubLauncher() });
-		const result = await handler({ compileHise: "1", installPath: "" }, noopProgress);
-		expect(result.success).toBe(false);
-	});
-});
-
 describe("updateLaunch", () => {
 	it("skips when launchHise is off", async () => {
 		const executor = new MockPhaseExecutor();
@@ -459,6 +310,3 @@ describe("updateVerify", () => {
 		expect(result.message).toContain("buildCommit");
 	});
 });
-
-// Keep vitest happy — mock fetch used in some init tests
-void vi;

@@ -5,14 +5,15 @@ import { tokenizeSlash } from "./slash.js";
 
 const ASSETS_KEYWORDS = new Set([
 	"list", "info", "install", "uninstall", "cleanup",
-	"local", "auth", "add", "remove", "login", "logout",
+	"local", "add", "remove", "login", "logout",
 	"installed", "uninstalled", "store", "help",
 ]);
 
 const ARG_RULES: Array<{ pattern: RegExp; token: TokenType }> = [
 	{ pattern: /^"(?:[^"\\]|\\.)*"/, token: "string" },
 	{ pattern: /^'(?:[^'\\]|\\.)*'/, token: "string" },
-	{ pattern: /^--[a-zA-Z][a-zA-Z0-9-]*(?:=[^\s]*)?/, token: "keyword" },
+	{ pattern: /^--[a-zA-Z][a-zA-Z0-9-]*/, token: "keyword" },
+	{ pattern: /^[a-zA-Z_][a-zA-Z0-9_-]*=[^\s]*/, token: "keyword" },
 	{ pattern: /^\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?/, token: "float" },
 	{ pattern: /^\d+/, token: "integer" },
 	{ pattern: /^[a-zA-Z_./][a-zA-Z0-9_./-]*/, token: "identifier" },

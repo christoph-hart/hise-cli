@@ -37,21 +37,6 @@ export function createUpdateDetectHandler(deps: UpdateDetectDeps): InternalInitH
 		defaults.platform = platform;
 		defaults.architecture = process.arch === "arm64" ? "arm64" : "x64";
 
-		// Windows: mklink (used by updateSymlink) requires admin or Developer
-		// Mode. Fail fast before a 30-minute compile discovers this at the
-		// symlink step. `net session` returns 0 only inside an elevated
-		// token — the cheapest reliable elevation probe on Windows.
-		if (platform === "Windows") {
-			const elevated = await deps.executor.spawn("net", ["session"], {});
-			if (elevated.exitCode !== 0) {
-				throw new WizardInitAbortError(
-					"The update wizard needs administrator rights on Windows to create the " +
-					"HISE symlink. Re-launch hise-cli from an elevated terminal (Run as " +
-					"administrator) and try again.",
-				);
-			}
-		}
-
 		// HISE install path — read from <appData>/HISE/compilerSettings.xml.
 		// Without it we can't locate currentGitHash.txt below, and the user
 		// almost certainly hasn't run /setup yet.

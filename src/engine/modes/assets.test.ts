@@ -74,21 +74,21 @@ describe("AssetsMode.parse", () => {
 		expect(r.content).toMatch(/Installed/);
 	});
 
-	it("auth login without --token returns error", async () => {
+	it("login without token returns error", async () => {
 		const { env } = makeEnv();
 		const mode = new AssetsMode(env);
-		const r = await mode.parse("auth login", dummySession);
+		const r = await mode.parse("login", dummySession);
 		expect(r.type).toBe("error");
 	});
 
-	it("auth login with --token persists and returns ok", async () => {
+	it("login with token persists and returns ok", async () => {
 		const { env, http } = makeEnv();
 		http.onGet("https://git.hise.dev/api/v1/user", () => ({
 			status: 200,
 			body: JSON.stringify({ username: "vendor", email: "v@example.com" }),
 		}));
 		const mode = new AssetsMode(env);
-		const r = await mode.parse("auth login --token=abc", dummySession);
+		const r = await mode.parse("login token=abc", dummySession);
 		expect(r.type).toBe("markdown");
 		if (r.type !== "markdown") return;
 		expect(r.content).toMatch(/Signed in as/);
@@ -162,13 +162,13 @@ describe("AssetsMode context-aware completion", () => {
 		expect(labels).not.toContain("Already");
 	});
 
-	it("'install pkg --' returns flag completions", async () => {
+	it("'install pkg ' returns flag completions", async () => {
 		const { mode } = setup();
-		const r = mode.complete!("install pkg --", 14);
+		const r = mode.complete!("install pkg ", 12);
 		const labels = r.items.map((i) => i.label);
-		expect(labels).toEqual(expect.arrayContaining(["--dry-run", "--version="]));
-		expect(labels).not.toContain("--token=");
-		expect(labels).not.toContain("--local=");
+		expect(labels).toEqual(expect.arrayContaining(["--dry-run", "version="]));
+		expect(labels).not.toContain("token=");
+		expect(labels).not.toContain("local=");
 	});
 
 	it("'cleanup ' prioritises NeedsCleanup names", async () => {
@@ -195,11 +195,12 @@ describe("AssetsMode context-aware completion", () => {
 		expect(labels).toContain("MyLib");
 	});
 
-	it("'auth ' returns login/logout sub-verbs", async () => {
+	it("top-level verbs include login/logout", async () => {
 		const { mode } = setup();
-		const r = mode.complete!("auth ", 5);
+		const r = mode.complete!("", 0);
 		const labels = r.items.map((i) => i.label);
 		expect(labels).toEqual(expect.arrayContaining(["login", "logout"]));
+		expect(labels).not.toContain("auth");
 	});
 
 	it("refreshes cache after a successful uninstall", async () => {

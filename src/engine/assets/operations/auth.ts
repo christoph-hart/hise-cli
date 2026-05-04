@@ -1,4 +1,4 @@
-// `auth login` / `auth logout` / token reading. Spec §13.
+// `login` / `logout` / token reading. Spec §13.
 
 import { normalizeGiteaUser, type GiteaUser } from "../../../mock/contracts/assets/giteaUser.js";
 import type { AssetEnvironment } from "../environment.js";

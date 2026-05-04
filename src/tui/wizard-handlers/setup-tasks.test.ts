@@ -135,24 +135,8 @@ describe("setupFaustInstall", () => {
 		expect(result.success).toBe(true);
 	});
 
-	it("fails fast on Windows when not elevated", async () => {
+	it("downloads and runs the NSIS installer via Start-Process -Verb RunAs (UAC self-elevation)", async () => {
 		const executor = new MockPhaseExecutor();
-		// net session exitCode != 0 → not elevated.
-		executor.onSpawn("net", { exitCode: 1, stdout: "", stderr: "Access denied" });
-		// Faust probes use `cmd`; miss both global and install-path checks.
-		executor.onSpawn("cmd", { exitCode: 0, stdout: "", stderr: "" });
-		const handler = createSetupFaustInstallHandler(executor);
-		const result = await handler({ includeFaust: "1", hasFaust: "0", platform: "Windows" }, noop);
-		expect(result.success).toBe(false);
-		expect(result.message).toMatch(/admin/i);
-		// No installer download was attempted.
-		const curlCalls = executor.calls.filter((c) => c.command === "curl");
-		expect(curlCalls).toHaveLength(0);
-	});
-
-	it("downloads and silently installs on Windows when elevated", async () => {
-		const executor = new MockPhaseExecutor();
-		// All stubs default to exitCode 0; `net session` succeeds → elevated.
 		const handler = createSetupFaustInstallHandler(executor);
 		const result = await handler({ includeFaust: "1", hasFaust: "0", platform: "Windows" }, noop);
 		expect(result.success).toBe(true);
@@ -161,12 +145,19 @@ describe("setupFaustInstall", () => {
 		expect(curl).toBeDefined();
 		const url = curl!.args[curl!.args.length - 1]!;
 		expect(url).toContain("https://github.com/grame-cncm/faust/releases/download/");
-		expect(url).toContain("Faust-");
 		expect(url.endsWith("-win64.exe")).toBe(true);
 
-		const installerCall = executor.calls.find((c) => c.command.endsWith("faust-installer.exe"));
-		expect(installerCall).toBeDefined();
-		expect(installerCall!.args).toEqual(["/S", "/D=C:\\Program Files\\Faust"]);
+		// Installer launched via powershell Start-Process -Verb RunAs, NOT
+		// directly. Self-elevation lets hise-cli stay non-elevated.
+		const psCall = executor.calls.find(
+			(c) => c.command === "powershell" && c.args.some((a) => a.includes("Start-Process")),
+		);
+		expect(psCall).toBeDefined();
+		const psCmd = psCall!.args.find((a) => a.includes("Start-Process"))!;
+		expect(psCmd).toContain("-Verb RunAs");
+		expect(psCmd).toContain("faust-installer.exe");
+		expect(psCmd).toContain("/S");
+		expect(psCmd).toContain("/D=C:\\Program Files\\Faust");
 	});
 
 	it("installs on macOS via DMG mount and ditto copy", async () => {
@@ -332,24 +323,7 @@ describe("setupCompilerInstall", () => {
 			expect(result.message).toContain("detected");
 		});
 
-		it("fails fast when not elevated", async () => {
-			const executor = new MockPhaseExecutor();
-			// vswhere probe fails → not installed → continue to elevation check.
-			executor.onSpawn(
-				"C:\\Program Files (x86)\\Microsoft Visual Studio\\Installer\\vswhere.exe",
-				{ exitCode: 1, stdout: "", stderr: "not found" },
-			);
-			executor.onSpawn("net", { exitCode: 1, stdout: "", stderr: "Access denied" });
-			const handler = createSetupCompilerInstallHandler(executor);
-			const result = await handler({ platform: "Windows", hasVs: "0" }, noop);
-			expect(result.success).toBe(false);
-			expect(result.message).toMatch(/admin/i);
-			// No download (curl) attempted.
-			const curlCalls = executor.calls.filter((c) => c.command === "curl");
-			expect(curlCalls).toHaveLength(0);
-		});
-
-		it("downloads bootstrapper and runs install with the expected args", async () => {
+		it("downloads bootstrapper and runs install via Start-Process -Verb RunAs", async () => {
 			const executor = new MockPhaseExecutor();
 			const handler = createSetupCompilerInstallHandler(executor);
 			const result = await handler({ platform: "Windows", hasVs: "0" }, noop);
@@ -359,28 +333,31 @@ describe("setupCompilerInstall", () => {
 			expect(curl).toBeDefined();
 			expect(curl!.args).toContain("https://aka.ms/vs/stable/vs_BuildTools.exe");
 
-			const installerCall = executor.calls.find((c) => c.command.endsWith("vs_BuildTools.exe"));
-			expect(installerCall).toBeDefined();
-			const args = installerCall!.args;
-			expect(args).toContain("--passive");
-			expect(args).toContain("--wait");
-			expect(args).toContain("--norestart");
-			expect(args).toContain("Microsoft.VisualStudio.Workload.VCTools");
-			expect(args).toContain("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
-			expect(args).toContain("Microsoft.VisualStudio.Component.Windows11SDK.26100");
-			expect(args).toContain("--addProductLang");
-			expect(args).toContain("en-US");
+			// Installer launched via powershell Start-Process -Verb RunAs;
+			// hise-cli itself stays non-elevated.
+			const psCall = executor.calls.find(
+				(c) => c.command === "powershell" && c.args.some((a) => a.includes("Start-Process")),
+			);
+			expect(psCall).toBeDefined();
+			const psCmd = psCall!.args.find((a) => a.includes("Start-Process"))!;
+			expect(psCmd).toContain("-Verb RunAs");
+			expect(psCmd).toContain("vs_BuildTools.exe");
+			expect(psCmd).toContain("--passive");
+			expect(psCmd).toContain("--wait");
+			expect(psCmd).toContain("--norestart");
+			expect(psCmd).toContain("Microsoft.VisualStudio.Workload.VCTools");
+			expect(psCmd).toContain("Microsoft.VisualStudio.Component.VC.Tools.x86.x64");
+			expect(psCmd).toContain("Microsoft.VisualStudio.Component.Windows11SDK.26100");
+			expect(psCmd).toContain("en-US");
 		});
 
 		it("treats installer exit code 3010 (reboot-pending) as success", async () => {
 			const executor = new MockPhaseExecutor();
-			// We don't know the exact installer path string to key the mock on,
-			// so we match by filename suffix via a custom sub-class approach:
-			// simpler — override spawn directly.
+			// runElevatedInstaller calls powershell with the Start-Process
+			// command — propagate 3010 from PowerShell's exit.
 			const baseSpawn = executor.spawn.bind(executor);
 			executor.spawn = async (command, args, options) => {
-				if (command.endsWith("vs_BuildTools.exe") && args.includes("--passive")) {
-					// Still record the call.
+				if (command === "powershell" && args.some((a) => a.includes("vs_BuildTools.exe"))) {
 					executor.calls.push({ command, args, env: options.env });
 					return { exitCode: 3010, stdout: "", stderr: "" };
 				}

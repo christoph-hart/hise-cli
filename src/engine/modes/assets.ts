@@ -42,13 +42,13 @@ const HELP_MARKDOWN = `## Assets Commands
 |---------|-------------|
 | \`list [installed\\|uninstalled\\|local\\|store]\` | Show packages by category |
 | \`info <name>\` | Show details for a package |
-| \`install <name> [--version=X.Y.Z] [--dry-run]\` | Install or update a package |
+| \`install <name> [version=X.Y.Z] [--dry-run]\` | Install or update a package |
 | \`uninstall <name>\` | Remove an installed package |
 | \`cleanup <name>\` | Finish removing files from a previous uninstall |
 | \`local add <path>\` | Add a HISE project to your asset library |
 | \`local remove <name\\|path>\` | Remove an entry from your asset library |
-| \`auth login [--token=<t>]\` | Sign in to the HISE store |
-| \`auth logout\` | Sign out of the HISE store |
+| \`login [token=<t>]\` | Sign in to the HISE store |
+| \`logout\` | Sign out of the HISE store |
 | \`create\` | Open the package-author wizard for the current project |
 | \`help\` | Show this list |
 
@@ -177,18 +177,18 @@ async function dispatch(env: AssetEnvironment, cmd: AssetsCommand): Promise<Comm
 		case "cleanup":           return formatCleanup(await cleanup(env, cmd.name));
 		case "localAdd":          return formatLocalAdd(await addLocalFolder(env, cmd.path));
 		case "localRemove":       return formatLocalRemove(await removeLocalFolder(env, cmd.query));
-		case "authLogin": {
+		case "login": {
 			const token = cmd.token;
 			if (!token) {
 				return errorResult(
-					"auth login needs a token (`--token=<t>`).",
+					"login needs a token (`token=<t>`).",
 					"Generate one at https://store.hise.dev/account/settings/ and paste it here.",
 				);
 			}
 			const r = await login(env, token);
 			return formatLogin(r);
 		}
-		case "authLogout":        await logout(env); return markdownResult("Signed out of the HISE store.");
+		case "logout":            await logout(env); return markdownResult("Signed out of the HISE store.");
 		default:                  return errorResult("Internal: unhandled command kind");
 	}
 }
@@ -368,7 +368,7 @@ function formatInstall(r: InstallResult): CommandResult {
 		case "missingToken":
 			return errorResult(
 				"You need to be signed in to the HISE store to install this package.",
-				"Run `auth login --token=<t>` first.",
+				"Run `login token=<t>` first.",
 			);
 		case "dryRun": {
 			const p = r.preview;

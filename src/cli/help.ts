@@ -867,7 +867,7 @@ SYNTAX
 VERBS
   list [installed|uninstalled|local|store]   Show packages by category.
   info <name>                                Show details for a package.
-  install <name> [--version=X.Y.Z] [--dry-run]
+  install <name> [version=X.Y.Z] [--dry-run]
                                              Install or update a package.
                                              Looks in your asset library
                                              first, then the HISE store.
@@ -881,8 +881,8 @@ VERBS
                                              into other projects.
   local remove <name|path>                   Remove an entry from your asset
                                              library.
-  auth login --token=<t>                     Sign in to the HISE store.
-  auth logout                                Sign out.
+  login token=<t>                            Sign in to the HISE store.
+  logout                                     Sign out.
   create                                     Open the package-author wizard
                                              for the current project.
   help                                       Show available commands.
@@ -890,11 +890,11 @@ VERBS
 EXAMPLES
   hise-cli -assets "list installed"
   hise-cli -assets "info synth_building_blocks"
-  hise-cli -assets "install synth_building_blocks --version=1.2.0 --dry-run"
+  hise-cli -assets "install synth_building_blocks version=1.2.0 --dry-run"
   hise-cli -assets "uninstall synth_building_blocks"
   hise-cli -assets "cleanup synth_building_blocks"
   hise-cli -assets "local add /path/to/MyLib"
-  hise-cli -assets "auth login --token=abc123"
+  hise-cli -assets "login token=abc123"
   hise-cli -assets "create"
 
 NOTES
@@ -903,7 +903,7 @@ NOTES
   - If you've modified files installed by a package, uninstall keeps them and
     flags the package for cleanup. Run "cleanup <name>" when you're ready to
     delete them too.
-  - Sign in once with "auth login --token=<t>". The HISE_STORE_TOKEN env var
+  - Sign in once with "login token=<t>". The HISE_STORE_TOKEN env var
     can also be used to override the saved sign-in for a single command.
   - HISE must be running — the asset commands talk to your live project for
     settings and preprocessor changes.`,

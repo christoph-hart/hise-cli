@@ -123,10 +123,6 @@ tasks:
     function: updateCompile
     type: internal
     label: Compile HISE
-  - id: symlink
-    function: updateSymlink
-    type: internal
-    label: Symlink HISE binary
   - id: launch
     function: updateLaunch
     type: internal

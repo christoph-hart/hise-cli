@@ -178,13 +178,13 @@ that other HISE users can install.
 |---------|-------------|
 | \`list [installed\\|uninstalled\\|local\\|store]\` | Show packages by category |
 | \`info <name>\` | Show details for a package |
-| \`install <name> [--version=X.Y.Z] [--dry-run]\` | Install or update |
+| \`install <name> [version=X.Y.Z] [--dry-run]\` | Install or update |
 | \`uninstall <name>\` | Remove an installed package |
 | \`cleanup <name>\` | Finish a previous uninstall (delete files you'd modified) |
 | \`local add <path>\` | Add a HISE project to your asset library |
 | \`local remove <name\\|path>\` | Remove an entry from your asset library |
-| \`auth login --token=<t>\` | Sign in to the HISE store |
-| \`auth logout\` | Sign out |
+| \`login token=<t>\` | Sign in to the HISE store |
+| \`logout\` | Sign out |
 | \`create\` | Open the package-author wizard for the current project |
 
 ## Notes

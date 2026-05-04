@@ -15,7 +15,6 @@ import {
 	createSetupIppInstallHandler,
 	createSetupAdaptVsVersionHandler,
 	createSetupCompileHandler,
-	createSetupAddPathHandler,
 	createSetupVerifyHandler,
 	createSetupTestHandler,
 } from "./setup-tasks.js";
@@ -29,7 +28,6 @@ import {
 	createUpdateCheckoutHandler,
 	createUpdateCleanBuildsHandler,
 	createUpdateCompileHandler,
-	createUpdateSymlinkHandler,
 	createUpdateLaunchHandler,
 	createUpdateVerifyHandler,
 } from "./update-tasks.js";
@@ -71,7 +69,6 @@ export function registerSetupHandlers(
 	registry.registerTask("setupIppInstall", createSetupIppInstallHandler(executor));
 	registry.registerTask("setupAdaptVsVersion", createSetupAdaptVsVersionHandler(executor));
 	registry.registerTask("setupCompile", createSetupCompileHandler(executor));
-	registry.registerTask("setupAddPath", createSetupAddPathHandler(executor));
 	registry.registerTask("setupVerify", createSetupVerifyHandler(executor));
 	registry.registerTask("setupTest", createSetupTestHandler(executor));
 }
@@ -154,7 +151,6 @@ export function registerUpdateHandlers(
 	registry.registerTask("updateCheckout", createUpdateCheckoutHandler(deps));
 	registry.registerTask("updateCleanBuilds", createUpdateCleanBuildsHandler(deps));
 	registry.registerTask("updateCompile", createUpdateCompileHandler(deps));
-	registry.registerTask("updateSymlink", createUpdateSymlinkHandler(deps));
 	registry.registerTask("updateLaunch", createUpdateLaunchHandler(deps));
 	registry.registerTask("updateVerify", createUpdateVerifyHandler(deps));
 }

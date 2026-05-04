@@ -535,18 +535,25 @@ export class CompletionEngine {
 				{ label: "uninstall", detail: "Remove an installed package" },
 				{ label: "cleanup", detail: "Finish a previous uninstall" },
 				{ label: "local", detail: "Manage your asset library" },
-				{ label: "auth", detail: "Sign in to / out of the HISE store" },
+				{ label: "login", detail: "Sign in to the HISE store" },
+				{ label: "logout", detail: "Sign out of the HISE store" },
 				{ label: "create", detail: "Open the package-author wizard" },
 				{ label: "help", detail: "Show assets commands" },
 			]);
 		}
 
-		// `install` flag completion: trigger whenever the trailing token starts with --,
-		// regardless of where it lands among the install args.
-		if (verb === "install" && tail.startsWith("--")) {
+		// `install` flag completion: trigger once <name> is in place (tokenCount >= 3).
+		if (verb === "install" && tokenCount >= 3) {
 			return fuzzyFilter(tail, [
 				{ label: "--dry-run", detail: "Preview without writing" },
-				{ label: "--version=", detail: "Pin a specific store tag" },
+				{ label: "version=", detail: "Pin a specific store tag" },
+			]);
+		}
+
+		// `login` flag completion.
+		if (verb === "login" && tokenCount >= 2) {
+			return fuzzyFilter(tail, [
+				{ label: "token=", detail: "HISE store API token" },
 			]);
 		}
 
@@ -597,14 +604,6 @@ export class CompletionEngine {
 		}
 		if (verb === "local" && sub === "remove" && tokenCount === 3) {
 			return fuzzyFilter(tail, namedItems(dynamic.localNames, "in library"));
-		}
-
-		// auth <login|logout>
-		if (verb === "auth" && tokenCount === 2) {
-			return fuzzyFilter(tail, [
-				{ label: "login", detail: "Sign in to the HISE store" },
-				{ label: "logout", detail: "Sign out" },
-			]);
 		}
 
 		return [];

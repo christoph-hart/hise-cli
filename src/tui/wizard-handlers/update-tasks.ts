@@ -13,7 +13,7 @@ import type { PhaseExecutor } from "../../engine/wizard/phase-executor.js";
 import type { WizardExecResult } from "../../engine/wizard/types.js";
 import { isOn } from "../../engine/wizard/types.js";
 import { extractStatusPayload } from "../../engine/modes/inspect.js";
-import { compileHise, createHiseSymlink, hiseBinaryPath, normaliseVsVersion } from "./setup-tasks.js";
+import { compileHise, normaliseVsVersion } from "./setup-tasks.js";
 
 export interface UpdateHandlerDeps {
 	readonly executor: PhaseExecutor;
@@ -218,43 +218,6 @@ export function createUpdateCompileHandler(deps: UpdateHandlerDeps): InternalTas
 			// user explicitly asked for an incremental build, and running
 			// `make clean` would defeat that choice.
 		}, onProgress);
-	};
-}
-
-// ── 3b. Register binary ──────────────────────────────────────────────
-//
-// After rebuild, make the freshly built HISE discoverable by any shell
-// regardless of PATH quirks: symlink the binary into the first writable
-// directory on the user's PATH. Shared with the setup wizard via
-// createHiseSymlink — see setup-tasks.ts. Skipped when compile was off.
-
-export function createUpdateSymlinkHandler(deps: UpdateHandlerDeps): InternalTaskHandler {
-	return async (answers, onProgress, signal) => {
-		if (!isOn(answers.compileHise)) {
-			onProgress({ phase: "symlink", percent: 100, message: "Skipped (compile was off)." });
-			return ok("Symlink skipped.");
-		}
-		const executor = withSignal(deps.executor, signal);
-		const installPath = answers.installPath;
-		if (!installPath) return fail("Install path is empty — cannot resolve bin dir.");
-		const platform = answers.platform ?? "Linux";
-		const includeFaust = isOn(answers.includeFaust);
-		const vsVersion = normaliseVsVersion(answers.vsVersion);
-
-		const binary = hiseBinaryPath(installPath, platform, includeFaust, vsVersion);
-		const result = await createHiseSymlink(executor, binary, platform, "symlink", onProgress);
-
-		// Splice the chosen directory into this Node process's PATH so
-		// subsequent tasks (launch, verify) find the new binary without
-		// waiting for the user to open a fresh shell.
-		if (result.success && result.dir) {
-			const sep = platform === "Windows" ? ";" : ":";
-			const current = process.env.PATH ?? "";
-			if (!current.split(sep).includes(result.dir)) {
-				process.env.PATH = [result.dir, ...current.split(sep).filter((p) => p.length > 0)].join(sep);
-			}
-		}
-		return result.execResult;
 	};
 }
 

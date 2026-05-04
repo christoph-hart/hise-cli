@@ -40,16 +40,16 @@ describe("parseAssetsCommand", () => {
 		});
 	});
 
-	it("install --version=1.2.0", () => {
-		expect(parseAssetsCommand("install pkg --version=1.2.0"))
+	it("install version=1.2.0", () => {
+		expect(parseAssetsCommand("install pkg version=1.2.0"))
 			.toEqual({
 				type: "install", name: "pkg", dryRun: false,
 				version: "1.2.0",
 			});
 	});
 
-	it("install ignores stray --token / --local flags (not in surface)", () => {
-		const r = parseAssetsCommand("install pkg --token=abc --local=/p");
+	it("install ignores stray flags (not in surface)", () => {
+		const r = parseAssetsCommand("install pkg token=abc local=/p");
 		expect(r).toMatchObject({ type: "install", name: "pkg" });
 		expect(r as object).not.toHaveProperty("token");
 		expect(r as object).not.toHaveProperty("local");
@@ -73,11 +73,11 @@ describe("parseAssetsCommand", () => {
 		expect(parseAssetsCommand("local add")).toMatchObject({ type: "error" });
 	});
 
-	it("auth login / logout", () => {
-		expect(parseAssetsCommand("auth login")).toEqual({ type: "authLogin" });
-		expect(parseAssetsCommand("auth login --token=abc"))
-			.toEqual({ type: "authLogin", token: "abc" });
-		expect(parseAssetsCommand("auth logout")).toEqual({ type: "authLogout" });
+	it("login / logout", () => {
+		expect(parseAssetsCommand("login")).toEqual({ type: "login" });
+		expect(parseAssetsCommand("login token=abc"))
+			.toEqual({ type: "login", token: "abc" });
+		expect(parseAssetsCommand("logout")).toEqual({ type: "logout" });
 		expect(parseAssetsCommand("auth")).toMatchObject({ type: "error" });
 	});
 

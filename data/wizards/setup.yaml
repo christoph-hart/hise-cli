@@ -152,10 +152,6 @@ tasks:
     function: setupCompile
     type: internal
     label: Compile HISE
-  - id: addPath
-    function: setupAddPath
-    type: internal
-    label: Add to PATH
   - id: verify
     function: setupVerify
     type: internal

@@ -6,13 +6,17 @@
 //   create
 //   list [installed|uninstalled|local|store]
 //   info <name>
-//   install <name> [--version=X.Y.Z] [--dry-run]
+//   install <name> [version=X.Y.Z] [--dry-run]
 //   uninstall <name>
 //   cleanup <name>
 //   local add <path>
 //   local remove <name|path>
-//   auth login [--token=<t>]
-//   auth logout
+//   login [token=<t>]
+//   logout
+//
+// Flag forms:
+//   --dry-run         boolean flag
+//   key=value         string flag (e.g. token=abc, version=1.2.0)
 
 export type ListFilter = "all" | "installed" | "uninstalled" | "local" | "store";
 
@@ -31,8 +35,8 @@ export type AssetsCommand =
 	| { type: "cleanup"; name: string }
 	| { type: "localAdd"; path: string }
 	| { type: "localRemove"; query: string }
-	| { type: "authLogin"; token?: string }
-	| { type: "authLogout" }
+	| { type: "login"; token?: string }
+	| { type: "logout" }
 	| { type: "error"; message: string };
 
 interface ParsedTokens {
@@ -40,16 +44,19 @@ interface ParsedTokens {
 	flags: Map<string, string | true>;
 }
 
+const KEY_VALUE_RE = /^[a-zA-Z_][a-zA-Z0-9_-]*=/;
+
 function tokenize(input: string): ParsedTokens {
 	const tokens = input.match(/(?:[^\s"]+|"(?:\\"|[^"])*")+/g) ?? [];
 	const positional: string[] = [];
 	const flags = new Map<string, string | true>();
 	for (const raw of tokens) {
 		const t = unquote(raw);
-		if (t.startsWith("--")) {
+		if (t.startsWith("--") && !t.includes("=")) {
+			flags.set(t.slice(2), true);
+		} else if (KEY_VALUE_RE.test(t)) {
 			const eq = t.indexOf("=");
-			if (eq < 0) flags.set(t.slice(2), true);
-			else flags.set(t.slice(2, eq), unquote(t.slice(eq + 1)));
+			flags.set(t.slice(0, eq), unquote(t.slice(eq + 1)));
 		} else {
 			positional.push(t);
 		}
@@ -89,8 +96,10 @@ export function parseAssetsCommand(input: string): AssetsCommand {
 			return requireOne("cleanup", args, (n) => ({ type: "cleanup", name: n }));
 		case "local":
 			return parseLocal(args);
-		case "auth":
-			return parseAuth(args, flags);
+		case "login":
+			return { type: "login", token: readStringFlag(flags, "token") };
+		case "logout":
+			return { type: "logout" };
 		default:
 			return { type: "error", message: `Unknown command: "${verb}". Type "help" for available commands.` };
 	}
@@ -131,16 +140,6 @@ function parseLocal(args: string[]): AssetsCommand {
 		return { type: "localRemove", query: q };
 	}
 	return { type: "error", message: "local: expected 'add' or 'remove'" };
-}
-
-function parseAuth(args: string[], flags: Map<string, string | true>): AssetsCommand {
-	const sub = args[0]?.toLowerCase();
-	if (sub === "login") {
-		const token = readStringFlag(flags, "token");
-		return { type: "authLogin", token };
-	}
-	if (sub === "logout") return { type: "authLogout" };
-	return { type: "error", message: "auth: expected 'login' or 'logout'" };
 }
 
 function requireOne(verb: string, args: string[], fn: (name: string) => AssetsCommand): AssetsCommand {

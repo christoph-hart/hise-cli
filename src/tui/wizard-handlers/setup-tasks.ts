@@ -30,12 +30,28 @@ function fail(message: string, logs?: string[]): WizardExecResult {
 	return { success: false, message, logs };
 }
 
-/** True when the current process has administrator rights on Windows.
- *  `net session` is the cheapest documented way to probe: it succeeds
- *  only in an elevated token, fails with exitCode 2 otherwise. */
-async function requireWindowsElevation(executor: PhaseExecutor): Promise<boolean> {
-	const r = await executor.spawn("net", ["session"], {});
-	return r.exitCode === 0;
+/** Escape a string for a single-quoted PowerShell literal. */
+function psQuote(s: string): string {
+	return `'${s.replace(/'/g, "''")}'`;
+}
+
+/** Run a Windows installer that requires Administrator. PowerShell's
+ *  Start-Process -Verb RunAs triggers UAC, so hise-cli can launch
+ *  non-elevated and only the third-party installer needs elevation.
+ *  Exit code is propagated back via -PassThru + exit. */
+async function runElevatedInstaller(
+	executor: PhaseExecutor,
+	installer: string,
+	args: string[],
+	onLog: (line: string, transient?: boolean) => void,
+): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+	const psArgList = args.map(psQuote).join(",");
+	const psCmd = `$p = Start-Process -FilePath ${psQuote(installer)} -ArgumentList @(${psArgList}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
+	return executor.spawn("powershell", [
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-Command", psCmd,
+	], { onLog });
 }
 
 /** True when macOS `xcode-select -p` resolves — invoking developer-tool
@@ -265,13 +281,6 @@ export function createSetupFaustInstallHandler(_executor: PhaseExecutor): Intern
 		}
 
 		if (platform === "Windows") {
-			if (!(await requireWindowsElevation(executor))) {
-				return fail(
-					"Faust install needs admin privileges. " +
-					"Restart the terminal as administrator, then re-run: hise setup.",
-				);
-			}
-
 			const tmpDir = process.env.TEMP ?? "C:\\Windows\\Temp";
 			const installer = `${tmpDir}\\faust-installer.exe`;
 			const url = `https://github.com/grame-cncm/faust/releases/download/${FAUST_VERSION}/Faust-${FAUST_VERSION}-win64.exe`;
@@ -284,12 +293,16 @@ export function createSetupFaustInstallHandler(_executor: PhaseExecutor): Intern
 			});
 			if (dl.exitCode !== 0) return fail(`Faust download failed: ${dl.stderr}`);
 
-			onProgress({ phase: "faust-install", percent: 50, message: "Installing Faust..." });
-			// NSIS installer. /S = silent, /D=<path> = install dir — MUST be
-			// the last arg, unquoted, per NSIS convention.
-			const inst = await executor.spawn(installer, ["/S", "/D=C:\\Program Files\\Faust"], {
-				onLog: (line, transient) => onProgress({ phase: "faust-install", message: line, transient }),
-			});
+			onProgress({ phase: "faust-install", percent: 50, message: "Installing Faust (approve the UAC prompt)..." });
+			// NSIS installer needs admin (writes to Program Files); self-elevate
+			// via Start-Process -Verb RunAs so hise-cli stays non-elevated.
+			// /S = silent, /D=<path> = install dir.
+			const inst = await runElevatedInstaller(
+				executor,
+				installer,
+				["/S", "/D=C:\\Program Files\\Faust"],
+				(line, transient) => onProgress({ phase: "faust-install", message: line, transient }),
+			);
 			if (inst.exitCode !== 0) return fail(`Faust install failed: ${inst.stderr}`);
 
 			// Inject bin dir into this Node process's PATH so any downstream
@@ -618,13 +631,6 @@ export function createSetupCompilerInstallHandler(_executor: PhaseExecutor): Int
 			return ok("✓ Visual Studio detected.");
 		}
 
-		if (!(await requireWindowsElevation(executor))) {
-			return fail(
-				"Visual Studio Build Tools install needs admin privileges. " +
-				"Close the wizard, restart the terminal as administrator, then re-run: hise setup.",
-			);
-		}
-
 		const tmpDir = process.env.TEMP ?? "C:\\Windows\\Temp";
 		const installer = `${tmpDir}\\vs_BuildTools.exe`;
 
@@ -636,16 +642,21 @@ export function createSetupCompilerInstallHandler(_executor: PhaseExecutor): Int
 		});
 		if (download.exitCode !== 0) return fail(`VS Build Tools download failed: ${download.stderr}`);
 
-		onProgress({ phase: "compiler-install", percent: 40, message: "Installing VS Build Tools (this can take 5–10 minutes)..." });
-		const install = await executor.spawn(installer, [
-			"--passive", "--wait", "--norestart", "--nocache",
-			"--add", "Microsoft.VisualStudio.Workload.VCTools",
-			"--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
-			"--add", "Microsoft.VisualStudio.Component.Windows11SDK.26100",
-			"--addProductLang", "en-US",
-		], {
-			onLog: (line, transient) => onProgress({ phase: "compiler-install", message: line, transient }),
-		});
+		onProgress({ phase: "compiler-install", percent: 40, message: "Installing VS Build Tools (approve the UAC prompt; install can take 5–10 minutes)..." });
+		// vs_BuildTools.exe needs admin; self-elevate via Start-Process -Verb
+		// RunAs so hise-cli stays non-elevated.
+		const install = await runElevatedInstaller(
+			executor,
+			installer,
+			[
+				"--passive", "--wait", "--norestart", "--nocache",
+				"--add", "Microsoft.VisualStudio.Workload.VCTools",
+				"--add", "Microsoft.VisualStudio.Component.VC.Tools.x86.x64",
+				"--add", "Microsoft.VisualStudio.Component.Windows11SDK.26100",
+				"--addProductLang", "en-US",
+			],
+			(line, transient) => onProgress({ phase: "compiler-install", message: line, transient }),
+		);
 		// 3010 = installed OK, reboot requested (suppressed via --norestart).
 		if (install.exitCode !== 0 && install.exitCode !== 3010) {
 			return fail(`VS Build Tools install failed (exit ${install.exitCode}): ${install.stderr || install.stdout}`);
@@ -659,11 +670,6 @@ export function createSetupCompilerInstallHandler(_executor: PhaseExecutor): Int
 
 const IPP_INSTALLER_URL =
 	"https://registrationcenter-download.intel.com/akdlm/IRC_NAS/9c651894-4548-491c-b69f-49e84b530c1d/intel-ipp-2022.3.1.10_offline.exe";
-
-/** Escape a string for a single-quoted PowerShell literal. */
-function psQuote(s: string): string {
-	return `'${s.replace(/'/g, "''")}'`;
-}
 
 export function createSetupIppInstallHandler(_executor: PhaseExecutor): InternalTaskHandler {
 	return async (answers, onProgress, signal) => {
@@ -702,18 +708,12 @@ export function createSetupIppInstallHandler(_executor: PhaseExecutor): Internal
 
 		onProgress({ phase: "ipp-install", percent: 50, message: "Installing Intel IPP (approve the UAC prompt)..." });
 
-		// The IPP installer has requireAdministrator in its manifest —
-		// Start-Process -Verb RunAs triggers UAC so it can elevate.
-		const installerArgs = ["-s", "-a", "--silent", "--eula", "accept"];
-		const psArgList = installerArgs.map(psQuote).join(",");
-		const psCmd = `$p = Start-Process -FilePath ${psQuote(installer)} -ArgumentList @(${psArgList}) -Verb RunAs -Wait -PassThru; exit $p.ExitCode`;
-		const install = await executor.spawn("powershell", [
-			"-NoProfile",
-			"-ExecutionPolicy", "Bypass",
-			"-Command", psCmd,
-		], {
-			onLog: (line, transient) => onProgress({ phase: "ipp-install", message: line, transient }),
-		});
+		const install = await runElevatedInstaller(
+			executor,
+			installer,
+			["-s", "-a", "--silent", "--eula", "accept"],
+			(line, transient) => onProgress({ phase: "ipp-install", message: line, transient }),
+		);
 		if (install.exitCode !== 0) return fail(`Intel IPP installation failed: ${install.stderr || install.stdout}`);
 
 		onProgress({ phase: "ipp-install", percent: 100 });
@@ -842,12 +842,6 @@ export async function compileHise(
 			onLog: (line, transient) => onProgress({ phase, message: line, transient }),
 		});
 		if (result.exitCode !== 0) return fail(`Compilation failed: ${result.stderr}`);
-
-		// Make drops only HISE.app in build/<CONFIG>/. Add a bare `HISE`
-		// symlink alongside so the addPath phase can register this dir
-		// on $PATH and users can still invoke `HISE` from the shell.
-		const outDir = `${makeDir}/build/${buildConfig}`;
-		await executor.spawn("ln", ["-sf", "HISE.app/Contents/MacOS/HISE", `${outDir}/HISE`], {});
 	} else if (platform === "Linux") {
 		const makeDir = `${installPath}/projects/standalone/Builds/LinuxMakefile`;
 		const result = await executor.spawn("make", [`CONFIG=${buildConfig}`, "AR=gcc-ar", `-j${jobs}`], {
@@ -947,9 +941,9 @@ export function hiseBinDir(
 	return `${installPath}/projects/standalone/Builds/LinuxMakefile/build`;
 }
 
-/** Absolute path of the built HISE binary (what we symlink into PATH).
- *  On macOS the .app bundle holds the real binary; we target it directly
- *  so the symlink chain is a single hop. */
+/** Absolute path of the built HISE binary. On macOS the .app bundle holds
+ *  the real binary; we target it directly so verify/test invocations bypass
+ *  LaunchServices and get a real exit code + stdout. */
 export function hiseBinaryPath(
 	installPath: string,
 	platform: string,
@@ -960,371 +954,6 @@ export function hiseBinaryPath(
 	if (platform === "Windows") return `${binDir}\\HISE.exe`;
 	if (platform === "macOS") return `${binDir}/HISE.app/Contents/MacOS/HISE`;
 	return `${binDir}/HISE Standalone`;
-}
-
-/** Absolute path of the macOS .app bundle. Used as the `open -a` target
- *  inside the macOS PATH-wrapper so LaunchServices activates the GUI
- *  (dock icon, front activation). Direct binary launch bypasses LS. */
-export function hiseAppBundlePath(
-	installPath: string,
-	includeFaust: boolean,
-): string {
-	const binDir = hiseBinDir(installPath, "macOS", includeFaust);
-	return `${binDir}/HISE.app`;
-}
-
-// ── Shared: create a HISE → binary symlink in a writable PATH entry ──
-//
-// Scans process.env.PATH for the first writable dir and drops the symlink
-// there. POSIX uses `ln -sf`; Windows uses `cmd /c mklink` which requires
-// admin or developer mode. Falls back to ~/.local/bin (POSIX) with a note
-// when nothing on PATH is writable; on Windows a hard failure is returned
-// so the caller can surface a clear "run as admin" message.
-
-// System dirs we refuse to touch even if they happen to be writable —
-// polluting /bin/HISE or C:\Windows\System32\HISE.exe is never what the
-// user wants.
-const POSIX_BLOCKED_RE = /^\/(?:bin|sbin|usr\/bin|usr\/sbin|usr\/local\/sbin|System|Library\/Apple)(?:\/|$)/;
-const WINDOWS_BLOCKED_RE = /[\\/](?:System32|SysWOW64|WindowsApps)(?:[\\/]|$)/i;
-
-export interface CreateHiseSymlinkResult {
-	readonly success: boolean;
-	/** Directory the symlink landed in (caller may splice into PATH). */
-	readonly dir?: string;
-	readonly execResult: WizardExecResult;
-}
-
-/** Create (or replace) a `HISE` shim in the first writable PATH entry. */
-export async function createHiseSymlink(
-	executor: PhaseExecutor,
-	binary: string,
-	platform: string,
-	phase: string,
-	onProgress: (p: import("../../engine/wizard/types.js").WizardProgress) => void,
-): Promise<CreateHiseSymlinkResult> {
-	if (platform === "Windows") {
-		return createWindowsSymlink(executor, binary, phase, onProgress);
-	}
-	if (platform === "macOS") {
-		return createMacOSWrapper(executor, binary, phase, onProgress);
-	}
-	return createPosixSymlink(executor, binary, phase, onProgress);
-}
-
-async function createPosixSymlink(
-	executor: PhaseExecutor,
-	binary: string,
-	phase: string,
-	onProgress: (p: import("../../engine/wizard/types.js").WizardProgress) => void,
-): Promise<CreateHiseSymlinkResult> {
-	const pathDirs = (process.env.PATH ?? "").split(":").filter((p) => p.length > 0);
-	const errors: string[] = [];
-	for (const dir of pathDirs) {
-		if (POSIX_BLOCKED_RE.test(dir)) continue;
-		const isDir = await executor.spawn("test", ["-d", dir], {});
-		if (isDir.exitCode !== 0) continue;
-		const writable = await executor.spawn("test", ["-w", dir], {});
-		if (writable.exitCode !== 0) continue;
-
-		onProgress({ phase, percent: 50, message: `Symlinking into ${dir}/HISE...` });
-		const ln = await executor.spawn("ln", ["-sf", binary, `${dir}/HISE`], {});
-		if (ln.exitCode !== 0) {
-			errors.push(`ln ${dir}/HISE: ${ln.stderr.trim() || "failed"}`);
-			continue;
-		}
-		onProgress({ phase, percent: 100 });
-		return {
-			success: true,
-			dir,
-			execResult: ok(`✓ ${dir}/HISE → ${binary}`),
-		};
-	}
-
-	// Nothing on PATH is writable — last resort: create ~/.local/bin and
-	// warn the user to put it on PATH.
-	const home = process.env.HOME ?? "";
-	if (!home) {
-		return {
-			success: false,
-			execResult: fail(
-				`No writable directory on PATH. Tried:\n  ${errors.join("\n  ") || "(nothing matched)"}`,
-			),
-		};
-	}
-	const userBin = `${home}/.local/bin`;
-	onProgress({ phase, percent: 60, message: `Nothing writable on PATH; falling back to ${userBin}...` });
-	const mk = await executor.spawn("mkdir", ["-p", userBin], {});
-	if (mk.exitCode !== 0) {
-		return { success: false, execResult: fail(`mkdir ${userBin} failed: ${mk.stderr}`) };
-	}
-	const fallback = await executor.spawn("ln", ["-sf", binary, `${userBin}/HISE`], {});
-	if (fallback.exitCode !== 0) {
-		return { success: false, execResult: fail(`ln ${userBin}/HISE failed: ${fallback.stderr}`) };
-	}
-	onProgress({ phase, percent: 100 });
-	return {
-		success: true,
-		dir: userBin,
-		execResult: ok(
-			`✓ ${userBin}/HISE → ${binary} (note: ${userBin} is not on your PATH — add it to invoke HISE by name)`,
-		),
-	};
-}
-
-// ── macOS wrapper script (LaunchServices-routed GUI launch) ──────────
-//
-// Symlinking HISE.app/Contents/MacOS/HISE into PATH bypasses macOS
-// LaunchServices: GUI-mode launches get no dock icon, no front activation,
-// and the window may stay hidden behind other apps. Fix: install a small
-// shell wrapper that branches on argc:
-//   - no args  → `open -a HISE.app`  (LaunchServices; proper GUI launch)
-//   - any args → exec the inner binary directly so verify/test phases
-//                still see stdout and a real exit code.
-
-function shellSingleQuote(s: string): string {
-	return `'${s.replace(/'/g, "'\\''")}'`;
-}
-
-function macOSWrapperContent(appPath: string): string {
-	const quoted = shellSingleQuote(appPath);
-	return `#!/bin/bash
-APP=${quoted}
-if [ $# -eq 0 ]; then
-	exec /usr/bin/open -a "$APP"
-else
-	exec "$APP/Contents/MacOS/HISE" "$@"
-fi
-`;
-}
-
-/** Write+chmod the wrapper at `${dir}/HISE`. Removes any stale file or
- *  symlink first so re-runs over a previous install are clean. */
-async function writeMacOSWrapper(
-	executor: PhaseExecutor,
-	dir: string,
-	content: string,
-): Promise<{ ok: boolean; error?: string }> {
-	const target = `${dir}/HISE`;
-	const rm = await executor.spawn("rm", ["-f", target], {});
-	if (rm.exitCode !== 0) return { ok: false, error: `rm ${target}: ${rm.stderr.trim() || "failed"}` };
-	// Pass wrapper content via argv to printf so we don't have to escape
-	// the script body for the outer shell -c invocation.
-	const write = await executor.spawn(
-		"sh",
-		["-c", 'printf "%s" "$1" > "$2"', "sh", content, target],
-		{},
-	);
-	if (write.exitCode !== 0) return { ok: false, error: `write ${target}: ${write.stderr.trim() || "failed"}` };
-	const chmod = await executor.spawn("chmod", ["+x", target], {});
-	if (chmod.exitCode !== 0) return { ok: false, error: `chmod ${target}: ${chmod.stderr.trim() || "failed"}` };
-	return { ok: true };
-}
-
-/** Append `~/.local/bin` to PATH in the user's shell rc file. Idempotent
- *  via grep -qF. Only invoked when we fell back to ~/.local/bin and that
- *  dir isn't already on PATH. Returns the rc file we touched (or null
- *  when the user's shell isn't bash/zsh — in which case the caller's
- *  message asks the user to add it manually). */
-async function ensureUserBinOnPath(
-	executor: PhaseExecutor,
-): Promise<{ rc: string | null; appended: boolean; error: string | null }> {
-	const shell = process.env.SHELL ?? "";
-	const home = process.env.HOME ?? "";
-	if (!home) return { rc: null, appended: false, error: "HOME not set" };
-	const rc = shell.endsWith("/zsh")
-		? `${home}/.zshrc`
-		: shell.endsWith("/bash")
-			? `${home}/.bash_profile`
-			: null;
-	if (!rc) return { rc: null, appended: false, error: null };
-	const line = 'export PATH="$HOME/.local/bin:$PATH"';
-	const cmd = `touch "${rc}" && (grep -qF '${line}' "${rc}" || printf '\\n%s\\n' '${line}' >> "${rc}")`;
-	const r = await executor.spawn("sh", ["-c", cmd], {});
-	if (r.exitCode !== 0) {
-		return { rc, appended: false, error: r.stderr.trim() || r.stdout.trim() || "failed" };
-	}
-	return { rc, appended: true, error: null };
-}
-
-async function createMacOSWrapper(
-	executor: PhaseExecutor,
-	binary: string,
-	phase: string,
-	onProgress: (p: import("../../engine/wizard/types.js").WizardProgress) => void,
-): Promise<CreateHiseSymlinkResult> {
-	// Strip the bundle-internal binary suffix to recover the .app path.
-	// Whoever calls us passed `${binDir}/HISE.app/Contents/MacOS/HISE`.
-	const APP_SUFFIX = "/Contents/MacOS/HISE";
-	const appPath = binary.endsWith(APP_SUFFIX)
-		? binary.slice(0, -APP_SUFFIX.length)
-		: binary;
-	const content = macOSWrapperContent(appPath);
-
-	const pathDirs = (process.env.PATH ?? "").split(":").filter((p) => p.length > 0);
-	const errors: string[] = [];
-	for (const dir of pathDirs) {
-		if (POSIX_BLOCKED_RE.test(dir)) continue;
-		const isDir = await executor.spawn("test", ["-d", dir], {});
-		if (isDir.exitCode !== 0) continue;
-		const writable = await executor.spawn("test", ["-w", dir], {});
-		if (writable.exitCode !== 0) continue;
-
-		onProgress({ phase, percent: 50, message: `Installing wrapper at ${dir}/HISE...` });
-		const w = await writeMacOSWrapper(executor, dir, content);
-		if (!w.ok) {
-			errors.push(w.error ?? "unknown");
-			continue;
-		}
-		onProgress({ phase, percent: 100 });
-		return {
-			success: true,
-			dir,
-			execResult: ok(`✓ ${dir}/HISE → ${appPath} (LaunchServices wrapper)`),
-		};
-	}
-
-	// Fallback: ~/.local/bin (handoff §Install location). We always create
-	// the dir, write the wrapper, then ensure the user's rc file has the
-	// PATH export so future shells pick it up.
-	const home = process.env.HOME ?? "";
-	if (!home) {
-		return {
-			success: false,
-			execResult: fail(
-				`No writable directory on PATH. Tried:\n  ${errors.join("\n  ") || "(nothing matched)"}`,
-			),
-		};
-	}
-	const userBin = `${home}/.local/bin`;
-	onProgress({ phase, percent: 60, message: `Nothing writable on PATH; falling back to ${userBin}...` });
-	const mk = await executor.spawn("mkdir", ["-p", userBin], {});
-	if (mk.exitCode !== 0) {
-		return { success: false, execResult: fail(`mkdir ${userBin} failed: ${mk.stderr}`) };
-	}
-	const w = await writeMacOSWrapper(executor, userBin, content);
-	if (!w.ok) {
-		return { success: false, execResult: fail(`Wrapper install at ${userBin} failed: ${w.error}`) };
-	}
-
-	// rc-file PATH append, only if userBin isn't already on PATH.
-	const onPath = pathDirs.includes(userBin);
-	let pathNote = "";
-	if (!onPath) {
-		const r = await ensureUserBinOnPath(executor);
-		if (r.appended && r.rc) {
-			pathNote = ` Added ${userBin} to PATH in ${r.rc} — open a new terminal or \`source ${r.rc}\` to pick it up.`;
-		} else if (r.rc && r.error) {
-			pathNote = ` Wanted to add PATH export to ${r.rc} but failed (${r.error}). Add this line manually: export PATH="$HOME/.local/bin:$PATH"`;
-		} else {
-			pathNote = ` ${userBin} is not on your PATH and your shell isn't bash/zsh — add this line manually to your shell rc: export PATH="$HOME/.local/bin:$PATH"`;
-		}
-	}
-	onProgress({ phase, percent: 100 });
-	return {
-		success: true,
-		dir: userBin,
-		execResult: ok(`✓ ${userBin}/HISE → ${appPath} (LaunchServices wrapper).${pathNote}`),
-	};
-}
-
-async function createWindowsSymlink(
-	executor: PhaseExecutor,
-	binary: string,
-	phase: string,
-	onProgress: (p: import("../../engine/wizard/types.js").WizardProgress) => void,
-): Promise<CreateHiseSymlinkResult> {
-	const pathDirs = (process.env.PATH ?? "").split(";").filter((p) => p.length > 0);
-	const errors: string[] = [];
-	for (const dir of pathDirs) {
-		if (WINDOWS_BLOCKED_RE.test(dir)) continue;
-		// Probe dir existence + writability via cmd. `echo > ...` on a
-		// read-only dir fails with nonzero exit; we clean the probe file up
-		// immediately so this is side-effect-free on success.
-		const probeFile = `${dir}\\.hise-cli-write-probe`;
-		const probe = await executor.spawn("cmd", [
-			"/c",
-			`if exist "${dir}" (type nul > "${probeFile}" 2>nul && del /q "${probeFile}" 2>nul && echo OK)`,
-		], {});
-		if (!probe.stdout.includes("OK")) continue;
-
-		onProgress({ phase, percent: 50, message: `Creating ${dir}\\HISE.exe symlink...` });
-		const linkPath = `${dir}\\HISE.exe`;
-		// Delete any stale link/file so mklink doesn't fail with "already
-		// exists". /f forces deletion of symlinks too.
-		await executor.spawn("cmd", ["/c", `if exist "${linkPath}" del /f /q "${linkPath}"`], {});
-		// mklink <Link> <Target>. No /D — HISE.exe is a file. Requires admin
-		// or developer mode on Windows 10+; failure means the user didn't
-		// start hise-cli elevated.
-		const mklink = await executor.spawn("cmd", ["/c", `mklink "${linkPath}" "${binary}"`], {});
-		if (mklink.exitCode !== 0) {
-			errors.push(`mklink ${linkPath}: ${mklink.stderr.trim() || mklink.stdout.trim() || "failed"}`);
-			continue;
-		}
-		onProgress({ phase, percent: 100 });
-		return {
-			success: true,
-			dir,
-			execResult: ok(`✓ ${linkPath} → ${binary}`),
-		};
-	}
-
-	return {
-		success: false,
-		execResult: fail(
-			`Could not create HISE symlink on Windows. mklink requires administrator ` +
-			`rights or Developer Mode. Tried:\n  ${errors.join("\n  ") || "(no writable PATH entries)"}`,
-		),
-	};
-}
-
-export function createSetupAddPathHandler(_executor: PhaseExecutor): InternalTaskHandler {
-	return async (answers, onProgress, signal) => {
-		const executor = withSignal(_executor, signal);
-		const installPath = answers.installPath!;
-		const platform = answers.platform ?? "Linux";
-		const includeFaust = isOn(answers.includeFaust);
-		const vsVersion = normaliseVsVersion(answers.vsVersion);
-		const binary = hiseBinaryPath(installPath, platform, includeFaust, vsVersion);
-		const result = await createHiseSymlink(executor, binary, platform, "add-path", onProgress);
-		// Mirror the update wizard: splice the chosen dir into this Node
-		// process's PATH so later setup phases (verify, test) resolve HISE
-		// without waiting for a fresh shell.
-		if (result.success && result.dir) {
-			const sep = platform === "Windows" ? ";" : ":";
-			const current = process.env.PATH ?? "";
-			if (!current.split(sep).includes(result.dir)) {
-				process.env.PATH = [result.dir, ...current.split(sep).filter((p) => p.length > 0)].join(sep);
-			}
-		}
-		return result.execResult;
-	};
-}
-
-// ── HISE binary path helper ───────────────────────────────────────────
-
-function hiseBinPath(
-	installPath: string,
-	platform: string,
-	includeFaust = false,
-	vsVersion: VsVersion = "2022",
-): string {
-	if (platform === "macOS") {
-		const cfg = includeFaust ? "ReleaseWithFaust" : "Release";
-		return `${installPath}/projects/standalone/Builds/MacOSXMakefile/build/${cfg}/HISE.app/Contents/MacOS/HISE`;
-	} else if (platform === "Linux") {
-		return `${installPath}/projects/standalone/Builds/LinuxMakefile/build/HISE Standalone`;
-	}
-	// MSBuild config name becomes the output subfolder name, so the
-	// Faust-enabled build lives under "ReleaseWithFaust\App\HISE.exe".
-	const config = includeFaust ? "ReleaseWithFaust" : "Release";
-	return `${installPath}\\projects\\standalone\\Builds\\VisualStudio${vsVersion}\\x64\\${config}\\App\\HISE.exe`;
-}
-
-/** Bare binary name used when invoking HISE via PATH lookup. */
-function hiseBinaryName(platform: string): string {
-	if (platform === "Windows") return "HISE.exe";
-	if (platform === "macOS") return "HISE";
-	return "HISE Standalone";
 }
 
 /** Strip pinned MSVC toolset versions from every .vcxproj under `buildsDir`.
@@ -1410,21 +1039,18 @@ export function createSetupVerifyHandler(_executor: PhaseExecutor): InternalTask
 		const includeIpp = isOn(answers.includeIpp);
 		const vsVersion = normaliseVsVersion(answers.vsVersion);
 
-		onProgress({ phase: "verify", percent: 0, message: "Verifying HISE binary on PATH..." });
+		onProgress({ phase: "verify", percent: 0, message: "Verifying HISE binary..." });
 
-		// Invoke by bare binary name — this verifies that the add-path phase
-		// actually made HISE resolvable via PATH. If it ENOENTs, PATH is
-		// broken. Hint the user with the expected install location.
-		const binaryName = hiseBinaryName(platform);
-		const flags = await executor.spawn(binaryName, ["get_build_flags"], {
+		// Invoke the freshly built binary by absolute path. compilerSettings.xml
+		// hasn't been written yet, so the launcher's PATH-fallback can't help —
+		// we own the path through hiseBinaryPath. After set_hise_settings runs,
+		// the launcher's compilerSettings lookup takes over for all later flows.
+		const binary = hiseBinaryPath(installPath, platform, includeFaust, vsVersion);
+		const flags = await executor.spawn(binary, ["get_build_flags"], {
 			onLog: (line, transient) => onProgress({ phase: "verify", message: line, transient }),
 		});
 		if (flags.exitCode !== 0) {
-			const expected = hiseBinPath(installPath, platform, includeFaust, vsVersion);
-			return fail(
-				`HISE not found on PATH (expected '${binaryName}'). ` +
-				`Binary should be at: ${expected}`,
-			);
+			return fail(`HISE not found at expected path: ${binary}`);
 		}
 		const logs = flags.stdout.trim() ? [flags.stdout.trim()] : undefined;
 
@@ -1441,7 +1067,7 @@ export function createSetupVerifyHandler(_executor: PhaseExecutor): InternalTask
 			const faustPath = faustInstallPath(platform, installPath);
 			if (faustPath) settingsArgs.push(`-faustpath:${faustPath}`);
 		}
-		const settings = await executor.spawn(binaryName, settingsArgs, {
+		const settings = await executor.spawn(binary, settingsArgs, {
 			onLog: (line, transient) => onProgress({ phase: "verify", message: line, transient }),
 		});
 		if (settings.exitCode !== 0) {
@@ -1474,9 +1100,9 @@ export function createSetupTestHandler(_executor: PhaseExecutor): InternalTaskHa
 		const installPath = answers.installPath!;
 		const platform = answers.platform ?? "Linux";
 		const arch = answers.architecture ?? "x64";
-		// Invoke HISE by bare name so it resolves via PATH (set by the
-		// add-path phase) rather than tying the test flow to a file layout.
-		const hise = hiseBinaryName(platform);
+		const includeFaust = isOn(answers.includeFaust);
+		const vsVersion = normaliseVsVersion(answers.vsVersion);
+		const hise = hiseBinaryPath(installPath, platform, includeFaust, vsVersion);
 		const demoProject = `${installPath}/extras/demo_project`;
 
 		onProgress({ phase: "test", percent: 0, message: "Setting project folder..." });
@@ -1521,7 +1147,7 @@ export function createSetupTestHandler(_executor: PhaseExecutor): InternalTaskHa
 			configuration: "Release",
 			parallelJobs,
 			macArchitecture,
-			vsVersion: normaliseVsVersion(answers.vsVersion),
+			vsVersion,
 		}, emit);
 
 		if (!compile.success) return fail(`Demo project compilation failed: ${compile.stderr}`);
