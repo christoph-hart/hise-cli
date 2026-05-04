@@ -1,6 +1,6 @@
 {
   "name": "@hise/cli",
-  "version": "0.7.3",
+  "version": "0.7.4",
   "description": "Official command-line interface for HISE REPL and automation workflows",
   "license": "MIT",
   "type": "module",
