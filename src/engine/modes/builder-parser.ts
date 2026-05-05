@@ -129,6 +129,7 @@ class BuilderParser extends CstParser {
 	});
 
 	// add <type> [as "<name>"] [to <target>[.<chain>]]
+	// `as` and `to` clauses are order-independent — both orderings parse the same.
 	// Type can be multi-word (e.g., "Noise Generator") — greedy Identifier+ or QuotedString.
 	public addCommand = this.RULE("addCommand", () => {
 		this.CONSUME(Add);
@@ -136,20 +137,24 @@ class BuilderParser extends CstParser {
 			{ ALT: () => this.CONSUME3(QuotedString, { LABEL: "quotedType" }) },
 			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME2(Identifier, { LABEL: "moduleType" })) },
 		]);
-		this.OPTION(() => {
-			this.CONSUME(As);
+		this.MANY(() => {
 			this.OR3([
-				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "alias" }) },
-				{ ALT: () => this.AT_LEAST_ONE2(() => this.CONSUME4(Identifier, { LABEL: "aliasWords" })) },
+				{ ALT: () => {
+					this.CONSUME(As);
+					this.OR4([
+						{ ALT: () => this.CONSUME(QuotedString, { LABEL: "alias" }) },
+						{ ALT: () => this.AT_LEAST_ONE2(() => this.CONSUME4(Identifier, { LABEL: "aliasWords" })) },
+					]);
+				}},
+				{ ALT: () => {
+					this.CONSUME(To);
+					this.SUBRULE(this.targetRef, { LABEL: "parent" });
+					this.OPTION(() => {
+						this.CONSUME(Dot);
+						this.CONSUME3(Identifier, { LABEL: "chain" });
+					});
+				}},
 			]);
-		});
-		this.OPTION2(() => {
-			this.CONSUME(To);
-			this.SUBRULE(this.targetRef, { LABEL: "parent" });
-			this.OPTION3(() => {
-				this.CONSUME(Dot);
-				this.CONSUME3(Identifier, { LABEL: "chain" });
-			});
 		});
 	});
 

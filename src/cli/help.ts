@@ -601,7 +601,7 @@ TOOL COMMANDS (available in scripts and TUI)
   /expect <cmd> logs <json|scalar> Assert Console.print logs (script mode)
   /expect <cmd> throws "<pat>"     Assert command errors with a substring
   /capture                         Open Console.print buffer (script mode)
-  /expect-logs <json>              Submit captured buffer + assert logs
+  /expect-logs <json>              Assert last log buffer (capture flush, /compile, or REPL)
   /expect-compile throws "<pat>"   Assert collected callbacks fail to compile
   /callback <name>                 In /script, collect raw callback body lines
   /compile                         In /script, compile collected callbacks
@@ -615,12 +615,18 @@ LOG / ERROR ASSERTIONS (script mode only)
     /expect Console.print("hi") logs "hi"
     /expect Console.print(0.5) logs 0.5 within 0.01
 
-  Multi-line (preserves var scope across lines):
+  Multi-line (buffer is wrapped in an IIFE — var scope preserved):
     /capture
     var x = 5;
     Console.print(x);
     Console.print(x * 2);
     /expect-logs ["5", "10"]
+
+  After /compile (asserts logs from /api/set_script response):
+    /callback onInit
+    Console.print("init done");
+    /compile
+    /expect-logs ["init done"]
 
   Substring match on success result (any mode):
     /hise /expect status contains "HISE online"

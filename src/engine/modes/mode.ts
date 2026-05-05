@@ -87,8 +87,9 @@ export interface SessionContext {
 	isCapturing?(processorId: string): boolean;
 	/** Discard all capture buffers (called on script-mode entry/exit). */
 	clearAllCaptureBuffers?(): void;
-	/** Logs from the most recent /api/repl call, populated by ScriptMode.parse. */
-	lastReplLogs?: string[];
+	/** Most recent log buffer — populated by REPL responses, /capture flush,
+	 *  and /compile. Read by /expect <expr> logs and /expect-logs. */
+	lastLogs?: string[];
 
 	/** Resolve a file path against the project folder. Absolute paths pass through. */
 	resolvePath?(filePath: string): string;

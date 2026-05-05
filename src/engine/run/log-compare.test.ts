@@ -70,4 +70,67 @@ describe("compareLogLines", () => {
 	it("normalizes Interface: prefix before compare", () => {
 		expect(compareLogLines(["Interface: ok"], ["ok"], 0.01).passed).toBe(true);
 	});
+	it("matches '-6.0' actual vs '-6' string expected (float fallback)", () => {
+		expect(compareLogLines(["-6.0"], ["-6"], 0.01).passed).toBe(true);
+	});
+	it("filters 'Skip token rebuild during recompilation' diagnostic noise", () => {
+		const r = compareLogLines(
+			[
+				"Skip token rebuild during recompilation",
+				"Skip token rebuild during recompilation",
+				"MySine",
+			],
+			["MySine"],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
+	it("matches pretty-printed JSON array actual vs compact JSON-string expected", () => {
+		const r = compareLogLines(
+			["[\n  60,\n  48,\n  72\n]", "[\n  48,\n  60,\n  72\n]"],
+			["[60, 48, 72]", "[48, 60, 72]"],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
+	it("matches pretty-printed JSON object actual vs compact JSON-string expected", () => {
+		const r = compareLogLines(
+			['{\n  "a": 1,\n  "b": 2\n}'],
+			['{"b":2,"a":1}'],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
+	it("filters noise even with Interface: prefix on user lines", () => {
+		const r = compareLogLines(
+			["Skip token rebuild during recompilation", "Interface: -6.0"],
+			["-6"],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
+
+	it("filters Console.testCallback diagnostic markers (with suffixes)", () => {
+		const r = compareLogLines(
+			[
+				"warning: this should be only used in a testing setup",
+				"BEGIN_CALLBACK_TEST MyImage.setKeyPressCallback",
+				"Key: A",
+				"END_CALLBACK_TEST MyImage.setKeyPressCallback",
+				'CALLBACK_ARGS: >{"character":"A"}',
+			],
+			["Key: A"],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
+
+	it("filters CALLBACK_ARGS with both bare and >-prefixed payloads", () => {
+		const r = compareLogLines(
+			['CALLBACK_ARGS: {"a":1}', 'CALLBACK_ARGS: >{"a":1}', "user line"],
+			["user line"],
+			0.01,
+		);
+		expect(r.passed).toBe(true);
+	});
 });

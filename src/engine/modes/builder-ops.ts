@@ -62,7 +62,8 @@ export function resolveChainIndex(
 		for (const mod of parentDef.modulation) {
 			const modName = mod.id.toLowerCase().replace(/\s+/g, "");
 			const modShort = modName.replace(/modulation$/, "");
-			if (modName === lower || modShort === lower) return mod.chainIndex;
+			const modMode = mod.modulationMode?.toLowerCase();
+			if (modName === lower || modShort === lower || modMode === lower) return mod.chainIndex;
 		}
 	}
 

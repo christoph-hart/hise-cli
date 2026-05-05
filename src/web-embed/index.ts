@@ -22,6 +22,9 @@ import type { Session } from "../engine/session.js";
 import type { CompletionEngine } from "../engine/completion/engine.js";
 import type { DataLoader } from "../engine/data.js";
 
+export const VERSION =
+	typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
+
 export { createBrowserDataLoader } from "./browserDataLoader.js";
 export type { BrowserDataLoaderOptions } from "./browserDataLoader.js";
 

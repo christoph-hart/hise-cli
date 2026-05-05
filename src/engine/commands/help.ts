@@ -89,7 +89,7 @@ Dot-context: \`/builder.Master add LFO\` sets the context path first.
 - **/wait** \`<duration>\` — Pause execution (e.g., \`/wait 500ms\`, \`/wait 0.5s\`)
 - **/expect** \`<cmd> is|matches|logs|throws|contains <value>\` — Assert a command result
 - **/capture** — In script mode, open a Console.print buffer (end with \`/expect-logs\`)
-- **/expect-logs** \`<json>\` — Assert captured Console output (paired with \`/capture\`)
+- **/expect-logs** \`<json>\` — Assert last log buffer (filled by \`/capture\` flush, \`/compile\`, or REPL)
 - **/expect-compile** \`throws "<pattern>"\` — Assert callback compile fails with a substring
 - **/callback** \`<name>\` — In script mode, collect raw callback body lines for compilation
 - **/compile** — In script mode, compile collected callbacks with \`/api/set_script\`
@@ -135,9 +135,13 @@ Content.getComponent("Knob1").getValue()
 ## Test Verbs (script mode)
 
 - \`/capture\` — open a Console.print buffer; following lines silently buffer
-- \`/expect-logs <json>\` — submit buffered lines, assert Console output
+- \`/expect-logs <json>\` — assert the last log buffer:
+  - after \`/capture\`: flushes buffered code via IIFE, asserts the response logs
+  - after \`/compile\`: asserts logs returned from \`/api/set_script\`
+  - after a REPL line: asserts that line's Console output
+  - buffer is cleared after the assert
 - \`/expect-compile throws "<pat>"\` — assert collected callbacks fail to compile
-- \`/expect <expr> logs <json|scalar>\` — inline log assertion
+- \`/expect <expr> logs <json|scalar>\` — inline log assertion (one-liner shortcut)
 - \`/expect <expr> throws "<pat>"\` — substring match on error
 - All verbs accept \`or abort\` and (where meaningful) \`within <tol>\``,
 

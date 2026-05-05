@@ -357,7 +357,8 @@ async function executeExpect(
 ): Promise<ExpectResult> {
 	if (parsed.kind === "logs") {
 		const result = await session.handleInput(parsed.command);
-		const actualLines = session.lastReplLogs ?? [];
+		const actualLines = session.lastLogs ?? [];
+		session.lastLogs = [];
 		const cmp = compareLogLines(actualLines, parsed.expectedLines, parsed.tolerance);
 		return {
 			line: line.lineNumber,

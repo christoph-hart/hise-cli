@@ -85,7 +85,7 @@ export class ScriptMode implements Mode {
 		});
 
 		// Stash logs so /expect <expr> logs <...> can read them after dispatch.
-		session.lastReplLogs = isEnvelopeResponse(response) ? [...response.logs] : [];
+		session.lastLogs = isEnvelopeResponse(response) ? [...response.logs] : [];
 
 		return formatReplResponse(response, input);
 	}
@@ -272,8 +272,10 @@ export async function submitReplBuffer(
 	if (!session.connection) return null;
 	const body = lines.join("\n");
 	const expression = `(function(){\n${body}\n})()`;
-	return session.connection.post("/api/repl", {
+	const response = await session.connection.post("/api/repl", {
 		expression,
 		moduleId: processorId,
 	});
+	session.lastLogs = isEnvelopeResponse(response) ? [...response.logs] : [];
+	return response;
 }

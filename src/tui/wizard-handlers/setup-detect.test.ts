@@ -45,11 +45,15 @@ describe("setupDetectEnvironment", () => {
 		expect(defaults.hasGit).toBe("1");
 	});
 
-	it("detects git absence when developer dir is missing", async () => {
+	it("detects git absence", async () => {
 		const executor = new MockPhaseExecutor();
-		// xcode-select -p returns non-zero → no dev dir → skip git probe,
-		// so the /usr/bin/git stub never pops the CLT install dialog.
+		// macOS: xcode-select -p returns non-zero → no dev dir → skip git
+		// probe, so the /usr/bin/git stub never pops the CLT install dialog.
 		executor.onSpawn("xcode-select", { exitCode: 1, stdout: "", stderr: "no dir" });
+		// Windows / Linux: git probe runs unconditionally; stub it as missing.
+		// (Windows fallback then probes `cmd /c if exist ...` — default empty
+		// stdout doesn't include "found", so that branch correctly returns false.)
+		executor.onSpawn("git", { exitCode: 1, stdout: "", stderr: "not found" });
 
 		const handler = createSetupDetectHandler(executor);
 		const defaults = await handler("setup") as Record<string, string>;

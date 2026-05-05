@@ -165,9 +165,10 @@ export class Session implements SessionContext, CommandSession {
 	private readonly modeCache = new Map<string, Mode>();
 	private readonly scriptCompilerStates = new Map<string, ScriptCompilerState>();
 	private readonly captureBuffers = new Map<string, string[]>();
-	/** Logs from the most recent /api/repl call, populated by ScriptMode.parse.
-	 *  Read by /expect <expr> logs <values> (inline form). */
-	lastReplLogs: string[] = [];
+	/** Most recent log buffer — populated by ScriptMode.parse (REPL),
+	 *  submitReplBuffer (/capture flush), and compileCallbacks (/compile).
+	 *  Read by /expect <expr> logs <values> and /expect-logs. */
+	lastLogs: string[] = [];
 
 	// Signal for TUI to handle quit
 	private quitRequested = false;

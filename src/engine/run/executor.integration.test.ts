@@ -214,6 +214,45 @@ describe("executor — new test verbs", () => {
 		expect(result.expects[0]?.passed).toBe(false);
 	});
 
+	it("/expect-logs reads logs from /compile output (no /capture)", async () => {
+		const mock = new MockHiseConnection();
+		mock.onPost("/api/recompile", () => ({
+			success: true,
+			result: "Compiled OK",
+			logs: ["init done", "ready"],
+			errors: [],
+		}));
+		const session = makeSession(mock);
+		const script = parseScript([
+			"/script",
+			"/compile",
+			'/expect-logs ["init done", "ready"]',
+		].join("\n"));
+		const result = await executeScript(script, session);
+		expect(result.ok).toBe(true);
+		expect(result.expects[0]?.passed).toBe(true);
+	});
+
+	it("/expect-logs clears buffer after assert", async () => {
+		const mock = new MockHiseConnection();
+		mock.onPost("/api/recompile", () => ({
+			success: true,
+			logs: ["one"],
+			errors: [],
+		}));
+		const session = makeSession(mock);
+		const script = parseScript([
+			"/script",
+			"/compile",
+			'/expect-logs ["one"]',
+			'/expect-logs ["one"]',
+		].join("\n"));
+		const result = await executeScript(script, session);
+		// First passes, second fails (buffer cleared, length mismatch 0 vs 1).
+		expect(result.expects[0]?.passed).toBe(true);
+		expect(result.expects[1]?.passed).toBe(false);
+	});
+
 	it("/capture buffer is cleared between runs (no state leak)", async () => {
 		const mock = new MockHiseConnection();
 		mock.onPost("/api/repl", () => ({ success: true, logs: ["x"], errors: [] }));

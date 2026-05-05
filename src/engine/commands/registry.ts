@@ -62,8 +62,8 @@ export interface CommandSession {
 	clearCapture?(processorId: string): void;
 	isCapturing?(processorId: string): boolean;
 	clearAllCaptureBuffers?(): void;
-	/** Logs from the most recent /api/repl call. */
-	lastReplLogs?: string[];
+	/** Most recent log buffer (REPL / capture flush / compile). */
+	lastLogs?: string[];
 	/** Progress callback for `/wizard run` streaming. Always wired. */
 	onWizardProgress?(progress: import("../wizard/types.js").WizardProgress): void;
 	/** Snapshot of the most recently paused wizard (null when none). */

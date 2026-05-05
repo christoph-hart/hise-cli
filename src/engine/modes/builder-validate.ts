@@ -15,15 +15,28 @@ export interface ValidationResult {
 
 // ── Module name resolution ────────────────────────────────────────
 
-/** Look up a module definition by pretty name or type ID (case-insensitive fallback). */
+/** Lowercase + strip ASCII whitespace. Used for spaceless-ID matches. */
+function compactName(s: string): string {
+	return s.toLowerCase().replace(/\s+/g, "");
+}
+
+/**
+ * Look up a module definition by pretty name or type ID. Tiers:
+ *   1. Exact (prettyName or id)
+ *   2. Case-insensitive
+ *   3. Case-insensitive + whitespace-stripped (matches the spaceless
+ *      CamelCase form users type in HiseScript, e.g. `ParametriqEQ`
+ *      against prettyName `"Parametriq EQ"`).
+ */
 export function findModuleByName(
 	name: string,
 	moduleList: ModuleList,
 ): ModuleDefinition | undefined {
 	const lower = name.toLowerCase();
-	// Exact match first (prettyName → id), then case-insensitive fallback
+	const compact = compactName(name);
 	return moduleList.modules.find((m) => m.prettyName === name || m.id === name)
-		?? moduleList.modules.find((m) => m.prettyName.toLowerCase() === lower || m.id.toLowerCase() === lower);
+		?? moduleList.modules.find((m) => m.prettyName.toLowerCase() === lower || m.id.toLowerCase() === lower)
+		?? moduleList.modules.find((m) => compactName(m.prettyName) === compact || compactName(m.id) === compact);
 }
 
 /**
@@ -154,9 +167,12 @@ function resolveChainConstrainer(
 	}
 
 	// Modulation chains: match by name (gain, pitch, or internal chain names)
+	// or by modulationMode (e.g. GlobalModulatorContainer's "Global Modulators"
+	// chain has modulationMode="gain", but its id doesn't contain "gain").
 	for (const mod of parentModule.modulation) {
 		const modName = mod.id.toLowerCase().replace(/\s+/g, "");
-		if (modName.includes(lower) || lower === `chain${mod.chainIndex}`) {
+		const modMode = mod.modulationMode?.toLowerCase();
+		if (modName.includes(lower) || modMode === lower || lower === `chain${mod.chainIndex}`) {
 			return mod.constrainer;
 		}
 	}

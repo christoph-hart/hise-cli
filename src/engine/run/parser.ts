@@ -5,6 +5,7 @@
 // just line classification.
 
 import type { ParsedScript, ScriptLine } from "./types.js";
+import { tryParseJson, deepEqual } from "./log-compare.js";
 
 /**
  * Parse a raw .hsc script string into a ParsedScript.
@@ -276,7 +277,11 @@ function unquote(s: string): string {
  * Comparison tiers (first match wins):
  * 1. Truthy/falsy coercion: true == 1 == "true" == "1", false == 0 == "false" == "0"
  * 2. Numeric with tolerance (including percentage: 0.25 == "25%")
- * 3. Case-insensitive string equality
+ * 3. JSON-decode tier: when expected parses as a JSON literal, compare the
+ *    decoded value against actual — direct string-equal for decoded strings
+ *    (handles `"a\nb"` vs raw newline `a\nb`), structural deep-equal for
+ *    arrays/objects (handles compact vs pretty-printed JSON).
+ * 4. Case-insensitive string equality
  */
 export function compareValues(
 	actual: string,
@@ -305,6 +310,24 @@ export function compareValues(
 		return Math.abs(actualNum - expectedNum) <= tolerance;
 	}
 
-	// 3. Case-insensitive string equality (strip surrounding quotes from either side)
+	// 3. JSON-decode tier (mirrors compareLogLines / python _try_json_match).
+	const expectedParsed = tryParseJson(expected);
+	if (expectedParsed !== undefined) {
+		// Decoded JSON string: compare decoded form against raw actual. This
+		// fixes `"a\nb"` (escaped) vs raw newline `a\nb` mismatches.
+		if (typeof expectedParsed === "string" && actual === expectedParsed) {
+			return true;
+		}
+		// Array/object: parse actual too and structurally compare. Fixes
+		// compact `[0, 2]` vs pretty-printed `[\n  0,\n  2\n]` mismatches.
+		if (typeof expectedParsed === "object" && expectedParsed !== null) {
+			const actualParsed = tryParseJson(actual);
+			if (actualParsed !== undefined && deepEqual(actualParsed, expectedParsed)) {
+				return true;
+			}
+		}
+	}
+
+	// 4. Case-insensitive string equality (strip surrounding quotes from either side)
 	return unquote(actual).toLowerCase() === unquote(expected).toLowerCase();
 }

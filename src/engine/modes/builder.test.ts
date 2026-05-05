@@ -115,6 +115,22 @@ describe("builder parser — add commands", () => {
 		expect(cmd.chain).toBe("gain");
 	});
 
+	it("parses add with `to` before `as` ordering", () => {
+		const cmd = parseOk('add Velocity to MySynth.gain as "WatchTable"') as AddCommand;
+		expect(cmd.moduleType).toBe("Velocity");
+		expect(cmd.alias).toBe("WatchTable");
+		expect(cmd.parent).toBe("MySynth");
+		expect(cmd.chain).toBe("gain");
+	});
+
+	it("parses add with `to` before `as` and multi-word parent", () => {
+		const cmd = parseOk('add AHDSR to Master Chain.gain as "MyEnv"') as AddCommand;
+		expect(cmd.moduleType).toBe("AHDSR");
+		expect(cmd.alias).toBe("MyEnv");
+		expect(cmd.parent).toBe("Master Chain");
+		expect(cmd.chain).toBe("gain");
+	});
+
 	it("rejects malformed add (no type)", () => {
 		const result = parseSingleCommand("add");
 		expect("error" in result).toBe(true);
@@ -460,6 +476,22 @@ describe("validateAddCommand", () => {
 			);
 			expect(result.valid).toBe(true);
 		}
+	});
+
+	it("accepts spaceless CamelCase form of pretty name (HiseScript identifier style)", () => {
+		const result = validateAddCommand(
+			{ type: "add", moduleType: "ParametriqEQ" },
+			moduleList,
+		);
+		expect(result.valid).toBe(true);
+	});
+
+	it("accepts spaceless form for multi-word pretty names", () => {
+		const result = validateAddCommand(
+			{ type: "add", moduleType: "AHDSREnvelope" },
+			moduleList,
+		);
+		expect(result.valid).toBe(true);
 	});
 
 	it("rejects unknown module type", () => {
@@ -1033,6 +1065,7 @@ describe("resolveChainIndex", () => {
 	const synthChainNode: TreeNode = { type: "SynthChain", label: "Master Chain", nodeKind: "module" };
 	const waveSynthNode: TreeNode = { type: "WaveSynth", label: "Waveform Generator", nodeKind: "module" };
 	const envelopeNode: TreeNode = { type: "SimpleEnvelope", label: "DefaultEnvelope", nodeKind: "module" };
+	const gmcNode: TreeNode = { type: "GlobalModulatorContainer", label: "GMC", nodeKind: "module" };
 
 	it("resolves cross-cutting names without a parent", () => {
 		expect(resolveChainIndex("children", undefined, null, moduleList)).toBe(-1);
@@ -1052,6 +1085,13 @@ describe("resolveChainIndex", () => {
 		expect(resolveChainIndex("mix modulation", undefined, waveSynthNode, moduleList)).toBe(4);
 		expect(resolveChainIndex("Osc2 Pitch", undefined, waveSynthNode, moduleList)).toBe(5);
 		expect(resolveChainIndex("osc2pitchmodulation", undefined, waveSynthNode, moduleList)).toBe(5);
+	});
+
+	it("resolves modulation chains by modulationMode (GlobalModulatorContainer)", () => {
+		// GMC's chain id "Global Modulators" doesn't contain "gain", but
+		// modulationMode="gain" must still resolve. Same for pitch chain.
+		expect(resolveChainIndex("gain", undefined, gmcNode, moduleList)).toBe(1);
+		expect(resolveChainIndex("pitch", undefined, gmcNode, moduleList)).toBe(2);
 	});
 
 	it("resolves internal modulator chains (Modulator parent)", () => {

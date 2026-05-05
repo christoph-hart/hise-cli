@@ -17,6 +17,34 @@ export function normalizeLogLine(line: string): string {
 }
 
 /**
+ * Prefix patterns for system diagnostics emitted by the HISE engine itself
+ * (compile/recompile chatter, Console.testCallback markers — not user
+ * `Console.print` output). Dropped from the actual buffer before comparison
+ * so /expect-logs only matches user-emitted lines.
+ *
+ * Prefix-match (not equals): real lines often carry suffixes like
+ *   "BEGIN_CALLBACK_TEST MyImage.setKeyPressCallback"
+ *   "CALLBACK_ARGS: >{...}"
+ * Mirrors python validator: `line.lstrip().startswith(prefix)`.
+ */
+export const LOG_NOISE_PREFIXES: readonly string[] = [
+	"Skip token rebuild during recompilation",
+	"warning: this should be only used",
+	"BEGIN_CALLBACK_TEST",
+	"END_CALLBACK_TEST",
+	"CALLBACK_ARGS:",
+];
+
+/** True iff the (post-normalization) line matches a known engine diagnostic. */
+export function isLogNoiseLine(line: string): boolean {
+	const head = line.trimStart();
+	for (const p of LOG_NOISE_PREFIXES) {
+		if (head.startsWith(p)) return true;
+	}
+	return false;
+}
+
+/**
  * Strip noise from a HISE error message:
  * - leading `Line N, column M: ` location prefix
  * - REPL callstack lines (`eval()...`, `at ...`)
@@ -31,7 +59,7 @@ export function normalizeErrorMessage(msg: string): string {
 }
 
 /** Deep-equal for JSON-comparable values. */
-function deepEqual(a: unknown, b: unknown): boolean {
+export function deepEqual(a: unknown, b: unknown): boolean {
 	if (a === b) return true;
 	if (typeof a !== typeof b) return false;
 	if (a === null || b === null) return false;
@@ -60,7 +88,7 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /** Try to JSON-parse a value. Returns the parsed result, or undefined on error. */
-function tryParseJson(s: string): unknown {
+export function tryParseJson(s: string): unknown {
 	try {
 		return JSON.parse(s);
 	} catch {
@@ -95,7 +123,7 @@ export function compareLogLines(
 	expected: unknown[],
 	tolerance: number,
 ): LogCompareResult {
-	const normActual = actual.map(normalizeLogLine);
+	const normActual = actual.map(normalizeLogLine).filter((l) => !isLogNoiseLine(l));
 	if (normActual.length !== expected.length) {
 		return {
 			passed: false,
@@ -135,7 +163,14 @@ function matchLogLine(actual: string, expected: unknown, tolerance: number): boo
 
 	// Tier 3: JSON-structural deep-equal.
 	const aParsed = tryParseJson(actual);
-	if (aParsed !== undefined && deepEqual(aParsed, expected)) return true;
+	if (aParsed !== undefined) {
+		if (deepEqual(aParsed, expected)) return true;
+		// Expected may itself be a JSON-string ("[60, 48, 72]") — parse it too.
+		if (typeof expected === "string") {
+			const eParsed = tryParseJson(expected);
+			if (eParsed !== undefined && deepEqual(aParsed, eParsed)) return true;
+		}
+	}
 
 	// Fallback: stringify expected and compare exactly.
 	if (typeof expected !== "string" && actual === JSON.stringify(expected)) return true;

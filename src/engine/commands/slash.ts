@@ -573,11 +573,11 @@ async function handleExpect(
 		readBinaryFile: session.readBinaryFile,
 		writeTextFile: session.writeTextFile,
 		listDirectory: session.listDirectory,
-		lastReplLogs: [] as string[],
+		lastLogs: [] as string[],
 	};
 	const result = await mode.parse(parsed.command, sessionContext);
-	// Bubble lastReplLogs up so script-mode REPL responses surface in the logs verb.
-	(session as { lastReplLogs?: string[] }).lastReplLogs = sessionContext.lastReplLogs;
+	// Bubble lastLogs up so script-mode REPL responses surface in the logs verb.
+	(session as { lastLogs?: string[] }).lastLogs = sessionContext.lastLogs;
 
 	// Handle "matches" comparison (file-based)
 	if (parsed.kind === "match") {
@@ -604,7 +604,7 @@ async function handleExpect(
 
 	// "logs" comparison \u2014 pull captured REPL logs.
 	if (parsed.kind === "logs") {
-		const actualLines = sessionContext.lastReplLogs ?? [];
+		const actualLines = sessionContext.lastLogs ?? [];
 		const cmp = compareLogLines(actualLines, parsed.expectedLines, parsed.tolerance);
 		if (cmp.passed) {
 			return textResult(`\u2713 ${parsed.command} logs ${JSON.stringify(parsed.expectedLines)}`);
@@ -748,44 +748,48 @@ export async function runExpectLogs(
 	const scriptMode = session.getOrCreateMode("script");
 	const procId = scriptMode instanceof ScriptMode ? scriptMode.processorId : "Interface";
 
-	if (!session.isCapturing?.(procId)) {
-		return {
-			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
-			command: "", error: "/expect-logs requires an open /capture buffer.",
-		};
+	let label = "";
+
+	// If a /capture buffer is open, flush it now: submit IIFE, populate lastLogs.
+	// If not, we read whatever the prior command (e.g. /compile, REPL) wrote.
+	if (session.isCapturing?.(procId)) {
+		const lines = session.getCaptureBuffer?.(procId) ?? [];
+		label = lines.join("; ");
+		const response = await submitReplBuffer(session, procId, lines);
+		session.clearCapture?.(procId);
+
+		if (!response) {
+			return {
+				passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+				command: label, error: "No HISE connection.",
+			};
+		}
+		if (isErrorResponse(response)) {
+			return {
+				passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+				command: label, error: response.message,
+			};
+		}
+		if (!isEnvelopeResponse(response)) {
+			return {
+				passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+				command: label, error: "Unexpected response from HISE",
+			};
+		}
+		if (response.errors.length > 0) {
+			return {
+				passed: false, expectedLines, actualLines: response.logs, abortOnFail, tolerance,
+				command: label,
+				error: response.errors.map((e) => e.errorMessage).join("\n"),
+			};
+		}
 	}
 
-	const lines = session.getCaptureBuffer?.(procId) ?? [];
-	const response = await submitReplBuffer(session, procId, lines);
-	session.clearCapture?.(procId);
+	const actualLines = session.lastLogs ?? [];
+	// Clear after assert so stale logs don't bleed into the next /expect-logs.
+	session.lastLogs = [];
 
-	if (!response) {
-		return {
-			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
-			command: lines.join("; "), error: "No HISE connection.",
-		};
-	}
-	if (isErrorResponse(response)) {
-		return {
-			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
-			command: lines.join("; "), error: response.message,
-		};
-	}
-	if (!isEnvelopeResponse(response)) {
-		return {
-			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
-			command: lines.join("; "), error: "Unexpected response from HISE",
-		};
-	}
-	if (response.errors.length > 0) {
-		return {
-			passed: false, expectedLines, actualLines: response.logs, abortOnFail, tolerance,
-			command: lines.join("; "),
-			error: response.errors.map((e) => e.errorMessage).join("\n"),
-		};
-	}
-
-	const cmp = compareLogLines(response.logs, expectedLines, tolerance);
+	const cmp = compareLogLines(actualLines, expectedLines, tolerance);
 	const failure = !cmp.passed && cmp.diff
 		? (cmp.diff.index === -1
 			? `length mismatch: expected ${cmp.diff.expected}, got ${cmp.diff.actual}`
@@ -795,10 +799,10 @@ export async function runExpectLogs(
 	return {
 		passed: cmp.passed,
 		expectedLines,
-		actualLines: response.logs,
+		actualLines,
 		abortOnFail,
 		tolerance,
-		command: lines.join("; "),
+		command: label,
 		failure,
 	};
 }
@@ -952,6 +956,11 @@ async function handleCompileCallbacks(
 
 	const outcome = await compileCallbacks(session);
 	if (typeof outcome === "string") return errorResult(outcome);
+
+	// Populate the unified log buffer so /expect-logs can assert against
+	// /compile output (parallel to /capture flush, REPL response). Done
+	// regardless of compile success so failure-path logs are also visible.
+	session.lastLogs = [...outcome.logs];
 
 	if (!outcome.ok) {
 		const logs = outcome.logs.length > 0 ? `\n${outcome.logs.join("\n")}` : "";

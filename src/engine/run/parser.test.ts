@@ -426,4 +426,25 @@ describe("compareValues", () => {
 	it("strips surrounding single quotes for string compare", () => {
 		expect(compareValues("foo", "'foo'", 0.01)).toBe(true);
 	});
+
+	// ── JSON-decode tier (Bug: /expect ... is <quoted-json> mismatch) ──
+	it("matches raw-newline actual vs JSON-escaped \\n in expected", () => {
+		const actual = "Option A\nOption B\nOption C";
+		const expected = '"Option A\\nOption B\\nOption C"';
+		expect(compareValues(actual, expected, 0.01)).toBe(true);
+	});
+
+	it("matches pretty-printed array actual vs compact array expected", () => {
+		const actual = "[\n  0,\n  2\n]";
+		expect(compareValues(actual, "[0, 2]", 0.01)).toBe(true);
+	});
+
+	it("matches pretty-printed object actual vs compact object expected", () => {
+		const actual = '{\n  "a": 1,\n  "b": 2\n}';
+		expect(compareValues(actual, '{"b":2,"a":1}', 0.01)).toBe(true);
+	});
+
+	it("rejects JSON-decoded mismatch", () => {
+		expect(compareValues("a\nb", '"x\\ny"', 0.01)).toBe(false);
+	});
 });
