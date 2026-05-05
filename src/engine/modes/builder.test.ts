@@ -8,7 +8,9 @@ import {
 	validateAddCommand,
 	validateSetCommand,
 	collectModuleIds,
+	resolveChainIndex,
 } from "./builder.js";
+import type { TreeNode } from "../result.js";
 import type {
 	AddCommand,
 	CloneCommand,
@@ -1022,5 +1024,47 @@ describe("BuilderMode instance completion", () => {
 		// No tree set - instance completion returns empty
 		const result = mode.complete!("remove ", 7);
 		expect(result.items).toHaveLength(0);
+	});
+});
+
+// ── resolveChainIndex — modulation chain lookup ─────────────────────
+
+describe("resolveChainIndex", () => {
+	const synthChainNode: TreeNode = { type: "SynthChain", label: "Master Chain", nodeKind: "module" };
+	const waveSynthNode: TreeNode = { type: "WaveSynth", label: "Waveform Generator", nodeKind: "module" };
+	const envelopeNode: TreeNode = { type: "SimpleEnvelope", label: "DefaultEnvelope", nodeKind: "module" };
+
+	it("resolves cross-cutting names without a parent", () => {
+		expect(resolveChainIndex("children", undefined, null, moduleList)).toBe(-1);
+		expect(resolveChainIndex("midi", undefined, null, moduleList)).toBe(0);
+		expect(resolveChainIndex("fx", undefined, null, moduleList)).toBe(3);
+	});
+
+	it("resolves standard modulation chains from parent definition", () => {
+		expect(resolveChainIndex("gain", undefined, synthChainNode, moduleList)).toBe(1);
+		expect(resolveChainIndex("pitch", undefined, synthChainNode, moduleList)).toBe(2);
+		expect(resolveChainIndex("Gain Modulation", undefined, synthChainNode, moduleList)).toBe(1);
+	});
+
+	it("resolves non-standard modulation chains by name", () => {
+		// WaveSynth: Mix=4, Osc2 Pitch=5 (non-sequential, after FX=3)
+		expect(resolveChainIndex("Mix", undefined, waveSynthNode, moduleList)).toBe(4);
+		expect(resolveChainIndex("mix modulation", undefined, waveSynthNode, moduleList)).toBe(4);
+		expect(resolveChainIndex("Osc2 Pitch", undefined, waveSynthNode, moduleList)).toBe(5);
+		expect(resolveChainIndex("osc2pitchmodulation", undefined, waveSynthNode, moduleList)).toBe(5);
+	});
+
+	it("resolves internal modulator chains (Modulator parent)", () => {
+		// SimpleEnvelope: AttackTimeModulation=0
+		expect(resolveChainIndex("AttackTime", undefined, envelopeNode, moduleList)).toBe(0);
+		expect(resolveChainIndex("AttackTimeModulation", undefined, envelopeNode, moduleList)).toBe(0);
+	});
+
+	it("falls back to numeric chain index", () => {
+		expect(resolveChainIndex("4", undefined, waveSynthNode, moduleList)).toBe(4);
+	});
+
+	it("returns -1 for unknown chain name", () => {
+		expect(resolveChainIndex("nonexistent", undefined, waveSynthNode, moduleList)).toBe(-1);
 	});
 });

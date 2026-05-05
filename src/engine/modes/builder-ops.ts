@@ -52,23 +52,17 @@ export function resolveChainIndex(
 	if (lower === "midi" || lower === "midiprocessorchain") return 0;
 	if (lower === "fx" || lower === "fxchain") return 3;
 
-	// Try well-known modulation chain names (short and full labels)
-	if (lower === "gain" || lower === "gainmodulation") return 1;
-	if (lower === "pitch" || lower === "pitchmodulation") return 2;
-
-	// Look up named modulation chains from the parent tree node
-	if (parentNode?.children) {
-		for (const child of parentNode.children) {
-			if (child.nodeKind === "chain" && child.label) {
-				const chainLabel = child.label.toLowerCase().replace(/\s+/g, "");
-				if (chainLabel.includes(lower)) {
-					// Chains in our normalized tree don't carry chainIndex,
-					// but modulation chains follow a known order: Gain=1, Pitch=2, etc.
-					// Fall back to checking if the label matches standard patterns
-					if (chainLabel.includes("gain")) return 1;
-					if (chainLabel.includes("pitch")) return 2;
-				}
-			}
+	// Look up modulation chains from the parent module's definition.
+	// Source of truth: ModuleDefinition.modulation[] carries the real chainIndex,
+	// which is non-sequential for parents like WaveSynth (Mix=4, Osc2 Pitch=5).
+	const parentDef = parentNode?.type && moduleList
+		? moduleList.modules.find((m) => m.id === parentNode.type)
+		: null;
+	if (parentDef) {
+		for (const mod of parentDef.modulation) {
+			const modName = mod.id.toLowerCase().replace(/\s+/g, "");
+			const modShort = modName.replace(/modulation$/, "");
+			if (modName === lower || modShort === lower) return mod.chainIndex;
 		}
 	}
 
