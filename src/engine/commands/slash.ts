@@ -42,7 +42,7 @@ async function handleHelp(
 	const commands = session.allCommands();
 	const help = generateHelp(modeId, commands);
 
-	const result = textResult(help.content);
+	const result = markdownResult(help.content);
 	result.accent = modeId === "root" ? "#90FFB1" : MODE_ACCENTS[modeId];
 	return result;
 }

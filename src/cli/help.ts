@@ -11,26 +11,30 @@ export function renderCliHelp(_commands: CommandEntry[], scope?: string): string
 
 // ── Global help (overview only) ─────────────────────────────────────
 
-const GLOBAL_HELP = `hise-cli — automation frontend for HISE audio plugin framework
+const GLOBAL_HELP = `hise-cli — automation frontend for HISE audio plugin framework (connects to HISE at http://127.0.0.1:1900).
 
 USAGE
   hise-cli                                  Open the interactive TUI
-  hise-cli repl [--mock] [--show-keys] [--no-animation]   Open TUI with options
-  hise-cli -<mode> "<command>"              One-shot mode command (JSON output)
-  hise-cli --run <file.hsc> [--mock] [--dry-run] [--verbosity=<level>]  Run a .hsc script file
-  hise-cli --run --inline "<script>"             Run an inline script
-  hise-cli --run - < script.hsc                  Run script from stdin
-  hise-cli -wizard <subcommand>             Wizard operations (JSON output)
-  hise-cli diagnose <filepath>              Diagnose HiseScript file (JSON output)
+  hise-cli -<mode> "<command>"              One-shot mode command
+  hise-cli --run <file.hsc> [--dry-run] [--verbosity=<level>]   Run a .hsc script file
+  hise-cli --run --inline "<script>"        Run an inline script
+  hise-cli --run - < script.hsc             Run script from stdin
+  hise-cli -wizard <subcommand>             Wizard operations
+  hise-cli diagnose <filepath>              Diagnose HiseScript file
   hise-cli update [--check]                 Self-update to latest GitHub release
-  hise-cli -version                         Print the CLI version (JSON)
-  hise-cli -status                          Print CLI + HISE status (JSON)
+  hise-cli -version                         Print the CLI version
+  hise-cli -status                          Print CLI + HISE status
   hise-cli --help                           Show this help
   hise-cli -<mode> --help                   Show mode-specific help
 
 OUTPUT FORMAT
-  All one-shot commands emit JSON to stdout:
-    { "ok": true|false, "result": ..., "logs": [...], "errors": [...] }
+  Default: pretty text. Markdown rendered as ANSI on a TTY, plain text
+  when piped. ANSI is stripped on non-TTY output.
+
+  --json   Emit structured JSON instead:
+             { "ok": true|false, "result": ..., "logs": [...], "errors": [...] }
+           Use this in scripts that parse output programmatically.
+
   Exit code: 0 on success, 1 on error.
 
 MODES
@@ -49,18 +53,8 @@ MODES
 
 OPTIONS
   --help             Show this help (or mode help with -<mode> --help)
-  --mock             Use mock HISE connection (for testing without HISE)
-  --pretty           Render output as ANSI/markdown text (default: JSON)
-  --show-keys        Show key press badge in the top bar (for screencasts)
-  --target:<path>    Set context path for mode commands
-
-HISE CONNECTION
-  Connects to HISE at http://127.0.0.1:1900 (REST API must be enabled).
-  Use --mock to test without a running HISE instance.
-
-ENVIRONMENT VARIABLES
-  FORCE_COLOR=0|1|2|3      Override terminal color detection
-  NO_COLOR=1               Disable all color output`;
+  --json             Emit structured JSON output instead of pretty text
+  --target:<path>    Set context path for mode commands`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────
 
@@ -177,11 +171,6 @@ NAMING
   add SimpleGain as "MyGain" to Master Chain
   Without "as", the module gets the type ID as its instance name.
 
-MOCK MODE
-  --mock simulates a full module tree (SynthGroup with 23 modules).
-  add/remove/set/clone modify the simulated tree and return diffs.
-  Use "show tree" with --mock to see the simulated hierarchy.
-
 UNDO
   All tree mutations (add, remove, set, clone, rename, bypass) are
   undoable via the undo mode. See: hise-cli -undo --help
@@ -195,7 +184,7 @@ RESPONSE FORMAT
 ERROR HANDLING
   Invalid type names, nonexistent targets, and chain constraint violations
   return JSON with ok:false and an error message.
-  If HISE is not running (and --mock is not set), returns a connection error.
+  If HISE is not running, returns a connection error.
 
 MODULE TYPE IDS
   The add command uses type IDs as returned by "show types". IDs are
@@ -560,7 +549,6 @@ SYNTAX
   hise-cli --run <file.hsc>                      Execute a .hsc script file
   hise-cli --run --inline "<script>"             Execute an inline script string
   hise-cli --run - < script.hsc                  Execute script from stdin
-  hise-cli --run <file.hsc> --mock               Execute with mock HISE connection
   hise-cli --run <file.hsc> --dry-run            Validate only (no execution)
   hise-cli --run <file.hsc> --verbosity=<level>  Control output detail (default: summary)
 
@@ -640,14 +628,15 @@ EXAMPLE SCRIPT (test.hsc)
   Console.print(Message.getNoteNumber());
   /compile
 
-OUTPUT FORMAT (JSON)
-  { "ok": true|false, "value": {
-    "linesExecuted": 8,
-    "expects": [
-      { "line": 7, "command": "...", "expected": "...", "actual": "...", "passed": true }
-    ],
-    "error": null
-  }}
+OUTPUT FORMAT
+  Default: human-readable run report. Use --json for structured payload:
+    { "ok": true|false, "value": {
+      "linesExecuted": 8,
+      "expects": [
+        { "line": 7, "command": "...", "expected": "...", "actual": "...", "passed": true }
+      ],
+      "error": null
+    }}
 
 SHEBANG (Unix)
   Make .hsc files directly executable:
@@ -662,7 +651,6 @@ EXAMPLES
   hise-cli --run test.hsc --verbose              # full per-command logs
   hise-cli --run test.hsc --quiet                # single pass/fail line
   hise-cli --run Examples/sn.hsc --verbosity=summary
-  hise-cli --run test.hsc --mock
   hise-cli --run test.hsc --dry-run`,
 
 	diagnose: `hise-cli diagnose — HiseScript shadow parser diagnostics
@@ -843,7 +831,8 @@ SYNTAX
   hise-cli -api "<Class>"
   hise-cli -api "<Class>.<method>()"
 
-Renders HiseScript API docs as markdown (use --pretty to render ANSI).
+Renders HiseScript API docs as markdown. ANSI on a TTY, raw markdown
+when piped. Use --json for the structured payload.
 Static — no HISE connection required.
 
 QUERIES
@@ -855,11 +844,11 @@ EXAMPLES
   hise-cli -api "Console"
   hise-cli -api "Console.print()"
   hise-cli -api "Engine.getSampleRate"
-  hise-cli -api "Console" --pretty
+  hise-cli -api "Console" --json
 
 OUTPUT
-  Markdown is returned in the JSON "result.content" field. Use --pretty to
-  render ANSI directly to stdout (syntax-highlighted code blocks).`,
+  Default: rendered markdown text. With --json, markdown source is
+  returned in the "result.content" field of the structured payload.`,
 
 	assets: `hise-cli -assets — install, manage, and publish asset packages
 

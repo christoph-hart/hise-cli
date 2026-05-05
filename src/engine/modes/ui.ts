@@ -349,6 +349,9 @@ export class UiMode implements Mode {
 	private getPropertyCompletionItems(componentId: string): CompletionItem[] {
 		const items: CompletionItem[] = [];
 
+		// Read-only meta property exposed by /api/get_component_properties
+		items.push({ label: "type", detail: "read-only" });
+
 		// Common properties shared by all ScriptComponent subclasses
 		for (const p of COMMON_COMPONENT_PROPERTIES) {
 			items.push({ label: p, detail: "common" });
@@ -773,6 +776,15 @@ export class UiMode implements Mode {
 			const errors = (data as { errors?: Array<{ errorMessage: string }> }).errors;
 			const msg = errors?.[0]?.errorMessage ?? `Could not fetch properties for "${cmd.target}"`;
 			return errorResult(msg);
+		}
+
+		// Special case: .type is exposed as a top-level field on the response,
+		// not inside the properties array.
+		if (cmd.prop === "type") {
+			if (typeof data.type !== "string") {
+				return errorResult(`Component "${cmd.target}" has no type`);
+			}
+			return textResult(data.type);
 		}
 
 		const properties = data.properties as Array<{ id: string; value: unknown }> | undefined;

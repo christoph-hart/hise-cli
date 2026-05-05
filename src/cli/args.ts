@@ -17,7 +17,7 @@ export type CliParseResult =
 		useMock: boolean;
 	};
 
-const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty"]);
+const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json"]);
 
 const VALID_VERBOSITIES = new Set(["verbose", "summary", "quiet"]);
 
@@ -198,7 +198,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 		return { kind: "error", message: `${commandFlag} does not support --target` };
 	}
 
-	const tailParts = args.filter((arg) => arg !== commandFlag && arg !== targetArg && arg !== "--mock" && arg !== "--pretty");
+	const tailParts = args.filter((arg) => arg !== commandFlag && arg !== targetArg && arg !== "--mock" && arg !== "--pretty" && arg !== "--json");
 	// Do NOT re-add quotes around multi-word args. The mode parsers treat a
 	// quoted string as a distinct QuotedString token, so wrapping the user's
 	// input in quotes turns a valid verb like `show tree` into an unparseable

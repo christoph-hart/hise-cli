@@ -109,12 +109,12 @@ async function main(): Promise<void> {
 	}
 
 	if (cliResult.kind === "json") {
-		if (process.argv.includes("--pretty")) {
+		if (process.argv.includes("--json")) {
+			console.log(JSON.stringify(cliResult.payload));
+		} else {
 			const { renderPretty } = await import("./cli/pretty.js");
 			const text = renderPretty(cliResult.payload);
 			if (text) console.log(text);
-		} else {
-			console.log(JSON.stringify(cliResult.payload));
 		}
 		process.exitCode = cliResult.payload.ok ? 0 : 1;
 		return;

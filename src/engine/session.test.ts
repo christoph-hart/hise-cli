@@ -114,7 +114,7 @@ describe("Session input dispatch", () => {
 	it("dispatches slash commands to registry", async () => {
 		const session = createSession();
 		const result = await session.handleInput("/help");
-		expect(result.type).toBe("text");
+		expect(result.type).toBe("markdown");
 	});
 
 	it("dispatches plain input to current mode", async () => {
