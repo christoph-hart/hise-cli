@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { parseScript, parseExpect, parseWait, compareValues } from "./parser.js";
+import {
+	parseScript,
+	parseExpect,
+	parseWait,
+	compareValues,
+	findKeywordOutsideQuotes,
+	stripTrailingKeyword,
+} from "./parser.js";
 
 // ── parseScript ─────────────────────────────────────────────────────
 
@@ -146,6 +153,146 @@ describe("parseExpect", () => {
 		const result = parseExpect("getValue() is 0.5 within abc");
 		expect(typeof result).toBe("string");
 	});
+
+	// ── Quote-aware verb selection (regression for greedy " is " split) ──
+	it("ignores 'is' inside a quoted expected value", () => {
+		const result = parseExpect('foo() is "ERROR: This expression is not a function!"');
+		expect(result).toMatchObject({
+			kind: "is",
+			command: "foo()",
+			expected: '"ERROR: This expression is not a function!"',
+		});
+	});
+
+	// ── logs verb ──────────────────────────────────────────────────────
+	it("parses logs verb with array RHS", () => {
+		const result = parseExpect('Console.print("a") logs ["a", "b"]');
+		expect(result).toMatchObject({
+			kind: "logs",
+			command: 'Console.print("a")',
+			expectedLines: ["a", "b"],
+		});
+	});
+
+	it("wraps scalar number RHS for logs verb", () => {
+		const result = parseExpect("Console.print(1234) logs 1234");
+		expect(result).toMatchObject({
+			kind: "logs",
+			expectedLines: [1234],
+		});
+	});
+
+	it("wraps scalar string RHS for logs verb", () => {
+		const result = parseExpect('Console.print("hi") logs "hi"');
+		expect(result).toMatchObject({
+			kind: "logs",
+			expectedLines: ["hi"],
+		});
+	});
+
+	it("logs verb honors within tolerance", () => {
+		const result = parseExpect("Console.print(1.5) logs 1.5 within 0.001");
+		expect(result).toMatchObject({
+			kind: "logs",
+			tolerance: 0.001,
+		});
+	});
+
+	it("logs verb honors or abort", () => {
+		const result = parseExpect("foo() logs [1] or abort");
+		expect(result).toMatchObject({ kind: "logs", abortOnFail: true });
+	});
+
+	it("returns error for invalid JSON in logs RHS", () => {
+		const result = parseExpect("foo() logs not-json");
+		expect(typeof result).toBe("string");
+	});
+
+	// ── throws verb ────────────────────────────────────────────────────
+	it("parses throws verb with quoted pattern", () => {
+		const result = parseExpect('undefinedFn() throws "not a function"');
+		expect(result).toMatchObject({
+			kind: "throws",
+			command: "undefinedFn()",
+			pattern: "not a function",
+		});
+	});
+
+	it("parses throws verb with bare pattern", () => {
+		const result = parseExpect("undefinedFn() throws boom");
+		expect(result).toMatchObject({
+			kind: "throws",
+			pattern: "boom",
+		});
+	});
+
+	it("throws verb honors or abort", () => {
+		const result = parseExpect('foo() throws "x" or abort');
+		expect(result).toMatchObject({ kind: "throws", abortOnFail: true });
+	});
+
+	// ── contains verb ──────────────────────────────────────────────────
+	it("parses contains verb with quoted pattern", () => {
+		const result = parseExpect('status contains "HISE online"');
+		expect(result).toMatchObject({
+			kind: "contains",
+			command: "status",
+			pattern: "HISE online",
+		});
+	});
+
+	it("parses contains verb with bare pattern", () => {
+		const result = parseExpect("status contains online");
+		expect(result).toMatchObject({
+			kind: "contains",
+			pattern: "online",
+		});
+	});
+
+	it("contains verb honors or abort", () => {
+		const result = parseExpect('foo() contains "x" or abort');
+		expect(result).toMatchObject({ kind: "contains", abortOnFail: true });
+	});
+});
+
+// ── Quote-aware helpers ────────────────────────────────────────────
+
+describe("findKeywordOutsideQuotes", () => {
+	it("finds keyword in unquoted region", () => {
+		expect(findKeywordOutsideQuotes("foo is bar", "is")).toBe(3);
+	});
+
+	it("ignores keyword inside double quotes", () => {
+		expect(findKeywordOutsideQuotes('foo "x is y" bar', "is")).toBe(-1);
+	});
+
+	it("returns rightmost match", () => {
+		expect(findKeywordOutsideQuotes("a is b is c", "is")).toBe(6);
+	});
+
+	it("ignores match inside single quotes", () => {
+		expect(findKeywordOutsideQuotes("foo 'x is y'", "is")).toBe(-1);
+	});
+});
+
+describe("stripTrailingKeyword", () => {
+	it("strips ' or abort' suffix", () => {
+		const r = stripTrailingKeyword("foo or abort", "or abort");
+		expect(r.matched).toBe(true);
+		expect(r.remaining).toBe("foo");
+	});
+
+	it("does not strip when keyword is inside quotes", () => {
+		const r = stripTrailingKeyword('foo "or abort"', "or abort");
+		expect(r.matched).toBe(false);
+	});
+
+	it("captures tail value when captureTail=true", () => {
+		const r = stripTrailingKeyword("foo within 0.001", "within", true);
+		expect(r.matched).toBe(true);
+		expect(r.tail).toBe("0.001");
+		expect(r.remaining).toBe("foo");
+	});
 });
 
 // ── parseWait ───────────────────────────────────────────────────────
@@ -267,5 +414,16 @@ describe("compareValues", () => {
 	it("compares strings case-insensitively", () => {
 		expect(compareValues("Hello", "hello", 0.01)).toBe(true);
 		expect(compareValues("Funky", "FUNKY", 0.01)).toBe(true);
+	});
+
+	// ── Quoted string equality ─────────────────────────────────
+	it("strips surrounding double quotes for string compare", () => {
+		expect(compareValues("GainKnob", '"GainKnob"', 0.01)).toBe(true);
+		expect(compareValues('"GainKnob"', "GainKnob", 0.01)).toBe(true);
+		expect(compareValues('"GainKnob"', '"GainKnob"', 0.01)).toBe(true);
+	});
+
+	it("strips surrounding single quotes for string compare", () => {
+		expect(compareValues("foo", "'foo'", 0.01)).toBe(true);
 	});
 });

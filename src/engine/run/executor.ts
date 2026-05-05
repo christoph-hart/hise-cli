@@ -12,9 +12,11 @@ import type {
 	ScriptProgressEvent,
 } from "./types.js";
 import { parseExpect, parseWait, compareValues } from "./parser.js";
+import { compareLogLines, normalizeErrorMessage } from "./log-compare.js";
 import { optimizeScript } from "./optimizer.js";
 import { buildModeMap } from "./mode-map.js";
 import { isEnvelopeResponse, isErrorResponse } from "../hise.js";
+import { ScriptMode } from "../modes/script.js";
 import type { ParseError } from "./types.js";
 
 /**
@@ -53,6 +55,9 @@ export async function executeScript(
 
 	try {
 		for (const line of script.lines) {
+			// Active processor for /capture buffer routing.
+			const activeProcessor = activeScriptProcessor(session);
+
 			// Handle special /expect and /wait commands directly
 			if (line.kind === "slash") {
 				const cmd = extractSlashCommand(line.content);
@@ -76,16 +81,12 @@ export async function executeScript(
 					}
 
 					// "matches" comparison not supported in batch executor
-					if ("kind" in parsed && parsed.kind === "match") {
+					if (parsed.kind === "match") {
 						abortError = { line: line.lineNumber, message: "/expect matches is only supported in interactive mode" };
 						break;
 					}
 
-					const expectResult = await executeExpect(
-						parsed as import("./types.js").ParsedExpect,
-						line,
-						session,
-					);
+					const expectResult = await executeExpect(parsed, line, session);
 					expects.push(expectResult);
 					onProgress?.({ type: "expect", result: expectResult });
 					linesExecuted++;
@@ -93,13 +94,91 @@ export async function executeScript(
 					if (!expectResult.passed && parsed.abortOnFail) {
 						abortError = {
 							line: line.lineNumber,
-							message: `Assertion failed (abort): expected ${parsed.expected}, got ${expectResult.actual}`,
+							message: `Assertion failed (abort): expected ${expectResult.expected}, got ${expectResult.actual}`,
 						};
 						onProgress?.({ type: "error", line: line.lineNumber, message: abortError.message });
 						break;
 					}
 					continue;
 				}
+
+				if (cmd.name === "capture") {
+					if (!activeProcessor) {
+						abortError = { line: line.lineNumber, message: "/capture requires script mode" };
+						break;
+					}
+					session.startCapture?.(activeProcessor);
+					linesExecuted++;
+					continue;
+				}
+
+				if (cmd.name === "expect-logs") {
+					const { runExpectLogs } = await import("../commands/slash.js");
+					const outcome = await runExpectLogs(cmd.args, session);
+					const expectResult: ExpectResult = {
+						line: line.lineNumber,
+						command: outcome.command || "/expect-logs",
+						expected: JSON.stringify(outcome.expectedLines),
+						actual: JSON.stringify(outcome.actualLines),
+						actualLines: outcome.actualLines,
+						passed: outcome.passed,
+						tolerance: outcome.tolerance,
+						verb: "logs",
+					};
+					expects.push(expectResult);
+					onProgress?.({ type: "expect", result: expectResult });
+					linesExecuted++;
+
+					if (outcome.error) {
+						abortError = { line: line.lineNumber, message: outcome.error };
+						onProgress?.({ type: "error", line: line.lineNumber, message: outcome.error });
+						break;
+					}
+					if (!outcome.passed && outcome.abortOnFail) {
+						const msg = `Assertion failed (abort): ${outcome.failure ?? "logs mismatch"}`;
+						abortError = { line: line.lineNumber, message: msg };
+						onProgress?.({ type: "error", line: line.lineNumber, message: msg });
+						break;
+					}
+					continue;
+				}
+
+				if (cmd.name === "expect-compile") {
+					const { runExpectCompile } = await import("../commands/slash.js");
+					const outcome = await runExpectCompile(cmd.args, session);
+					const expectResult: ExpectResult = {
+						line: line.lineNumber,
+						command: "/expect-compile",
+						expected: `throws "${outcome.pattern}"`,
+						actual: outcome.actualError,
+						actualError: outcome.actualError,
+						passed: outcome.passed,
+						verb: "compile-throws",
+					};
+					expects.push(expectResult);
+					onProgress?.({ type: "expect", result: expectResult });
+					linesExecuted++;
+
+					if (outcome.error) {
+						abortError = { line: line.lineNumber, message: outcome.error };
+						onProgress?.({ type: "error", line: line.lineNumber, message: outcome.error });
+						break;
+					}
+					if (!outcome.passed && outcome.abortOnFail) {
+						const msg = `Assertion failed (abort): expected throws "${outcome.pattern}", got ${outcome.actualError}`;
+						abortError = { line: line.lineNumber, message: msg };
+						onProgress?.({ type: "error", line: line.lineNumber, message: msg });
+						break;
+					}
+					continue;
+				}
+			}
+
+			// Capture mode: non-slash lines accumulate in the buffer instead of running.
+			if (line.kind === "command" && activeProcessor && session.isCapturing?.(activeProcessor)) {
+				session.appendCaptureLine?.(activeProcessor, line.content);
+				linesExecuted++;
+				continue;
 			}
 
 			// Normal command: dispatch through session
@@ -232,7 +311,13 @@ export async function dryRunScript(
 				const cmd = extractSlashCommand(line.content);
 
 				// Skip timing/assertion commands — not relevant for validation
-				if (cmd.name === "wait" || cmd.name === "expect") continue;
+				if (
+					cmd.name === "wait"
+					|| cmd.name === "expect"
+					|| cmd.name === "expect-logs"
+					|| cmd.name === "expect-compile"
+					|| cmd.name === "capture"
+				) continue;
 
 				// Skip /run — nested scripts are validated separately
 				if (cmd.name === "run") continue;
@@ -262,15 +347,73 @@ export async function dryRunScript(
 // ── /expect execution ──────────────────────────────────���────────────
 
 async function executeExpect(
-	parsed: import("./types.js").ParsedExpect,
+	parsed:
+		| import("./types.js").ParsedExpect
+		| import("./types.js").ParsedExpectLogs
+		| import("./types.js").ParsedExpectThrows
+		| import("./types.js").ParsedExpectContains,
 	line: ScriptLine,
 	session: Session,
 ): Promise<ExpectResult> {
+	if (parsed.kind === "logs") {
+		const result = await session.handleInput(parsed.command);
+		const actualLines = session.lastReplLogs ?? [];
+		const cmp = compareLogLines(actualLines, parsed.expectedLines, parsed.tolerance);
+		return {
+			line: line.lineNumber,
+			command: parsed.command,
+			expected: JSON.stringify(parsed.expectedLines),
+			actual: JSON.stringify(actualLines),
+			actualLines,
+			passed: cmp.passed,
+			tolerance: parsed.tolerance,
+			verb: "logs",
+			actualError: result.type === "error" ? result.message : undefined,
+		};
+	}
+
+	if (parsed.kind === "contains") {
+		const result = await session.handleInput(parsed.command);
+		const actual = extractResultValue(result);
+		return {
+			line: line.lineNumber,
+			command: parsed.command,
+			expected: `contains "${parsed.pattern}"`,
+			actual,
+			passed: result.type !== "error" && actual.includes(parsed.pattern),
+			verb: "contains",
+		};
+	}
+
+	if (parsed.kind === "throws") {
+		const result = await session.handleInput(parsed.command);
+		if (result.type === "error") {
+			const errMsg = normalizeErrorMessage(result.message);
+			return {
+				line: line.lineNumber,
+				command: parsed.command,
+				expected: `throws "${parsed.pattern}"`,
+				actual: errMsg,
+				actualError: errMsg,
+				passed: errMsg.includes(parsed.pattern),
+				verb: "throws",
+			};
+		}
+		const value = extractResultValue(result);
+		return {
+			line: line.lineNumber,
+			command: parsed.command,
+			expected: `throws "${parsed.pattern}"`,
+			actual: `(no throw — got ${value})`,
+			actualError: "(no throw)",
+			passed: false,
+			verb: "throws",
+		};
+	}
+
 	const result = await session.handleInput(parsed.command);
 	const actual = extractResultValue(result);
-
 	const passed = compareValues(actual, parsed.expected, parsed.tolerance);
-
 	return {
 		line: line.lineNumber,
 		command: parsed.command,
@@ -278,7 +421,16 @@ async function executeExpect(
 		actual,
 		passed,
 		tolerance: parsed.tolerance,
+		verb: "is",
 	};
+}
+
+/** Resolve the active processor id for /capture routing. Returns null when
+ *  the current mode isn't script. */
+function activeScriptProcessor(session: Session): string | null {
+	const mode = session.currentMode();
+	if (mode instanceof ScriptMode) return mode.processorId;
+	return null;
 }
 
 /**
@@ -462,7 +614,9 @@ export function formatRunReport(
 	if (verbosity !== "quiet") {
 		for (const expect of result.expects) {
 			const icon = expect.passed ? "\u2713" : "\u2717";
-			const line = ` ${icon} line ${expect.line}: ${expect.command} is ${expect.expected}`;
+			const verb = expect.verb ?? "is";
+			const verbLabel = verb === "compile-throws" ? "compile-throws" : verb;
+			const line = ` ${icon} line ${expect.line}: ${expect.command} ${verbLabel} ${expect.expected}`;
 			if (!expect.passed) {
 				lines.push(`${line} \u2014 got ${expect.actual}`);
 			} else {

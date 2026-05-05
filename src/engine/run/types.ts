@@ -29,6 +29,9 @@ export interface ValidationResult {
 	errors: ParseError[];
 }
 
+/** Verb tag for /expect-style assertions. */
+export type ExpectVerb = "is" | "match" | "logs" | "throws" | "compile-throws" | "contains";
+
 /** Result of a single /expect assertion. */
 export interface ExpectResult {
 	line: number;
@@ -41,6 +44,12 @@ export interface ExpectResult {
 	passed: boolean;
 	/** Float tolerance used (if numeric comparison) */
 	tolerance?: number;
+	/** Verb form. Defaults to "is" for legacy callers. */
+	verb?: ExpectVerb;
+	/** For "logs" verb: the actual log lines captured. */
+	actualLines?: string[];
+	/** For "throws" / "compile-throws": the captured error message (or "(no throw)"). */
+	actualError?: string;
 }
 
 /** Per-command output collected during script execution. */
@@ -75,7 +84,7 @@ export interface ParsedExpect {
 	tolerance: number;
 	/** If true, abort the script on failure */
 	abortOnFail: boolean;
-	kind?: "value";
+	kind: "is";
 }
 
 /** Parsed /expect command (file match comparison). */
@@ -87,6 +96,41 @@ export interface ParsedExpectMatch {
 	/** If true, abort the script on failure */
 	abortOnFail: boolean;
 	kind: "match";
+}
+
+/** Parsed /expect command (Console.print log comparison). */
+export interface ParsedExpectLogs {
+	/** The command to execute in the current mode */
+	command: string;
+	/** Expected log lines (positional, ordered). */
+	expectedLines: unknown[];
+	/** Float tolerance for numeric line compare (default 0.01) */
+	tolerance: number;
+	/** If true, abort the script on failure */
+	abortOnFail: boolean;
+	kind: "logs";
+}
+
+/** Parsed /expect command (error throw assertion). */
+export interface ParsedExpectThrows {
+	/** The command to execute in the current mode */
+	command: string;
+	/** Substring pattern to match against the error message. */
+	pattern: string;
+	/** If true, abort the script on failure */
+	abortOnFail: boolean;
+	kind: "throws";
+}
+
+/** Parsed /expect command (substring match on success result). */
+export interface ParsedExpectContains {
+	/** The command to execute in the current mode */
+	command: string;
+	/** Substring pattern to match against the result value. */
+	pattern: string;
+	/** If true, abort the script on failure */
+	abortOnFail: boolean;
+	kind: "contains";
 }
 
 /** Parsed /wait command. */

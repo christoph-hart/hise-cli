@@ -164,6 +164,10 @@ export class Session implements SessionContext, CommandSession {
 	private readonly modeFactories = new Map<string, ModeFactory>();
 	private readonly modeCache = new Map<string, Mode>();
 	private readonly scriptCompilerStates = new Map<string, ScriptCompilerState>();
+	private readonly captureBuffers = new Map<string, string[]>();
+	/** Logs from the most recent /api/repl call, populated by ScriptMode.parse.
+	 *  Read by /expect <expr> logs <values> (inline form). */
+	lastReplLogs: string[] = [];
 
 	// Signal for TUI to handle quit
 	private quitRequested = false;
@@ -376,6 +380,35 @@ export class Session implements SessionContext, CommandSession {
 				lines.join("\n"),
 			]),
 		);
+	}
+
+	// ── /capture buffer (Console.print log assertion) ───────────────
+
+	startCapture(processorId: string): void {
+		this.captureBuffers.set(processorId, []);
+	}
+
+	appendCaptureLine(processorId: string, line: string): boolean {
+		const buf = this.captureBuffers.get(processorId);
+		if (!buf) return false;
+		buf.push(line);
+		return true;
+	}
+
+	getCaptureBuffer(processorId: string): string[] {
+		return this.captureBuffers.get(processorId) ?? [];
+	}
+
+	clearCapture(processorId: string): void {
+		this.captureBuffers.delete(processorId);
+	}
+
+	isCapturing(processorId: string): boolean {
+		return this.captureBuffers.has(processorId);
+	}
+
+	clearAllCaptureBuffers(): void {
+		this.captureBuffers.clear();
 	}
 
 	// ── Completion ─────────────────────────────────────────────────

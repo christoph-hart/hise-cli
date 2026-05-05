@@ -55,71 +55,156 @@ export function parseScript(source: string): ParsedScript {
 
 // ── /expect parsing ─────────────────────────────────────────────────
 
-import type { ParsedExpect, ParsedExpectMatch } from "./types.js";
+import type {
+	ParsedExpect,
+	ParsedExpectMatch,
+	ParsedExpectLogs,
+	ParsedExpectThrows,
+	ParsedExpectContains,
+} from "./types.js";
+
+/**
+ * Find the rightmost occurrence of ` <keyword> ` (with surrounding spaces)
+ * in `s`, where the match is NOT inside a "..." or '...' quoted region.
+ * Returns -1 if none.
+ */
+export function findKeywordOutsideQuotes(s: string, keyword: string): number {
+	const needle = ` ${keyword} `;
+	let inDouble = false;
+	let inSingle = false;
+	let last = -1;
+	for (let i = 0; i < s.length; i++) {
+		const ch = s[i]!;
+		if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+		if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
+		if (inDouble || inSingle) continue;
+		if (s.startsWith(needle, i)) {
+			last = i;
+		}
+	}
+	return last;
+}
+
+/**
+ * Strip a trailing ` <keyword>` (or ` <keyword> <tail>` when captureTail) from
+ * `s`, but only if the keyword sits outside a quoted region. Returns the
+ * stripped remainder, the captured tail (when applicable), and a `matched` flag.
+ */
+export function stripTrailingKeyword(
+	s: string,
+	keyword: string,
+	captureTail = false,
+): { remaining: string; tail: string; matched: boolean } {
+	const trimmed = s.trimEnd();
+	if (captureTail) {
+		// Find rightmost unquoted ` <keyword> ` and treat everything after as tail.
+		const idx = findKeywordOutsideQuotes(trimmed, keyword);
+		if (idx === -1) return { remaining: s, tail: "", matched: false };
+		const tail = trimmed.slice(idx + keyword.length + 2).trim();
+		const remaining = trimmed.slice(0, idx);
+		return { remaining, tail, matched: true };
+	}
+	// Match exact ` <keyword>` at end (whitespace already trimmed).
+	const suffix = ` ${keyword}`;
+	if (!trimmed.endsWith(suffix)) return { remaining: s, tail: "", matched: false };
+	const head = trimmed.slice(0, trimmed.length - suffix.length);
+	// Verify the keyword position is unquoted by walking the head.
+	let inDouble = false;
+	let inSingle = false;
+	for (let i = 0; i < head.length; i++) {
+		const ch = head[i]!;
+		if (ch === '"' && !inSingle) inDouble = !inDouble;
+		else if (ch === "'" && !inDouble) inSingle = !inSingle;
+	}
+	if (inDouble || inSingle) return { remaining: s, tail: "", matched: false };
+	return { remaining: head, tail: "", matched: true };
+}
 
 /**
  * Parse the arguments of an /expect command.
  *
  * Syntax:
- *   `/expect <command> is <value> [within <tolerance>] [or abort]`
- *   `/expect <command> matches <file> [or abort]`
+ *   /expect <command> is <value> [within <tol>] [or abort]
+ *   /expect <command> matches <file> [or abort]
+ *   /expect <command> logs <json|scalar> [within <tol>] [or abort]
+ *   /expect <command> throws <pattern> [or abort]
  *
- * Parsing is right-to-left to avoid ambiguity:
- * 1. Strip trailing "or abort" → sets abortOnFail
- * 2. Try "matches" keyword → file comparison mode
- * 3. Check for "within <tolerance>" → extract tolerance (default 0.01)
- * 4. Find last " is " → split into command and expected value
+ * Parsing strategy:
+ * 1. Strip trailing ` or abort` (quote-aware).
+ * 2. Strip trailing ` within <tol>` (quote-aware).
+ * 3. Pick the rightmost UNQUOTED occurrence of ` is `, ` matches `, ` logs `,
+ *    or ` throws ` and split on it. This avoids the long-standing collision
+ *    where `is` inside a quoted error message confused the splitter.
  */
-export function parseExpect(args: string): ParsedExpect | ParsedExpectMatch | string {
+export function parseExpect(
+	args: string,
+): ParsedExpect | ParsedExpectMatch | ParsedExpectLogs | ParsedExpectThrows | ParsedExpectContains | string {
 	let remaining = args.trim();
 	let abortOnFail = false;
 
-	// 1. Check for trailing "or abort"
-	if (remaining.endsWith(" or abort")) {
+	// 1. Trailing ` or abort` (quote-aware).
+	const abortStrip = stripTrailingKeyword(remaining, "or abort");
+	if (abortStrip.matched) {
 		abortOnFail = true;
-		remaining = remaining.slice(0, -" or abort".length);
+		remaining = abortStrip.remaining.trimEnd();
 	}
 
-	// 2. Check for "matches" keyword (file comparison)
-	const matchesIdx = remaining.lastIndexOf(" matches ");
-	if (matchesIdx !== -1) {
-		const command = remaining.slice(0, matchesIdx).trim();
-		const referenceFile = remaining.slice(matchesIdx + " matches ".length).trim();
-		if (!command) return `Missing command before "matches"`;
-		if (!referenceFile) return `Missing reference file after "matches"`;
-		return { command, referenceFile, abortOnFail, kind: "match" };
-	}
-
-	// 3. Check for "within <tolerance>"
+	// 2. Trailing ` within <tol>` (quote-aware, captures tail).
 	let tolerance = 0.01;
-	const withinIdx = remaining.lastIndexOf(" within ");
-	if (withinIdx !== -1) {
-		const tolStr = remaining.slice(withinIdx + " within ".length).trim();
-		const tolVal = Number(tolStr);
+	const withinStrip = stripTrailingKeyword(remaining, "within", true);
+	if (withinStrip.matched) {
+		const tolVal = Number(withinStrip.tail);
 		if (Number.isNaN(tolVal) || tolVal < 0) {
-			return `Invalid tolerance value: "${tolStr}"`;
+			return `Invalid tolerance value: "${withinStrip.tail}"`;
 		}
 		tolerance = tolVal;
-		remaining = remaining.slice(0, withinIdx);
+		remaining = withinStrip.remaining.trimEnd();
 	}
 
-	// 4. Find last " is " to split command from expected value
-	const isIdx = remaining.lastIndexOf(" is ");
-	if (isIdx === -1) {
-		return `Missing "is" or "matches" keyword. Syntax: /expect <command> is <value> | /expect <command> matches <file>`;
+	// 3. Rightmost unquoted verb keyword.
+	const verbs = ["is", "matches", "logs", "throws", "contains"] as const;
+	let bestIdx = -1;
+	let bestVerb: typeof verbs[number] | null = null;
+	for (const v of verbs) {
+		const idx = findKeywordOutsideQuotes(remaining, v);
+		if (idx > bestIdx) {
+			bestIdx = idx;
+			bestVerb = v;
+		}
 	}
 
-	const command = remaining.slice(0, isIdx).trim();
-	const expected = remaining.slice(isIdx + " is ".length).trim();
-
-	if (!command) {
-		return `Missing command before "is"`;
-	}
-	if (!expected) {
-		return `Missing expected value after "is"`;
+	if (bestIdx === -1 || !bestVerb) {
+		return `Missing "is" / "matches" / "logs" / "throws" / "contains" keyword. See /help expect.`;
 	}
 
-	return { command, expected, tolerance, abortOnFail };
+	const command = remaining.slice(0, bestIdx).trim();
+	const rhs = remaining.slice(bestIdx + bestVerb.length + 2).trim();
+
+	if (!command) return `Missing command before "${bestVerb}"`;
+	if (!rhs) return `Missing value after "${bestVerb}"`;
+
+	switch (bestVerb) {
+		case "is":
+			return { command, expected: rhs, tolerance, abortOnFail, kind: "is" };
+		case "matches":
+			return { command, referenceFile: rhs, abortOnFail, kind: "match" };
+		case "logs": {
+			const parsed = (() => { try { return JSON.parse(rhs); } catch { return undefined; } })();
+			if (parsed === undefined) {
+				return `Invalid JSON value after "logs": ${rhs}`;
+			}
+			const expectedLines = Array.isArray(parsed) ? parsed : [parsed];
+			return { command, expectedLines, tolerance, abortOnFail, kind: "logs" };
+		}
+		case "throws": {
+			const pattern = unquote(rhs);
+			return { command, pattern, abortOnFail, kind: "throws" };
+		}
+		case "contains": {
+			const pattern = unquote(rhs);
+			return { command, pattern, abortOnFail, kind: "contains" };
+		}
+	}
 }
 
 // ── /wait parsing ───────────────────────────────────────────────────
@@ -173,6 +258,18 @@ function parsePercent(s: string): number {
 	return NaN;
 }
 
+/** Strip surrounding matching single or double quotes. */
+function unquote(s: string): string {
+	if (s.length >= 2) {
+		const first = s[0];
+		const last = s[s.length - 1];
+		if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+			return s.slice(1, -1);
+		}
+	}
+	return s;
+}
+
 /**
  * Compare an actual result string against an expected value.
  *
@@ -208,6 +305,6 @@ export function compareValues(
 		return Math.abs(actualNum - expectedNum) <= tolerance;
 	}
 
-	// 3. Case-insensitive string equality
-	return actual.toLowerCase() === expected.toLowerCase();
+	// 3. Case-insensitive string equality (strip surrounding quotes from either side)
+	return unquote(actual).toLowerCase() === unquote(expected).toLowerCase();
 }

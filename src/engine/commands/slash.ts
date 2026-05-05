@@ -550,6 +550,7 @@ async function handleExpect(
 ): Promise<CommandResult> {
 	const { parseExpect, compareValues } = await import("../run/parser.js");
 	const { extractResultValue } = await import("../run/executor.js");
+	const { compareLogLines, normalizeErrorMessage } = await import("../run/log-compare.js");
 	const parsed = parseExpect(args);
 	if (typeof parsed === "string") {
 		return errorResult(parsed);
@@ -572,11 +573,14 @@ async function handleExpect(
 		readBinaryFile: session.readBinaryFile,
 		writeTextFile: session.writeTextFile,
 		listDirectory: session.listDirectory,
+		lastReplLogs: [] as string[],
 	};
 	const result = await mode.parse(parsed.command, sessionContext);
+	// Bubble lastReplLogs up so script-mode REPL responses surface in the logs verb.
+	(session as { lastReplLogs?: string[] }).lastReplLogs = sessionContext.lastReplLogs;
 
 	// Handle "matches" comparison (file-based)
-	if ("kind" in parsed && parsed.kind === "match") {
+	if (parsed.kind === "match") {
 		if (!session.loadScriptFile) {
 			return errorResult("File reading not available for /expect matches.");
 		}
@@ -598,6 +602,51 @@ async function handleExpect(
 		);
 	}
 
+	// "logs" comparison \u2014 pull captured REPL logs.
+	if (parsed.kind === "logs") {
+		const actualLines = sessionContext.lastReplLogs ?? [];
+		const cmp = compareLogLines(actualLines, parsed.expectedLines, parsed.tolerance);
+		if (cmp.passed) {
+			return textResult(`\u2713 ${parsed.command} logs ${JSON.stringify(parsed.expectedLines)}`);
+		}
+		return errorResult(
+			`\u2717 ${parsed.command} logs mismatch`,
+			`Expected: ${JSON.stringify(parsed.expectedLines)}\nActual: ${JSON.stringify(actualLines)}`,
+		);
+	}
+
+	// "contains" comparison \u2014 substring match on success result value.
+	if (parsed.kind === "contains") {
+		if (result.type === "error") {
+			return errorResult(
+				`\u2717 ${parsed.command} expected contains "${parsed.pattern}", got error: ${result.message}`,
+			);
+		}
+		const actual = extractResultValue(result);
+		if (actual.includes(parsed.pattern)) {
+			return textResult(`\u2713 ${parsed.command} contains "${parsed.pattern}"`);
+		}
+		return errorResult(
+			`\u2717 ${parsed.command} expected contains "${parsed.pattern}", got: ${actual}`,
+		);
+	}
+
+	// "throws" comparison \u2014 substring match on error message.
+	if (parsed.kind === "throws") {
+		if (result.type !== "error") {
+			return errorResult(
+				`\u2717 ${parsed.command} expected throws "${parsed.pattern}", got: ${extractResultValue(result)}`,
+			);
+		}
+		const errMsg = normalizeErrorMessage(result.message);
+		if (errMsg.includes(parsed.pattern)) {
+			return textResult(`\u2713 ${parsed.command} throws "${parsed.pattern}"`);
+		}
+		return errorResult(
+			`\u2717 ${parsed.command} expected throws "${parsed.pattern}", got: ${errMsg}`,
+		);
+	}
+
 	// Standard "is" comparison
 	const actual = extractResultValue(result);
 	const passed = compareValues(actual, parsed.expected, parsed.tolerance);
@@ -606,6 +655,242 @@ async function handleExpect(
 		return textResult(`\u2713 ${parsed.command} is ${parsed.expected}`);
 	}
 	return errorResult(`\u2717 Expected ${parsed.expected}, got ${actual}`);
+}
+
+// ── /capture and /expect-logs / /expect-compile ───────────────────
+
+/** Outcome shared by /expect-logs runs (interactive + executor paths). */
+export interface ExpectLogsOutcome {
+	passed: boolean;
+	expectedLines: unknown[];
+	actualLines: string[];
+	abortOnFail: boolean;
+	tolerance: number;
+	/** Joined buffer lines (display-only label). */
+	command: string;
+	/** First failure description, when !passed. */
+	failure?: string;
+	/** Set when the run could not even reach the comparator (no connection, REPL error, etc.). */
+	error?: string;
+}
+
+/** Outcome shared by /expect-compile runs. */
+export interface ExpectCompileOutcome {
+	passed: boolean;
+	pattern: string;
+	abortOnFail: boolean;
+	/** Normalized error from the compiler, or "(compile succeeded)" when no error. */
+	actualError: string;
+	/** Set when the run could not be performed (e.g., no connection). */
+	error?: string;
+}
+
+async function handleCapture(
+	_args: string,
+	session: CommandSession,
+): Promise<CommandResult> {
+	if (session.currentModeId !== "script") {
+		return errorResult("/capture requires script mode.");
+	}
+	const scriptMode = session.getOrCreateMode("script");
+	if (!(scriptMode instanceof ScriptMode)) {
+		return errorResult("Active script mode is unavailable.");
+	}
+	if (!session.startCapture) {
+		return errorResult("Capture buffer not supported in this environment.");
+	}
+	session.startCapture(scriptMode.processorId);
+	return textResult("Capturing Console output. End with /expect-logs <json>.");
+}
+
+/**
+ * Parse args + run the /expect-logs assertion. Pure-ish wrapper: reads
+ * capture buffer, submits to /api/repl, compares logs. Returns a structured
+ * outcome so executor can build ExpectResult and registry handler can build
+ * CommandResult.
+ */
+export async function runExpectLogs(
+	args: string,
+	session: CommandSession,
+): Promise<ExpectLogsOutcome> {
+	const { stripTrailingKeyword } = await import("../run/parser.js");
+	const { compareLogLines } = await import("../run/log-compare.js");
+	const { submitReplBuffer } = await import("../modes/script.js");
+
+	let remaining = args.trim();
+	let abortOnFail = false;
+	const abortStrip = stripTrailingKeyword(remaining, "or abort");
+	if (abortStrip.matched) { abortOnFail = true; remaining = abortStrip.remaining.trimEnd(); }
+	let tolerance = 0.01;
+	const withinStrip = stripTrailingKeyword(remaining, "within", true);
+	if (withinStrip.matched) {
+		const tolVal = Number(withinStrip.tail);
+		if (Number.isNaN(tolVal) || tolVal < 0) {
+			return {
+				passed: false, expectedLines: [], actualLines: [], abortOnFail, tolerance,
+				command: "", error: `Invalid tolerance value: "${withinStrip.tail}"`,
+			};
+		}
+		tolerance = tolVal;
+		remaining = withinStrip.remaining.trimEnd();
+	}
+
+	let parsed: unknown;
+	try { parsed = JSON.parse(remaining); }
+	catch {
+		return {
+			passed: false, expectedLines: [], actualLines: [], abortOnFail, tolerance,
+			command: "", error: `Invalid JSON value for /expect-logs: ${remaining}`,
+		};
+	}
+	const expectedLines: unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+
+	const scriptMode = session.getOrCreateMode("script");
+	const procId = scriptMode instanceof ScriptMode ? scriptMode.processorId : "Interface";
+
+	if (!session.isCapturing?.(procId)) {
+		return {
+			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+			command: "", error: "/expect-logs requires an open /capture buffer.",
+		};
+	}
+
+	const lines = session.getCaptureBuffer?.(procId) ?? [];
+	const response = await submitReplBuffer(session, procId, lines);
+	session.clearCapture?.(procId);
+
+	if (!response) {
+		return {
+			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+			command: lines.join("; "), error: "No HISE connection.",
+		};
+	}
+	if (isErrorResponse(response)) {
+		return {
+			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+			command: lines.join("; "), error: response.message,
+		};
+	}
+	if (!isEnvelopeResponse(response)) {
+		return {
+			passed: false, expectedLines, actualLines: [], abortOnFail, tolerance,
+			command: lines.join("; "), error: "Unexpected response from HISE",
+		};
+	}
+	if (response.errors.length > 0) {
+		return {
+			passed: false, expectedLines, actualLines: response.logs, abortOnFail, tolerance,
+			command: lines.join("; "),
+			error: response.errors.map((e) => e.errorMessage).join("\n"),
+		};
+	}
+
+	const cmp = compareLogLines(response.logs, expectedLines, tolerance);
+	const failure = !cmp.passed && cmp.diff
+		? (cmp.diff.index === -1
+			? `length mismatch: expected ${cmp.diff.expected}, got ${cmp.diff.actual}`
+			: `line ${cmp.diff.index}: expected ${cmp.diff.expected}, got ${cmp.diff.actual}`)
+		: undefined;
+
+	return {
+		passed: cmp.passed,
+		expectedLines,
+		actualLines: response.logs,
+		abortOnFail,
+		tolerance,
+		command: lines.join("; "),
+		failure,
+	};
+}
+
+async function handleExpectLogs(
+	args: string,
+	session: CommandSession,
+): Promise<CommandResult> {
+	if (session.currentModeId !== "script") {
+		return errorResult("/expect-logs requires script mode.");
+	}
+	const outcome = await runExpectLogs(args, session);
+	if (outcome.error) return errorResult(outcome.error);
+	if (outcome.passed) {
+		return textResult(`✓ /expect-logs ${JSON.stringify(outcome.expectedLines)}`);
+	}
+	return errorResult(
+		`✗ /expect-logs failed: ${outcome.failure}`,
+		`Actual: ${JSON.stringify(outcome.actualLines)}`,
+	);
+}
+
+/** Pure version of /expect-compile — runs compile, builds outcome. */
+export async function runExpectCompile(
+	args: string,
+	session: CommandSession,
+): Promise<ExpectCompileOutcome> {
+	const { stripTrailingKeyword, findKeywordOutsideQuotes } = await import("../run/parser.js");
+	const { normalizeErrorMessage } = await import("../run/log-compare.js");
+
+	let remaining = args.trim();
+	let abortOnFail = false;
+	const abortStrip = stripTrailingKeyword(remaining, "or abort");
+	if (abortStrip.matched) { abortOnFail = true; remaining = abortStrip.remaining.trimEnd(); }
+
+	// Accept "throws X" leading or " throws X" inside.
+	let rhs: string;
+	if (remaining.startsWith("throws ")) {
+		rhs = remaining.slice("throws ".length).trim();
+	} else {
+		const idx = findKeywordOutsideQuotes(remaining, "throws");
+		if (idx === -1) {
+			return {
+				passed: false, pattern: "", abortOnFail, actualError: "",
+				error: 'Usage: /expect-compile throws "<pattern>" [or abort]',
+			};
+		}
+		rhs = remaining.slice(idx + " throws ".length).trim();
+	}
+	if (!rhs) {
+		return {
+			passed: false, pattern: "", abortOnFail, actualError: "",
+			error: 'Missing pattern after "throws"',
+		};
+	}
+	const pattern = (rhs.startsWith('"') && rhs.endsWith('"')) ||
+		(rhs.startsWith("'") && rhs.endsWith("'"))
+		? rhs.slice(1, -1)
+		: rhs;
+
+	const outcome = await compileCallbacks(session);
+	if (typeof outcome === "string") {
+		return { passed: false, pattern, abortOnFail, actualError: "", error: outcome };
+	}
+
+	if (outcome.ok) {
+		return { passed: false, pattern, abortOnFail, actualError: "(compile succeeded)" };
+	}
+	const errMsg = normalizeErrorMessage(outcome.errors.join("\n"));
+	return {
+		passed: errMsg.includes(pattern),
+		pattern,
+		abortOnFail,
+		actualError: errMsg,
+	};
+}
+
+async function handleExpectCompile(
+	args: string,
+	session: CommandSession,
+): Promise<CommandResult> {
+	if (session.currentModeId !== "script") {
+		return errorResult("/expect-compile requires script mode.");
+	}
+	const outcome = await runExpectCompile(args, session);
+	if (outcome.error) return errorResult(outcome.error);
+	if (outcome.passed) {
+		return textResult(`✓ /expect-compile throws "${outcome.pattern}"`);
+	}
+	return errorResult(
+		`✗ /expect-compile expected throws "${outcome.pattern}", got: ${outcome.actualError}`,
+	);
 }
 
 // ── /run and /parse commands ───────────────────────────────────────
@@ -665,34 +950,64 @@ async function handleCompileCallbacks(
 		return errorResult("/compile requires script mode.");
 	}
 
+	const outcome = await compileCallbacks(session);
+	if (typeof outcome === "string") return errorResult(outcome);
+
+	if (!outcome.ok) {
+		const logs = outcome.logs.length > 0 ? `\n${outcome.logs.join("\n")}` : "";
+		return errorResult(outcome.errors.join("\n") + logs);
+	}
+
+	if (outcome.cleared) session.clearScriptCompilerState?.(outcome.processorId);
+	session.markProjectTreeDirty?.();
+	const updated = outcome.updatedCallbacks.length > 0
+		? ` (${outcome.updatedCallbacks.join(", ")})`
+		: "";
+	const logs = outcome.logs.length > 0 ? `\n${outcome.logs.join("\n")}` : "";
+	return textResult(`${outcome.summary} for ${outcome.processorId}${updated}.${logs}`.trim());
+}
+
+/** Structured outcome of a script-callback compile pass. */
+export interface CompileOutcome {
+	ok: boolean;
+	processorId: string;
+	errors: string[];
+	logs: string[];
+	updatedCallbacks: string[];
+	/** True iff the compiler-state buffer should be cleared on success. */
+	cleared: boolean;
+	summary: string;
+}
+
+/**
+ * Run the same compile pass /compile uses, but return a structured outcome
+ * instead of a CommandResult. Caller decides whether to translate failure
+ * into an error (/compile) or an ExpectResult (/expect-compile).
+ */
+export async function compileCallbacks(
+	session: CommandSession,
+): Promise<CompileOutcome | string> {
 	if (!session.connection) {
-		return errorResult("No HISE connection. Connect to HISE before compiling callbacks.");
+		return "No HISE connection. Connect to HISE before compiling callbacks.";
 	}
 
 	const scriptMode = session.getOrCreateMode("script");
 	if (!(scriptMode instanceof ScriptMode)) {
-		return errorResult("Active script mode is unavailable.");
+		return "Active script mode is unavailable.";
 	}
 
 	const collected = session.getCollectedScriptCallbacks?.(scriptMode.processorId) ?? {};
 	if (Object.keys(collected).length === 0) {
-		// No callbacks collected — just recompile the existing script
-		const recompileResp = await session.connection.post("/api/recompile", {
+		const resp = await session.connection.post("/api/recompile", {
 			moduleId: scriptMode.processorId,
 		});
-		const result = formatCompileResponse(recompileResp, scriptMode.processorId);
-		if (result.type !== "error") {
-			session.markProjectTreeDirty?.();
-		}
-		return result;
+		return outcomeFromResponse(resp, scriptMode.processorId, false, "Recompiled");
 	}
 
 	const callbacks = Object.fromEntries(
 		Object.entries(collected).map(([callbackId, body]) => [
 			callbackId,
-			callbackId === "onInit"
-				? body
-				: wrapCallback(callbackId, body),
+			callbackId === "onInit" ? body : wrapCallback(callbackId, body),
 		]),
 	);
 
@@ -702,12 +1017,61 @@ async function handleCompileCallbacks(
 		compile: true,
 	});
 
-	const result = formatSetScriptResponse(response, scriptMode.processorId);
-	if (result.type !== "error") {
-		session.clearScriptCompilerState?.(scriptMode.processorId);
-		session.markProjectTreeDirty?.();
+	return outcomeFromResponse(response, scriptMode.processorId, true, "Compiled OK");
+}
+
+function outcomeFromResponse(
+	response: import("../hise.js").HiseResponse,
+	processorId: string,
+	clearOnSuccess: boolean,
+	defaultSummary: string,
+): CompileOutcome {
+	if (isErrorResponse(response)) {
+		return {
+			ok: false,
+			processorId,
+			errors: [response.message],
+			logs: [],
+			updatedCallbacks: [],
+			cleared: false,
+			summary: "",
+		};
 	}
-	return result;
+	if (!isEnvelopeResponse(response)) {
+		return {
+			ok: false,
+			processorId,
+			errors: ["Unexpected response from HISE"],
+			logs: [],
+			updatedCallbacks: [],
+			cleared: false,
+			summary: "",
+		};
+	}
+	const errs = response.errors.map((e) => e.callstack.length > 0
+		? `${e.errorMessage}\n${e.callstack.join("\n")}`
+		: e.errorMessage);
+	if (errs.length > 0 || !response.success) {
+		return {
+			ok: false,
+			processorId,
+			errors: errs.length > 0 ? errs : [String(response.result ?? "Compile failed")],
+			logs: response.logs,
+			updatedCallbacks: [],
+			cleared: false,
+			summary: "",
+		};
+	}
+	const body = response as unknown as { updatedCallbacks?: string[]; result?: string | null };
+	return {
+		ok: true,
+		processorId,
+		errors: [],
+		logs: response.logs,
+		updatedCallbacks: body.updatedCallbacks ?? [],
+		cleared: clearOnSuccess,
+		summary: String(body.result ?? defaultSummary),
+	};
 }
 
 async function runOrParse(
@@ -1098,8 +1462,29 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
 
 	registry.register({
 		name: "expect",
-		description: "Assert a command result (e.g., /expect getValue() is 0.5)",
+		description: "Assert a command result (is | matches | logs | throws)",
 		handler: handleExpect,
+		kind: "command",
+	});
+
+	registry.register({
+		name: "capture",
+		description: "Open a Console.print capture buffer (script mode); end with /expect-logs",
+		handler: handleCapture,
+		kind: "command",
+	});
+
+	registry.register({
+		name: "expect-logs",
+		description: "Assert captured Console output (e.g., /expect-logs [\"a\", 1])",
+		handler: handleExpectLogs,
+		kind: "command",
+	});
+
+	registry.register({
+		name: "expect-compile",
+		description: "Assert callback compile fails with a substring (e.g., /expect-compile throws \"not a function\")",
+		handler: handleExpectCompile,
 		kind: "command",
 	});
 

@@ -74,6 +74,22 @@ export interface SessionContext {
 	/** Return collected callback source by callback id. */
 	getCollectedScriptCallbacks?(processorId: string): Record<string, string>;
 
+	// ── /capture buffer hooks (Console output assertion) ───────────
+	/** Open a Console.print capture buffer for a processor. */
+	startCapture?(processorId: string): void;
+	/** Append a non-slash line to the active capture buffer. Returns false if not capturing. */
+	appendCaptureLine?(processorId: string, line: string): boolean;
+	/** Read the buffered lines for a processor. Empty if not capturing. */
+	getCaptureBuffer?(processorId: string): string[];
+	/** Close and discard the capture buffer for a processor. */
+	clearCapture?(processorId: string): void;
+	/** True iff a capture buffer is open for the processor. */
+	isCapturing?(processorId: string): boolean;
+	/** Discard all capture buffers (called on script-mode entry/exit). */
+	clearAllCaptureBuffers?(): void;
+	/** Logs from the most recent /api/repl call, populated by ScriptMode.parse. */
+	lastReplLogs?: string[];
+
 	/** Resolve a file path against the project folder. Absolute paths pass through. */
 	resolvePath?(filePath: string): string;
 

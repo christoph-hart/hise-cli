@@ -55,6 +55,15 @@ export interface CommandSession {
 	getActiveScriptCallback?(processorId: string): string | null;
 	/** Return collected callback source by callback id. */
 	getCollectedScriptCallbacks?(processorId: string): Record<string, string>;
+	// ── /capture buffer hooks (Console output assertion) ───────────
+	startCapture?(processorId: string): void;
+	appendCaptureLine?(processorId: string, line: string): boolean;
+	getCaptureBuffer?(processorId: string): string[];
+	clearCapture?(processorId: string): void;
+	isCapturing?(processorId: string): boolean;
+	clearAllCaptureBuffers?(): void;
+	/** Logs from the most recent /api/repl call. */
+	lastReplLogs?: string[];
 	/** Progress callback for `/wizard run` streaming. Always wired. */
 	onWizardProgress?(progress: import("../wizard/types.js").WizardProgress): void;
 	/** Snapshot of the most recently paused wizard (null when none). */

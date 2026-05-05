@@ -47,10 +47,12 @@ export class ScriptMode implements Mode {
 
 	async onEnter(session: SessionContext): Promise<void> {
 		session.clearAllScriptCompilerState?.();
+		session.clearAllCaptureBuffers?.();
 	}
 
 	onExit(session: SessionContext): void {
 		session.clearAllScriptCompilerState?.();
+		session.clearAllCaptureBuffers?.();
 	}
 
 	async parse(
@@ -81,6 +83,9 @@ export class ScriptMode implements Mode {
 			expression: input,
 			moduleId: this.processorId,
 		});
+
+		// Stash logs so /expect <expr> logs <...> can read them after dispatch.
+		session.lastReplLogs = isEnvelopeResponse(response) ? [...response.logs] : [];
 
 		return formatReplResponse(response, input);
 	}
@@ -245,4 +250,30 @@ function formatValue(value: unknown): string {
 		}
 	}
 	return String(value);
+}
+
+// ── /capture buffer submission ──────────────────────────────────────
+
+/**
+ * Submit a buffered HiseScript block as a single REPL expression. Returns the
+ * raw envelope response so callers can pull `logs` / `errors` directly. Used by
+ * /expect-logs to flush the /capture buffer.
+ *
+ * The block is wrapped in an IIFE — `(function(){ ... })()` — because the HISE
+ * REPL forbids `var` declarations at the root namespace (root structure must
+ * stay immutable). Wrapping gives the buffered code its own local scope so
+ * `var x = 5; Console.print(x);` works as expected.
+ */
+export async function submitReplBuffer(
+	session: SessionContext,
+	processorId: string,
+	lines: string[],
+): Promise<HiseResponse | null> {
+	if (!session.connection) return null;
+	const body = lines.join("\n");
+	const expression = `(function(){\n${body}\n})()`;
+	return session.connection.post("/api/repl", {
+		expression,
+		moduleId: processorId,
+	});
 }

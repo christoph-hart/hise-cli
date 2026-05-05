@@ -59,7 +59,7 @@ export function createSession({
 }: CreateSessionOptions): { session: Session; completionEngine: CompletionEngine } {
 	const session = new Session(connection, completionEngine);
 	if (handlerRegistry) session.handlerRegistry = handlerRegistry;
-	session.cwd = cwd ?? (typeof process !== "undefined" ? process.cwd() : null);
+	session.cwd = cwd ?? (typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null);
 	session.registerMode("script", (ctx) => new ScriptMode(ctx, completionEngine));
 	session.registerMode("inspect", () => new InspectMode(completionEngine));
 	session.registerMode(

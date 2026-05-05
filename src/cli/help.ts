@@ -594,13 +594,50 @@ PATH RESOLUTION
   to make .hsc files directly executable on Unix (chmod +x test.hsc).
 
 TOOL COMMANDS (available in scripts and TUI)
-  /wait <duration>           Pause (e.g., /wait 500ms, /wait 0.5s)
-  /expect <cmd> is <value>   Assert a command's result
-  /callback <name>           In /script, collect raw callback body lines
-  /compile                   In /script, compile collected callbacks
-  /export                    Enter export mode (build targets)
+  /wait <duration>                 Pause (e.g., /wait 500ms, /wait 0.5s)
+  /expect <cmd> is <value>         Assert a command's return value
+  /expect <cmd> matches <file>     Assert output equals a reference file (TUI/CLI)
+  /expect <cmd> contains "<pat>"   Substring match on success result
+  /expect <cmd> logs <json|scalar> Assert Console.print logs (script mode)
+  /expect <cmd> throws "<pat>"     Assert command errors with a substring
+  /capture                         Open Console.print buffer (script mode)
+  /expect-logs <json>              Submit captured buffer + assert logs
+  /expect-compile throws "<pat>"   Assert collected callbacks fail to compile
+  /callback <name>                 In /script, collect raw callback body lines
+  /compile                         In /script, compile collected callbacks
+  /export                          Enter export mode (build targets)
     Float tolerance: default 0.01, customize with "within <tol>"
     Abort on failure: append "or abort"
+
+LOG / ERROR ASSERTIONS (script mode only)
+  Single-line:
+    /expect Console.print(1234) logs 1234
+    /expect Console.print("hi") logs "hi"
+    /expect Console.print(0.5) logs 0.5 within 0.01
+
+  Multi-line (preserves var scope across lines):
+    /capture
+    var x = 5;
+    Console.print(x);
+    Console.print(x * 2);
+    /expect-logs ["5", "10"]
+
+  Substring match on success result (any mode):
+    /hise /expect status contains "HISE online"
+    /expect get Master.Volume contains "-6"
+
+  Error matching (substring on normalized error message):
+    /expect undefinedFn() throws "not a function"
+    /expect Console.assertEqual(1, 2) throws "Assertion failed"
+
+  Compile-error matching (does NOT abort the script):
+    /callback onInit
+    var x = undefinedFn();
+    /expect-compile throws "not a function"
+
+  Log lines are normalized: leading "Interface: " / "Script Processor: " /
+  "ScriptProcessor: " prefixes are stripped before compare. Per-line match
+  is exact-string OR float-within-tolerance OR JSON-structural-equal.
 
 ERROR HANDLING
   Parse phase:   Multi-recovery — all syntax errors reported together

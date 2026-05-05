@@ -87,11 +87,17 @@ Dot-context: \`/builder.Master add LFO\` sets the context path first.
 - **/run** \`<file.hsc>\` — Execute a .hsc script (multiline recipes & tests)
 - **/parse** \`<file.hsc>\` — Validate a script without executing (dry run)
 - **/wait** \`<duration>\` — Pause execution (e.g., \`/wait 500ms\`, \`/wait 0.5s\`)
-- **/expect** \`<cmd> is <value>\` — Assert a command result (float tolerance: 0.01)
+- **/expect** \`<cmd> is|matches|logs|throws|contains <value>\` — Assert a command result
+- **/capture** — In script mode, open a Console.print buffer (end with \`/expect-logs\`)
+- **/expect-logs** \`<json>\` — Assert captured Console output (paired with \`/capture\`)
+- **/expect-compile** \`throws "<pattern>"\` — Assert callback compile fails with a substring
 - **/callback** \`<name>\` — In script mode, collect raw callback body lines for compilation
 - **/compile** — In script mode, compile collected callbacks with \`/api/set_script\`
   - \`/expect getValue() is 0.5 within 0.001\` — custom tolerance
-  - \`/expect isDefined(Knob1) is 1 or abort\` — abort script on failure`,
+  - \`/expect isDefined(Knob1) is 1 or abort\` — abort script on failure
+  - \`/expect Console.print(1234) logs 1234\` — single-line log assertion
+  - \`/expect undefinedFn() throws "not a function"\` — error substring match
+  - \`/expect status contains "HISE online"\` — substring match on success result`,
 
 	script: `# Script Mode
 
@@ -124,7 +130,16 @@ Content.getComponent("Knob1").getValue()
 - \`/callback onInit\` — start collecting raw \`onInit\` body lines
 - \`/callback onNoteOn\` — start collecting a callback body, then wrap it on compile
 - \`/compile\` — send collected callbacks to \`/api/set_script\` with \`compile: true\`
-- entering or exiting script mode clears all pending callback buffers`,
+- entering or exiting script mode clears all pending callback buffers
+
+## Test Verbs (script mode)
+
+- \`/capture\` — open a Console.print buffer; following lines silently buffer
+- \`/expect-logs <json>\` — submit buffered lines, assert Console output
+- \`/expect-compile throws "<pat>"\` — assert collected callbacks fail to compile
+- \`/expect <expr> logs <json|scalar>\` — inline log assertion
+- \`/expect <expr> throws "<pat>"\` — substring match on error
+- All verbs accept \`or abort\` and (where meaningful) \`within <tol>\``,
 
 	builder: `# Builder Mode
 
