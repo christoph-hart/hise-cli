@@ -66,6 +66,20 @@ export class Session implements SessionContext, CommandSession {
 	wizardRegistry: WizardRegistry | null = null;
 	handlerRegistry: WizardHandlerRegistry | null = null;
 	pendingWizard: PendingWizard | null = null;
+	/** Accessor for the loaded module list. Wired by the platform bootstrap
+	 *  after `loadSessionDatasets`. Used by the LLM intent pipeline to build
+	 *  schema-constrained outputs. */
+	getModuleList?: () => import("./data.js").ModuleList | undefined;
+	/** Accessor for the loaded component property dataset (UI mode). Wired by
+	 *  the platform bootstrap; consumed by the LLM intent pipeline. */
+	getComponentProperties?: () => import("./modes/ui-parser.js").ComponentPropertyMap | undefined;
+	/** LLM provider used by `?<NL>` script lines. Wired by the platform
+	 *  bootstrap (TUI launch, live-test setup). Unset = AI lines fail with
+	 *  a clear error. */
+	llmProvider?: import("./llm/types.js").LlmProvider;
+	/** Help-text provider for the LLM intent prompt. Wired by callers so the
+	 *  engine layer doesn't import from cli/. */
+	getHelpText?: (scope: string) => string;
 	/** Header of the wizard currently executing, or null if none.
 	 *  Read by status-bar renderers (TUI, web) to show "Running <header>" with a spinner. */
 	activeWizard: string | null = null;

@@ -6,10 +6,11 @@ export interface ScriptLine {
 	lineNumber: number;
 	/** Original text (for error messages) */
 	raw: string;
-	/** Trimmed text, ready to dispatch */
+	/** Trimmed text, ready to dispatch.
+	 *  For kind="ai": the natural-language request (no leading `?`). */
 	content: string;
-	/** Whether this is a slash command or a mode-specific command */
-	kind: "slash" | "command";
+	/** Whether this is a slash command, an AI prompt, or a mode-specific command */
+	kind: "slash" | "command" | "ai";
 }
 
 /** Parsed .hsc script ready for validation/execution. */

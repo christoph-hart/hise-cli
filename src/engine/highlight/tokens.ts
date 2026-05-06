@@ -18,6 +18,7 @@ export type TokenType =
 	| "bracket"
 	| "punctuation"
 	| "plain"
+	| "aiPrefix"     // signal-colored prefix marker (? for AI prediction)
 	// Slash command tokens
 	| "command"      // generic slash commands (/help, /exit, etc.)
 	// Mode-colored tokens (slash commands that enter modes)
@@ -52,6 +53,7 @@ export const TOKEN_COLORS: Record<TokenType, string> = {
 	bracket: "#FFFFFF",
 	punctuation: "#CCCCCC",
 	plain: "#DDDDFF",
+	aiPrefix: "#90FFB1",
 	// Slash command tokens
 	command: "#FFFFFF",
 	// Mode-colored tokens — accent colors from MODE_ACCENTS

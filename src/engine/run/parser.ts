@@ -43,6 +43,15 @@ export function parseScript(source: string): ParsedScript {
 
 		if (content === "") continue;
 
+		// `?<NL>` lines are AI-resolved at execution time. Strip the `?` and
+		// any leading whitespace; the remaining text is the user's request.
+		if (content.startsWith("?")) {
+			const nl = content.slice(1).trim();
+			if (nl.length === 0) continue;
+			lines.push({ lineNumber: i + 1, raw, content: nl, kind: "ai" });
+			continue;
+		}
+
 		lines.push({
 			lineNumber: i + 1,
 			raw,

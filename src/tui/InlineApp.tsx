@@ -56,10 +56,23 @@ import {
 import { mergeInitDefaults } from "../engine/wizard/types.js";
 import { formatWithClause } from "../engine/commands/slash.js";
 import { listPathCompletions } from "./wizard-files.js";
+import {
+	getProviderLabel,
+	isAiCapableMode,
+	runAiPrediction,
+} from "./ai-prompt.js";
+import type { IntentOutcome } from "../engine/llm/index.js";
 
 interface CommittedBlock {
 	id: number;
 	text: string;
+}
+
+interface AiPreviewState {
+	nl: string;
+	pending: boolean;
+	outcome?: IntentOutcome;
+	preludeError?: string;
 }
 
 export interface InlineAppProps {
@@ -222,6 +235,13 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 	// Bumped on every editor value change so editorMaxLines memo recomputes.
 	const [editorValueVersion, setEditorValueVersion] = useState(0);
 
+	// AI prompt (?-prefix) state. When set, displays a confirmation block
+	// above the input prompt; Enter executes, Esc cancels, R retries.
+	const [aiPreview, setAiPreview] = useState<AiPreviewState | null>(null);
+	const aiPreviewRef = useRef<AiPreviewState | null>(null);
+	aiPreviewRef.current = aiPreview;
+	const aiAbortRef = useRef<AbortController | null>(null);
+
 	const MIN_EDITOR_LINES = 4;
 	const editorMaxLines = useMemo(() => {
 		if (!multilineMode) return 1;
@@ -247,9 +267,26 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 		: currentMode.accent || scheme.foreground.muted;
 	const contextLabel = wizardActive ? undefined : currentMode.contextLabel;
 
-	const modeTokenizer = currentMode.tokenizeInput
-		? (v: string) => currentMode.tokenizeInput!(v)
-		: undefined;
+	const modeTokenizer = useMemo(() => {
+		const inner = currentMode.tokenizeInput
+			? (v: string) => currentMode.tokenizeInput!(v)
+			: undefined;
+		// Wrap to special-case ?-prefix (AI prompt): bypass mode highlight,
+		// render `?` in signal color and rest as plain text.
+		return (v: string) => {
+			if (v.trimStart().startsWith("?")) {
+				const leading = v.length - v.trimStart().length;
+				const out = [];
+				if (leading > 0) out.push({ token: "plain" as const, text: v.slice(0, leading) });
+				out.push({ token: "aiPrefix" as const, text: "?", bold: true });
+				const rest = v.slice(leading + 1);
+				if (rest.length > 0) out.push({ token: "plain" as const, text: rest });
+				return out;
+			}
+			return inner ? inner(v) : [{ token: "plain" as const, text: v }];
+		};
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [currentMode]);
 
 	const appendBlock = useCallback((block: PrerenderedBlock, indent = true, compact = false) => {
 		const id = blockIdRef.current++;
@@ -385,6 +422,12 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 
 	const handleInputValueChange = useCallback((value: string, cursorPos: number) => {
 		if (value.length < 1) {
+			setCompletionState(null);
+			return;
+		}
+
+		// AI prefix `?<request>` — suppress completion entirely.
+		if (!multilineModeRef.current && value.trimStart().startsWith("?")) {
 			setCompletionState(null);
 			return;
 		}
@@ -683,9 +726,59 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 		}
 	}, [session, scheme, innerW, appendBlock, editorFilePath]);
 
+	const runAiPredict = useCallback(async (nl: string) => {
+		const mode = session.currentMode();
+		if (!isAiCapableMode(mode.id)) {
+			setAiPreview({
+				nl,
+				pending: false,
+				preludeError: `AI prediction available in builder/ui/dsp modes only (current: ${mode.id || "root"}).`,
+			});
+			disabledRef.current = true;
+			setDisabled(true);
+			return;
+		}
+		aiAbortRef.current?.abort();
+		const ctl = new AbortController();
+		aiAbortRef.current = ctl;
+		setAiPreview({ nl, pending: true });
+		disabledRef.current = true;
+		setDisabled(true);
+		try {
+			const tree = mode.getTree?.() ?? null;
+			const moduleList = session.getModuleList?.();
+			const componentProperties = session.getComponentProperties?.();
+			const outcome = await runAiPrediction({
+				mode: mode.id,
+				tree,
+				nl,
+				signal: ctl.signal,
+				moduleList,
+				componentProperties,
+			});
+			if (ctl.signal.aborted) return;
+			setAiPreview({ nl, pending: false, outcome });
+		} catch (e) {
+			if (ctl.signal.aborted) return;
+			setAiPreview({
+				nl,
+				pending: false,
+				preludeError: e instanceof Error ? e.message : String(e),
+			});
+		}
+	}, [session]);
+
 	const handleSubmit = useCallback(async (input: string) => {
 		if (input.trim().length === 0) return;
 		setCompletionState(null);
+
+		// AI prefix `?<request>` — run intent pipeline, show confirmation block
+		if (!multilineModeRef.current && input.trim().startsWith("?")) {
+			const nl = input.trim().slice(1).trim();
+			if (nl.length === 0) return;
+			await runAiPredict(nl);
+			return;
+		}
 
 		// Multiline submit → execute script (no /edit detection here)
 		if (multilineModeRef.current) {
@@ -851,6 +944,40 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 				}
 			}
 			setWizardForm(newState);
+			return;
+		}
+
+		// AI preview block active — capture confirm/cancel/retry keys
+		// before the disabled-gate (preview always disables Input).
+		if (aiPreviewRef.current) {
+			const preview = aiPreviewRef.current;
+			if (preview.pending) {
+				if (key.escape) {
+					aiAbortRef.current?.abort();
+					setAiPreview(null);
+					disabledRef.current = false;
+					setDisabled(false);
+				}
+				return;
+			}
+			if (key.return) {
+				const cmd = preview.outcome?.ok ? preview.outcome.result.command : null;
+				setAiPreview(null);
+				disabledRef.current = false;
+				setDisabled(false);
+				if (cmd) void handleSubmit(cmd);
+				return;
+			}
+			if (key.escape) {
+				setAiPreview(null);
+				disabledRef.current = false;
+				setDisabled(false);
+				return;
+			}
+			if (input === "r" || input === "R") {
+				void runAiPredict(preview.nl);
+				return;
+			}
 			return;
 		}
 
@@ -1155,6 +1282,35 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 						<Text wrap="truncate-end">{treePanelText}</Text>
 					</>
 				)}
+				{!wizardForm && !wizardActive && aiPreview && (
+					<Box
+						flexDirection="column"
+						width={columns}
+						borderStyle="single"
+						borderColor={brand.signal}
+						paddingX={1}
+					>
+						<Text color={scheme.foreground.muted}>{"? "}<Text color={scheme.foreground.default}>{aiPreview.nl}</Text></Text>
+						{aiPreview.pending ? (
+							<Text color={brand.signal}>{spinnerFrames[spinnerFrame]} thinking via {getProviderLabel()}…  <Text color={scheme.foreground.muted}>(esc cancel)</Text></Text>
+						) : aiPreview.preludeError ? (
+							<>
+								<Text color={brand.error}>{aiPreview.preludeError}</Text>
+								<Text color={scheme.foreground.muted}>esc dismiss</Text>
+							</>
+						) : aiPreview.outcome?.ok ? (
+							<>
+								<Text color={scheme.foreground.bright}>{"→ "}{aiPreview.outcome.result.command}</Text>
+								<Text color={scheme.foreground.muted}>↵ execute   esc cancel   r retry   <Text color={scheme.foreground.muted}>({aiPreview.outcome.result.durationMs}ms via {getProviderLabel()})</Text></Text>
+							</>
+						) : aiPreview.outcome ? (
+							<>
+								<Text color={brand.error}>error: {aiPreview.outcome.error}</Text>
+								<Text color={scheme.foreground.muted}>esc dismiss   r retry</Text>
+							</>
+						) : null}
+					</Box>
+				)}
 				{!wizardForm && !wizardActive && (
 					<Input
 						modeLabel={multilineMode ? (editorFilePath?.split(/[\\/]/).pop() ?? "scratch") : "root"}
@@ -1162,7 +1318,7 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 						contextLabel={multilineMode ? (editorFilePath ?? undefined) : undefined}
 						columns={columns}
 						disabled={disabled}
-						focused={terminalFocused}
+						focused={terminalFocused && !aiPreview}
 						flat={!multilineMode}
 						multiline={multilineMode}
 						maxLines={editorMaxLines}

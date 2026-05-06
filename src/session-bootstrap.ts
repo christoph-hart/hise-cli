@@ -19,6 +19,8 @@ import type { AssetEnvironment } from "./engine/assets/environment.js";
 import { WizardRegistry } from "./engine/wizard/registry.js";
 import type { WizardHandlerRegistry } from "./engine/wizard/handler-registry.js";
 import { registerWizardAliases } from "./engine/commands/slash.js";
+import { createProvider } from "./engine/llm/index.js";
+import { renderCliHelp } from "./cli/help.js";
 
 export const SUPPORTED_MODE_IDS = ["script", "inspect", "builder", "dsp", "project", "undo", "ui", "sequence", "hise", "analyse", "publish", "assets", "api"] as const;
 
@@ -44,6 +46,11 @@ export interface CreateSessionOptions {
 	/** Host process working directory. Used by `/project switch ./` etc.
 	 *  Defaults to `process.cwd()` when running on Node. */
 	cwd?: string;
+	/** When true (default), wires `session.llmProvider` (Ollama qwen3.5:9b) and
+	 *  `session.getHelpText` so `?<NL>` script lines and the TUI ?-prefix can
+	 *  resolve via the LLM intent pipeline. Set false to opt out (e.g.,
+	 *  unit tests that never need AI). */
+	enableLlm?: boolean;
 }
 
 export function createSession({
@@ -59,11 +66,14 @@ export function createSession({
 	launcher,
 	assetEnvironment,
 	cwd,
+	enableLlm,
 }: CreateSessionOptions): { session: Session; completionEngine: CompletionEngine } {
 	const session = new Session(connection, completionEngine);
 	if (handlerRegistry) session.handlerRegistry = handlerRegistry;
 	session.forLlm = forLlm ?? false;
 	session.cwd = cwd ?? (typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null);
+	if (getModuleList) session.getModuleList = getModuleList;
+	if (getComponentProperties) session.getComponentProperties = getComponentProperties;
 	session.registerMode("script", (ctx) => new ScriptMode(ctx, completionEngine));
 	session.registerMode("inspect", () => new InspectMode(completionEngine));
 	session.registerMode(
@@ -89,6 +99,12 @@ export function createSession({
 	session.registerMode("publish", () => new PublishMode());
 	session.registerMode("assets", () => new AssetsMode(assetEnvironment ?? null, completionEngine));
 	session.registerMode("api", () => new ApiMode(getScriptingApi?.(), { forLlm: forLlm ?? false }));
+
+	if (enableLlm !== false) {
+		session.llmProvider = createProvider({ kind: "ollama", model: "qwen3.5:9b", think: false });
+		session.getHelpText = (scope: string) => renderCliHelp([], scope);
+	}
+
 	return { session, completionEngine };
 }
 

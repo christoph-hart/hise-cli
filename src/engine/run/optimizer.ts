@@ -67,6 +67,13 @@ export function optimizeScript(script: ParsedScript): ParsedScript {
 			continue;
 		}
 
+		// AI lines never batch — each needs its own LLM round-trip + dispatch.
+		if (line.kind === "ai") {
+			flushBatch();
+			result.push(line);
+			continue;
+		}
+
 		// Mode-specific command
 		if (currentMode === "builder" && isBatchable(line.content)) {
 			batch.push(line);

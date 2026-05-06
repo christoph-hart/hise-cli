@@ -181,6 +181,38 @@ export async function executeScript(
 				continue;
 			}
 
+			// AI line: resolve `?<NL>` to a CLI command via the LLM provider, then
+			// dispatch the resolved command through the normal session pipeline.
+			if (line.kind === "ai") {
+				const resolved = await resolveAiLine(line.content, session);
+				if (!resolved.ok) {
+					abortError = { line: line.lineNumber, message: `AI prediction failed: ${resolved.error}` };
+					onProgress?.({ type: "error", line: line.lineNumber, message: abortError.message });
+					break;
+				}
+				// Record the prediction as its own output entry so reports show
+				// the NL → command mapping. Then dispatch the resolved command.
+				const aiOutput = {
+					line: line.lineNumber,
+					content: `?${line.content}`,
+					result: textResult(`→ ${resolved.command}`),
+					label: "ai",
+				};
+				results.push(aiOutput);
+				onProgress?.({ type: "command", output: aiOutput });
+				const aiResult = await session.handleInput(resolved.command);
+				linesExecuted++;
+				const dispatchOutput = { line: line.lineNumber, content: resolved.command, result: aiResult };
+				results.push(dispatchOutput);
+				onProgress?.({ type: "command", output: dispatchOutput });
+				if (aiResult.type === "error") {
+					abortError = { line: line.lineNumber, message: `AI command rejected: ${aiResult.message}` };
+					onProgress?.({ type: "error", line: line.lineNumber, message: abortError.message });
+					break;
+				}
+				continue;
+			}
+
 			// Normal command: dispatch through session
 			const result = await session.handleInput(line.content);
 			linesExecuted++;
@@ -323,6 +355,20 @@ export async function dryRunScript(
 				if (cmd.name === "run") continue;
 			}
 
+			// AI lines: resolve via LLM, then execute the resolved command.
+			if (line.kind === "ai") {
+				const resolved = await resolveAiLine(line.content, session);
+				if (!resolved.ok) {
+					errors.push({ line: line.lineNumber, message: `AI prediction failed: ${resolved.error}` });
+					continue;
+				}
+				const aiResult = await session.handleInput(resolved.command);
+				if (aiResult.type === "error") {
+					errors.push({ line: line.lineNumber, message: `AI command "${resolved.command}" rejected: ${aiResult.message}` });
+				}
+				continue;
+			}
+
 			// Execute against HISE (inside the undo group)
 			const result = await session.handleInput(line.content);
 
@@ -428,6 +474,47 @@ async function executeExpect(
 
 /** Resolve the active processor id for /capture routing. Returns null when
  *  the current mode isn't script. */
+async function resolveAiLine(nl: string, session: Session): Promise<{ ok: true; command: string } | { ok: false; error: string }> {
+	if (!session.llmProvider) {
+		return { ok: false, error: "no LLM provider configured on session (set session.llmProvider)" };
+	}
+	const mode = session.modeStack[session.modeStack.length - 1];
+	if (!mode || (mode.id !== "builder" && mode.id !== "ui" && mode.id !== "dsp")) {
+		return { ok: false, error: `?-lines require builder/ui/dsp mode (current: ${mode?.id ?? "root"})` };
+	}
+	const helpText = session.getHelpText?.(mode.id) ?? "";
+	const tree = mode.getTree?.() ?? null;
+	const moduleList = session.getModuleList?.();
+	const componentProperties = session.getComponentProperties?.();
+	const { runStructuredIntent, runIntent, treeNodeToLlmJson } = await import("../llm/index.js");
+	const useStructured = mode.id === "builder" || mode.id === "ui";
+	const outcome = useStructured
+		? await runStructuredIntent(session.llmProvider, {
+				mode: mode.id,
+				nl,
+				tree,
+				helpText,
+				moduleList,
+				componentProperties,
+			})
+		: await runIntent(session.llmProvider, {
+				mode: mode.id,
+				nl,
+				treeJson: treeNodeToLlmJson(tree),
+				helpText,
+			});
+	if (!outcome.ok) {
+		const detail = outcome.raw ? ` (raw: ${truncate(outcome.raw, 240)})` : "";
+		return { ok: false, error: `${outcome.error}${detail}` };
+	}
+	return { ok: true, command: outcome.result.command };
+}
+
+function truncate(s: string, max: number): string {
+	const oneLine = s.replace(/\s+/g, " ").trim();
+	return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
 function activeScriptProcessor(session: Session): string | null {
 	const mode = session.currentMode();
 	if (mode instanceof ScriptMode) return mode.processorId;
@@ -607,6 +694,20 @@ export function formatRunReport(
 				for (const line of val.split("\n")) {
 					lines.push(line);
 				}
+			}
+		}
+	}
+
+	// AI predictions are always shown (even in summary/quiet) — high-signal
+	// info: which NL → which command. Pair the `?<nl>` echo with the resolved
+	// command on the next line for readability.
+	if (verbosity !== "verbose") {
+		for (const cmd of result.results) {
+			if (cmd.label !== "ai") continue;
+			const resolvedLine = formatResultForLog(cmd.result);
+			if (resolvedLine) {
+				lines.push(`line ${cmd.line}: ${cmd.content}`);
+				lines.push(`         ${resolvedLine}`);
 			}
 		}
 	}

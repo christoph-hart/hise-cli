@@ -120,6 +120,19 @@ export function validateScript(
 			continue;
 		}
 
+		// AI line: resolution is dynamic and depends on live HISE state +
+		// model output, so static validation can only check that the host
+		// mode supports AI dispatch.
+		if (line.kind === "ai") {
+			if (currentModeId !== "builder" && currentModeId !== "ui" && currentModeId !== "dsp") {
+				errors.push({
+					line: line.lineNumber,
+					message: `?-lines require builder/ui/dsp mode (current: ${currentModeId})`,
+				});
+			}
+			continue;
+		}
+
 		// Mode-specific command (no slash)
 		if (currentModeId === "root") {
 			errors.push({
