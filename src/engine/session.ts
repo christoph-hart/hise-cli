@@ -75,6 +75,9 @@ export class Session implements SessionContext, CommandSession {
 	activeWizardTick = 0;
 	projectName: string | null = null;
 	projectFolder: string | null = null;
+	/** Set by session-bootstrap when the session is created for the CLI/LLM
+	 *  route. Modes branch on this to emit structured JSON. */
+	forLlm = false;
 	/** Current working directory the host process started in. Set by the
 	 *  platform bootstrap (`process.cwd()`) so the engine can resolve `./`
 	 *  paths without importing `node:`. Falls back to "." when unset. */

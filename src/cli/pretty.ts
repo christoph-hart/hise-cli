@@ -103,6 +103,8 @@ function renderResult(result: CommandResult): string {
 			});
 		case "preformatted":
 			return IS_TTY ? result.content : stripAnsi(result.content);
+		case "json":
+			return result.fallbackText ?? JSON.stringify(result.value, null, 2);
 		case "table":
 			return IS_TTY ? renderTable(result.headers, result.rows) : renderPlainTable(result.headers, result.rows);
 		case "wizard":

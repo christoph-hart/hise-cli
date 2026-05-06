@@ -30,9 +30,12 @@ export interface CreateSessionOptions {
 	getComponentProperties?: () => ComponentPropertyMap | undefined;
 	getPreprocessorList?: () => PreprocessorList | undefined;
 	getScriptingApi?: () => ScriptingApi | undefined;
-	/** When true, the `/api` mode renders `llmRef` instead of the terse
-	 *  human description. CLI/agent route sets this. */
-	apiForLlm?: boolean;
+	/** When true, the session is treated as an LLM/CLI consumer:
+	 *  - `/api` mode renders `llmRef` instead of the terse human description
+	 *  - `show tree` (builder/ui/dsp) returns the raw HISE JSON instead of an
+	 *    ASCII tree
+	 *  CLI/agent route sets this. */
+	forLlm?: boolean;
 	handlerRegistry?: WizardHandlerRegistry;
 	launcher?: HiseLauncher;
 	/** Asset environment for the `/assets` mode. Optional — when absent, the
@@ -51,7 +54,7 @@ export function createSession({
 	getComponentProperties,
 	getPreprocessorList,
 	getScriptingApi,
-	apiForLlm,
+	forLlm,
 	handlerRegistry,
 	launcher,
 	assetEnvironment,
@@ -59,6 +62,7 @@ export function createSession({
 }: CreateSessionOptions): { session: Session; completionEngine: CompletionEngine } {
 	const session = new Session(connection, completionEngine);
 	if (handlerRegistry) session.handlerRegistry = handlerRegistry;
+	session.forLlm = forLlm ?? false;
 	session.cwd = cwd ?? (typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null);
 	session.registerMode("script", (ctx) => new ScriptMode(ctx, completionEngine));
 	session.registerMode("inspect", () => new InspectMode(completionEngine));
@@ -84,7 +88,7 @@ export function createSession({
 	session.registerMode("analyse", () => new AnalyseMode(completionEngine));
 	session.registerMode("publish", () => new PublishMode());
 	session.registerMode("assets", () => new AssetsMode(assetEnvironment ?? null, completionEngine));
-	session.registerMode("api", () => new ApiMode(getScriptingApi?.(), { forLlm: apiForLlm ?? false }));
+	session.registerMode("api", () => new ApiMode(getScriptingApi?.(), { forLlm: forLlm ?? false }));
 	return { session, completionEngine };
 }
 

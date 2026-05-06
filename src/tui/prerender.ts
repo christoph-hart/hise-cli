@@ -271,6 +271,13 @@ export function renderResult(
 		case "preformatted":
 			return renderPreformatted(result.content, scheme, width, result.accent, result.plain);
 
+		case "json":
+			source = codeToMarkdown(
+				result.fallbackText ?? JSON.stringify(result.value, null, 2),
+				"json",
+			);
+			break;
+
 		case "table":
 			source = tableToMarkdown(result.headers, result.rows);
 			break;

@@ -24,6 +24,11 @@ export function serializeCliOutput(
 		return serializeRunReport(result);
 	}
 
+	// json: emit the structured value directly (e.g. `show tree` raw HISE result)
+	if (result.type === "json") {
+		return { ok: true, value: result.value };
+	}
+
 	return {
 		ok: result.type !== "error",
 		result: stripAccent(result),

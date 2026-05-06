@@ -8,6 +8,7 @@
 import type { CommandResult } from "../result.js";
 import {
 	errorResult,
+	jsonResult,
 	preformattedResult,
 	tableResult,
 	textResult,
@@ -23,6 +24,7 @@ import { isEnvelopeResponse, isErrorResponse } from "../hise.js";
 import type { HiseConnection } from "../hise.js";
 import type { RawDspNode } from "../../mock/contracts/dsp.js";
 import {
+	cleanDspTreeForLlm,
 	findDspConnectionTargeting,
 	findDspNode,
 	findDspParent,
@@ -205,6 +207,7 @@ export class DspMode implements Mode {
 	private moduleId: string | null = null;
 	private currentPath: string[] = [];
 	private rawTree: RawDspNode | null = null;
+	private lastTreeResult: unknown = null;
 	private treeRoot: TreeNode | null = null;
 	private treeFetched = false;
 	/**
@@ -291,6 +294,7 @@ export class DspMode implements Mode {
 			this.lastTreeError = "tree fetch returned non-success envelope";
 			return;
 		}
+		this.lastTreeResult = response.result ?? null;
 		try {
 			const { raw, tree } = normalizeDspTreeResponse(response.result);
 			this.rawTree = raw;
@@ -473,6 +477,10 @@ export class DspMode implements Mode {
 		}
 		const what = cmd.what;
 		if (what === "tree") {
+			if (session.forLlm) {
+				if (!this.lastTreeResult) return textResult("(no tree — call `init <name>` first)");
+				return jsonResult(cleanDspTreeForLlm(this.lastTreeResult));
+			}
 			if (!this.treeRoot) return textResult("(no tree — call `init <name>` first)");
 			return preformattedResult(renderTreeBox(this.getTree()!), undefined, true);
 		}

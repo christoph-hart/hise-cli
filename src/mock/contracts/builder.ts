@@ -215,6 +215,50 @@ function applyDiffRecursive(
 // ── Response normalizers ────────────────────────────────────────────
 
 /** Normalize the result from GET /api/builder/tree into a TreeNode. */
+/** Strip a raw HISE builder tree to the minimum useful for LLM context:
+ *  per-module: id, type, bypassed, plus recursive children/midi/fx/modulation.
+ *  Per-modulation chain: id and children. Empty chains and empty arrays are
+ *  dropped to keep the payload compact. */
+export function cleanBuilderTreeForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.id === "string") out.id = n.id;
+	if (typeof n.type === "string") out.type = n.type;
+	if (typeof n.bypassed === "boolean") out.bypassed = n.bypassed;
+
+	const children = cleanArrayForLlm(n.children, cleanBuilderTreeForLlm);
+	const midi = cleanArrayForLlm(n.midi, cleanBuilderTreeForLlm);
+	const fx = cleanArrayForLlm(n.fx, cleanBuilderTreeForLlm);
+	const modulation = cleanArrayForLlm(n.modulation, cleanBuilderModChainForLlm);
+
+	if (children) out.children = children;
+	if (midi) out.midi = midi;
+	if (fx) out.fx = fx;
+	if (modulation) out.modulation = modulation;
+	return out;
+}
+
+function cleanBuilderModChainForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const children = cleanArrayForLlm(n.children, cleanBuilderTreeForLlm);
+	if (!children) return null;
+	const out: Record<string, unknown> = {};
+	if (typeof n.id === "string") out.id = n.id;
+	out.children = children;
+	return out;
+}
+
+function cleanArrayForLlm(
+	value: unknown,
+	mapper: (v: unknown) => unknown,
+): unknown[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	const mapped = value.map(mapper).filter((v) => v !== null && v !== undefined);
+	return mapped.length > 0 ? mapped : undefined;
+}
+
 export function normalizeBuilderTreeResponse(value: unknown): TreeNode {
 	if (!value || typeof value !== "object") {
 		throw new Error("Builder tree result must be an object");

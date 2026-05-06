@@ -77,6 +77,26 @@ function normalizeNode(
 
 // ── Response normalizers ───────────────────────────────────────────
 
+/** Strip a raw HISE UI tree to the minimum useful for LLM context:
+ *  id, type, optional visible (when false), optional saveInPreset (when true),
+ *  recursive childComponents. Empty arrays are dropped. */
+export function cleanUiTreeForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.id === "string") out.id = n.id;
+	if (typeof n.type === "string") out.type = n.type;
+	if (n.visible === false) out.visible = false;
+	if (n.saveInPreset === true) out.saveInPreset = true;
+	if (Array.isArray(n.childComponents)) {
+		const kids = n.childComponents
+			.map(cleanUiTreeForLlm)
+			.filter((v) => v !== null && v !== undefined);
+		if (kids.length > 0) out.childComponents = kids;
+	}
+	return out;
+}
+
 /** Normalize the result from GET /api/ui/tree into a TreeNode. */
 export function normalizeUiTreeResponse(value: unknown): TreeNode {
 	if (!value || typeof value !== "object") {

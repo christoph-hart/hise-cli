@@ -49,6 +49,7 @@ export type CommandResult =
 	| { type: "wizard"; definition: WizardDefinition; prefill: WizardAnswers; autoRun: boolean; accent?: string }
 	| { type: "run-report"; source: string; runResult: RunResult; verbosity: import("./run/executor.js").RunReportVerbosity; accent?: string }
 	| { type: "preformatted"; content: string; accent?: string; plain?: boolean }
+	| { type: "json"; value: unknown; fallbackText?: string; accent?: string }
 	| { type: "empty"; accent?: string };
 
 // ── Result factory helpers ──────────────────────────────────────────
@@ -100,6 +101,12 @@ export function runReportResult(
 
 export function preformattedResult(content: string, accent?: string, plain?: boolean): CommandResult {
 	return { type: "preformatted", content, accent, plain };
+}
+
+/** Structured JSON result. CLI --json mode emits `value` directly; TUI falls
+ *  back to `fallbackText` when present, otherwise pretty-prints `value`. */
+export function jsonResult(value: unknown, fallbackText?: string): CommandResult {
+	return { type: "json", value, fallbackText };
 }
 
 export function emptyResult(): CommandResult {

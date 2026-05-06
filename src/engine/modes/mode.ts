@@ -45,6 +45,10 @@ export interface CompletionResult {
 // The full Session class implements this. Avoids circular imports.
 export interface SessionContext {
 	readonly connection: import("../hise.js").HiseConnection | null;
+	/** True when the session serves an LLM/CLI consumer. Modes use this to
+	 *  emit structured JSON (e.g. raw HISE responses) instead of pre-rendered
+	 *  ASCII output. Set by the CLI route; TUI leaves it false. */
+	readonly forLlm?: boolean;
 	/** HISE project name (set on initial connection or after /hise launch). */
 	projectName?: string | null;
 	/** HISE project folder (set on initial connection or after /hise launch). */

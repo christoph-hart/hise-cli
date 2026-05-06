@@ -247,6 +247,25 @@ export function normalizeDspTreeResponse(value: unknown): { raw: RawDspNode; tre
 	return { raw, tree: normalizeDspTree(raw) };
 }
 
+/** Strip a raw HISE DSP tree to the minimum useful for LLM context:
+ *  nodeId, factoryPath, bypassed, recursive children. Parameters, properties,
+ *  and connections are dropped. */
+export function cleanDspTreeForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.nodeId === "string") out.nodeId = n.nodeId;
+	if (typeof n.factoryPath === "string") out.factoryPath = n.factoryPath;
+	if (typeof n.bypassed === "boolean") out.bypassed = n.bypassed;
+	if (Array.isArray(n.children)) {
+		const kids = n.children
+			.map(cleanDspTreeForLlm)
+			.filter((v) => v !== null && v !== undefined);
+		if (kids.length > 0) out.children = kids;
+	}
+	return out;
+}
+
 /** Normalize the full response of POST /api/dsp/init. */
 export function normalizeDspInitResponse(body: unknown): DspInitResult {
 	if (!body || typeof body !== "object") {

@@ -4,7 +4,7 @@
 // Falls back to local-only validation when no connection is available.
 
 import type { CommandResult, TreeNode } from "../result.js";
-import { errorResult, preformattedResult, tableResult, textResult } from "../result.js";
+import { errorResult, jsonResult, preformattedResult, tableResult, textResult } from "../result.js";
 import type { TokenSpan } from "../highlight/tokens.js";
 import { tokenizeUi } from "../highlight/ui.js";
 import type { CompletionItem, CompletionResult, Mode, ModeId, SessionContext } from "./mode.js";
@@ -18,6 +18,7 @@ import {
 	normalizeUiApplyResult,
 	applyUiDiffToTree,
 	collectComponentIds,
+	cleanUiTreeForLlm,
 } from "../../mock/contracts/ui.js";
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
@@ -91,6 +92,7 @@ export class UiMode implements Mode {
 	private moduleId = "Interface";
 	private currentPath: string[] = [];
 	private treeRoot: TreeNode | null = null;
+	private lastTreeResult: unknown = null;
 	private treeFetched = false;
 	private readonly completionEngine: CompletionEngine | null;
 	private readonly componentProperties: ComponentPropertyMap | null;
@@ -415,6 +417,7 @@ export class UiMode implements Mode {
 		const response = await connection.get(endpoint);
 		if (isErrorResponse(response)) return;
 		if (!isEnvelopeResponse(response) || !response.success) return;
+		this.lastTreeResult = response.result ?? null;
 		try {
 			this.treeRoot = normalizeUiTreeResponse(response.result);
 		} catch {
@@ -557,7 +560,7 @@ export class UiMode implements Mode {
 
 		// Show command — fetch properties from HISE and display as table
 		if (cmd.type === "show") {
-			return this.handleShow(cmd, session.connection ?? null);
+			return this.handleShow(cmd, session);
 		}
 
 		// Local validation for add commands
@@ -647,9 +650,16 @@ export class UiMode implements Mode {
 	/** Handle show command — show tree or fetch component properties from HISE. */
 	private async handleShow(
 		cmd: UiShowCommand,
-		connection: import("../hise.js").HiseConnection | null,
+		session: SessionContext,
 	): Promise<CommandResult> {
+		const connection = session.connection ?? null;
 		if (cmd.what === "tree") {
+			if (session.forLlm) {
+				if (!this.lastTreeResult) {
+					return textResult("No component tree available (requires HISE connection).");
+				}
+				return jsonResult(cleanUiTreeForLlm(this.lastTreeResult));
+			}
 			if (!this.treeRoot) {
 				return textResult("No component tree available (requires HISE connection).");
 			}

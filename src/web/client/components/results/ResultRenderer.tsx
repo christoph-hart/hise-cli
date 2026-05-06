@@ -26,6 +26,14 @@ export function ResultRenderer({ result }: { result: CommandResult }) {
 			return <RunReportResult result={result} />;
 		case "preformatted":
 			return <PreformattedResult result={result} />;
+		case "json": {
+			const text = result.fallbackText ?? JSON.stringify(result.value, null, 2);
+			return (
+				<pre className="result-code lang-json">
+					<code>{text}</code>
+				</pre>
+			);
+		}
 		case "wizard":
 			return <WizardResult result={result} />;
 		case "empty":

@@ -6,6 +6,7 @@
 import type { CommandResult } from "../result.js";
 import {
 	errorResult,
+	jsonResult,
 	preformattedResult,
 	tableResult,
 	textResult,
@@ -30,6 +31,7 @@ import {
 	normalizeBuilderTreeResponse,
 	normalizeBuilderApplyResult,
 	applyDiffToTree,
+	cleanBuilderTreeForLlm,
 } from "../../mock/contracts/builder.js";
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
@@ -203,6 +205,9 @@ export class BuilderMode implements Mode {
 	private readonly completionEngine: CompletionEngine | null;
 	private currentPath: string[] = [];
 	private treeRoot: TreeNode | null = null;
+	/** Raw HISE response.result from the most recent fetchTree call.
+	 *  Used by `show tree` in forLlm sessions to bypass ASCII rendering. */
+	private lastTreeResult: unknown = null;
 	compactView = false;
 
 	constructor(moduleList?: ModuleList, completionEngine?: CompletionEngine, initialPath?: string, treeRoot?: TreeNode | null) {
@@ -562,6 +567,7 @@ export class BuilderMode implements Mode {
 		const response = await connection.get(endpoint);
 		if (isErrorResponse(response)) return;
 		if (!isEnvelopeResponse(response) || !response.success) return;
+		this.lastTreeResult = response.result ?? null;
 		try {
 			this.treeRoot = normalizeBuilderTreeResponse(response.result);
 		} catch {
@@ -740,7 +746,7 @@ export class BuilderMode implements Mode {
 
 		// Show commands are always local (except show target which may fetch params)
 		if (cmd.type === "show") {
-			return this.handleShow(cmd, session.connection ?? null);
+			return this.handleShow(cmd, session);
 		}
 
 		// Move is not yet in C++ API
@@ -906,8 +912,9 @@ export class BuilderMode implements Mode {
 
 	private async handleShow(
 		cmd: ShowCommand,
-		connection: import("../hise.js").HiseConnection | null,
+		session: SessionContext,
 	): Promise<CommandResult> {
+		const connection = session.connection ?? null;
 		if (cmd.what === "types") {
 			if (!this.moduleList) {
 				return errorResult("Module data not loaded");
@@ -943,7 +950,13 @@ export class BuilderMode implements Mode {
 			return this.handleShowTarget(cmd.target!, connection);
 		}
 
-		// show tree — render from treeRoot (with chain colours propagated)
+		// show tree — emit cleaned HISE result for LLM sessions, ASCII tree otherwise
+		if (session.forLlm) {
+			if (!this.lastTreeResult) {
+				return textResult("No module tree available (requires HISE connection).");
+			}
+			return jsonResult(cleanBuilderTreeForLlm(this.lastTreeResult));
+		}
 		if (!this.treeRoot) {
 			return textResult("No module tree available (requires HISE connection).");
 		}
