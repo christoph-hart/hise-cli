@@ -1,0 +1,399 @@
+# CLI Grammar
+
+Grammar for hise-cli across all modes (builder, ui, dsp).
+
+## Notation
+
+| Symbol | Meaning |
+|--------|---------|
+| `<x>` | required token |
+| `[x]` | optional clause |
+| `[a, b, c]` | array literal (commas required, whitespace flexible) |
+| `\|` | alternative |
+
+Optional brackets in syntax tables are EBNF; array brackets in examples and values are literal.
+
+## Errors
+
+Operations that reference non-existent identifiers fail loudly. `set X.field V` errors if `X` doesn't exist or `field` is unknown for `X`'s type. No silent creation of missing intermediate paths.
+
+Exception: `create_parameter <container>.<name> ...` — the container path must exist; the final segment (`<name>`) must NOT exist (creates fresh). Errors if the parameter name already exists.
+
+Reparenting (`set X.parent Y`) errors if it would create a cycle.
+
+## Case sensitivity
+
+Identifier matching (paths, fields, type names) is **case-insensitive**. Storage and output preserve the original casing as supplied at creation or as stored in HISE.
+
+- `set master.volume -6` finds `Master.Volume`
+- `add Synth as "Lead"` stores `Lead`; `get lead.bypassed` retrieves it; output reads `Lead`
+- Ambiguous case-fold (two entities differing only by case) is rare in HISE; parser errors with both candidates listed.
+
+Filters (`list types <filter>`) are case-insensitive substring matches — same as identifier matching.
+
+## Output formats
+
+`show <id>` and `get <path>` return the same content in two formats:
+- **CLI mode** — JSON (machine-parseable, LLM-friendly).
+- **TUI mode** — formatted text (key/value, indented tree).
+
+`list <noun>` returns array (CLI) / table (TUI) of matching entries.
+
+## Paths and identifier resolution
+
+Instance IDs are unique within a project. Type names (`SineSynth`, `Compressor`) are class names from the type catalog, not instance IDs. Default instance IDs match the type name when only one of that type exists, but disambiguation is by parent path, not type. Shared chain ids (`Gain`, `Pitch`, `Velocity`) become unique once anchored to their parent (`SineSynth.Pitch` ≠ `SquareSynth.Pitch`).
+
+Two path forms only — no slash absolute syntax:
+
+- **Bare ID** (`Compressor`) — unique-instance project lookup. Errors if missing or ambiguous.
+- **Dotted path** (`SineSynth.Pitch.VelMod`) — anchored path used to disambiguate shared chain ids or to be explicit about location. Resolves left-to-right from project root.
+
+### Navigation (`cd`/`ls`/`pwd`)
+
+`cd` is the **only** command where bare paths are cwd-relative before falling back to unique-project lookup. All other verbs always use unique-project lookup.
+
+- `cd <name>` — descend into a child of cwd if one exists; otherwise unique-project lookup
+- `cd ..` — up one level
+- `cd <dotted.path>` — walk dotted path (relative or anchored at any prefix)
+- `pwd` / `ls` — current path / children
+
+Per-mode hierarchy and landing on mode entry:
+
+| Mode | Top entities | Path shape | `/<mode>` lands at | `/<mode> <X>` lands at |
+|------|--------------|------------|--------------------|------------------------|
+| Builder | `Master` (sole project root) | `Master.<chain>.<module>` | `Master` | n/a |
+| UI | scripts | `<Script>.<components>` | `Interface` | `<X>` |
+| DSP | host modules with networks | `<ScriptFX>.<NetworkName>.<nodes>` (root container named after the assigned network) | host-module selection (no entity, reach by `cd ..` from inside) | `<X>.<NetworkName>` (inside the network) |
+
+## Core rules
+
+1. **Prepositions have one global role.** `to` = destination (parent slot or wire target). `as` = name. `file`, `scale` = labeled roles for multi-slot verbs.
+
+2. **`add` creates an entity in the current container, or at an explicit parent via `to <parent>`.** Signature: `add <type> as "<name>" [to <parent>]`. Without `to`, the cwd is the parent. **The `to` clause is forbidden in comma-chained `add` statements** — chained adds use cwd only. To add multiple entities at a non-cwd parent, `cd` to that parent first.
+
+3. **Coordinates and bounds are JS arrays.** `[a, b, c, d]`. Commas required.
+
+4. **Strings are quoted when multi-word.** Single-word identifiers may be bare. Quoted strings escape keyword recognition.
+
+5. **`set`/`get` are symmetric across all paths.** `set X.field V` ↔ `get X.field`. No optional `to` on set. Reparent, bypass, position, resize, reorder all express as `set` writes.
+
+6. **`show` queries instances; `list` queries catalogs.** `show <id>` accepts only existing identifiers. `list <noun>` accepts a fixed set of category words.
+
+7. **Comma chaining inherits the verb only.** Every clause provides full arguments and full identifier paths. No prefix or target inheritance. The current working directory (`cwd`) applies to every clause in the statement (e.g. `add Filter as "LP", Filter as "HP"` adds both at cwd).
+
+8. **Naming uses `as "<name>"`.** Quoted, with the `as` keyword. One form across all modes. Names after `as` are always quoted strings, even for single-word names — this overrides the general "single-word identifier may be bare" rule.
+
+## Keyword inventory
+
+| Keyword | Meaning | Form |
+|---------|---------|------|
+| `as` | naming | `as "<name>"` |
+| `to` | destination | `to <id>` |
+| `file` | path | `file "<path>"` |
+| `scale` | render multiplier (1.0 = full size) | `scale <N>` |
+| `matched` | DSP normalize flag | trailing |
+
+Range/curve clauses for `create_parameter`: `default`, `step`, `mid`, `skew`.
+
+## Numeric arrays
+
+Array literals are whitelisted by arity. Only fixed-shape forms are valid; arbitrary lists like `[100, 200, 300]` are parse errors.
+
+| Arity | Form | Used by fields |
+|-------|------|----------------|
+| 2 | `[a, b]` | `position` (int), `size` (int), `range` (number), `create_parameter` min/max (number) |
+| 4 | `[a, b, c, d]` | `bounds` (int) |
+| N | `[a, b, …, n]` | `routing` (int), `routing.send` (int) — length 1..NUM_MAX_CHANNELS |
+
+Elements are numbers (integer or float). Percent literals are **not** allowed inside arrays — `position`, `size`, `bounds` are integer pixel values; `range` is a numeric pair. The `N`-arity form is restricted to routing fields and carries destination-channel indices (or `-1` for unconnected). Adding a new array-typed field requires extending the grammar with a new array production.
+
+## Percent literal
+
+`<N>%` is a value token that the parser normalizes to `<N> / 100` (float). Accepted in any value position globally.
+
+```
+set Sine1.Gain 50%             # equivalent to: set Sine1.Gain 0.5
+screenshot scale 50%           # equivalent to: scale 0.5
+```
+
+## Boolean values
+
+`true` and `false` are accepted aliases for the integers `1` and `0` in value positions. The receiving field's type determines whether the value is interpreted as boolean, integer, or float — `set g1.Gain 1` writes numeric 1, `set Button.visible 1` writes boolean true.
+
+```
+set Button.visible true        # equivalent to: set Button.visible 1
+set g1.bypassed false          # equivalent to: set g1.bypassed 0
+```
+
+## Builder mode
+
+Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `list types`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
+
+| Verb | Syntax |
+|------|--------|
+| `add` | `add <type> as "<name>" [to <parent>]` |
+| `clone` | `clone <target> <count>` (count required; clones placed as siblings; ids derived by bumping trailing integer of source name, or appending `1` if none. Auto-skips already-taken ids: `clone Lead 3` when `Lead1` exists → `Lead2`, `Lead3`, `Lead4`) |
+| `remove` | `remove <target>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
+| `rename` | `rename <target> as "<name>"` |
+| `set` | `set <target>.<field>[.<subfield>] <value>` |
+| `get` | `get <target>.<field>[.<subfield>]` (field required; for full inspection use `show`) |
+| `show` | `show <target>` |
+| `list` | `list types [<filter>]` \| `list tree [<filter>]` (filter is greedy: case-insensitive substring matched against any displayed column — id, type, path) |
+| `cd` / `ls` / `pwd` | navigation |
+| `reset` | `reset` (clears project to empty Master) |
+
+Asset reference fields (write only quoted names; no path resolution):
+- `samplemap` — looks up named samplemap in project assets (`set Sampler1.samplemap "My Piano"`).
+- `effect` — looks up compiled hardcoded effect by name (`set MasterFX.effect "my_cpp_fx"`).
+- `network` — DSP network reference. Two forms:
+  - Bare name (`"my_dsp"`) — in-memory network. Fails if `my_dsp.xml` exists on disk; error message suggests the `.xml` form.
+  - `.xml` extension (`"my_dsp.xml"`) — file-backed network. Must exist on disk.
+
+Routing matrix fields (instances implementing `RoutableProcessor` — synth chains, samplers, effects, hardcoded modules):
+- `routing` — channel routing matrix. Two write forms:
+  - Array: `set <proc>.routing [d0, d1, …]` — index = source channel, value = destination channel index (or `-1` for unconnected). Array length implicitly calls `setNumChannels(arr.length)`; errors if length differs from current and `routing.resizable` is `false`.
+  - Preset: `set <proc>.routing "<preset>"` where `<preset>` ∈ {`stereo`, `stereo_2`, `stereo_3`, `all`, `all_to_stereo`}.
+  - Clear via `set <proc>.routing [-1, -1, …]`.
+  - `get <proc>.routing` returns the array form.
+- `routing.send` — parallel send bus. Same array shape as `routing`. Length must equal current source-channel count (no implicit resize through this field).
+- Read-only subfields (read via `get`; appear in `show <proc>` output):
+  - `routing.resizable` — boolean; whether `setNumChannels` is permitted.
+  - `routing.routable` — boolean; if `false`, only diagonal writes (`src N → dst N`) are accepted. Cross-channel writes error.
+  - `routing.numDestinationChannels` — integer; pinned by parent context, not writable.
+
+Examples:
+
+```
+add Synth as "Lead"                                # adds at cwd (Master on entry)
+cd Lead
+add Filter as "LP"
+add VelocityModulator as "VelMod" to SineSynth.Pitch     # one-shot create-at-parent
+clone Lead 3
+set Lead.parent Compressor
+set Lead.bypassed 1
+set Lead.bypassed 0
+rename Lead as "MainSynth"
+set Master.Volume -6
+set Master.Volume -6, Master.Pan 0
+set Sampler1.samplemap "My Piano"
+set ScriptFX1.network "my_dsp"
+set ScriptFX1.network "my_dsp.xml"
+set MasterFX.effect "my_cpp_fx"
+set Synth1.routing [0, 1, -1, -1]
+set Synth1.routing.send [-1, -1, 2, 3]
+set Synth1.routing "stereo"
+set Synth1.routing [-1, -1]                        # clear all connections
+get Synth1.routing
+get Synth1.routing.routable
+list types filter
+show Master.Lead
+```
+
+## UI mode
+
+Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScript` to enter another script. Component types are HISE component classes (`Button`, `Slider`, `Panel`, …).
+
+`add ... to <parent>` accepts container-capable components only (`Panel`, `FloatingTile`, etc.). Adding to a non-container component is an error.
+
+| Verb | Syntax |
+|------|--------|
+| `add` | `add <type> as "<name>" [to <parent>]` |
+| `remove` | `remove <target>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
+| `set` | `set <target>.<field> <value>` |
+| `get` | `get <target>.<field>` (field required) |
+| `rename` | `rename <target> as "<name>"` |
+| `show` | `show <target>` |
+| `list` | `list tree [<filter>]` (greedy substring on id/type/path) |
+
+Component fields: `bounds [x, y, w, h]`, `position [x, y]`, `size [w, h]`, `x`, `y`, `width`, `height`, `parent`, `index`, `text`, `name`, plus type-specific properties.
+
+Examples:
+
+```
+add Button as "Play"
+set Play.bounds [100, 200, 80, 32]
+add Slider as "Volume"
+set Volume.bounds [200, 100, 24, 200]
+set Play.position [120, 200]
+set Play.size [100, 40]
+set Play.parent Panel, Play.index 0
+set Play.text "Play Now"
+set Play.x 120, Play.y 220
+rename Play as "PlayBtn"
+```
+
+## DSP mode
+
+Operates on a scriptnode network. Enter via `/dsp <ScriptFX>` (the host module's network must already be assigned in builder via `set <ScriptFX>.network "..."`). The network's root container is named after the network itself (`set MyFX.network "my_dsp"` → root container is `my_dsp`).
+
+`add` uses `<factory>.<node>` syntax — factory is a node library namespace (`core`, `math`, `filters`, …); node is the type within that library.
+
+`matched` (on `connect`) — without `matched`, source values map from the source's range to the target's range. With `matched`, the source range copies the target range so values pass through unmodified.
+
+`disconnect <nodeId>.<paramName>` — removes the single connection on that parameter. The path always ends in the actual parameter name (`Gain`, `Frequency`, `Cutoff`, …). Each target has at most one source, so source is never specified. Node-level `disconnect <nodeId>` (no param) is invalid.
+
+| Verb | Syntax |
+|------|--------|
+| `add` | `add <factory>.<node> as "<alias>" [to <network-path>]` |
+| `remove` | `remove <nodeId>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
+| `connect` | `connect <src>[.<output>] to <targetNode>[.<paramName>] [matched]` (for modulation/parameter targets, path ends in the parameter name (`gain.Gain`); for routing targets (`routing.send` → `routing.receive`), `.<paramName>` may be omitted. Source `.<output>` may be omitted only when source has a single output) |
+| `disconnect` | `disconnect <nodeId>.<paramName>` (path ends in the parameter name; each param target has at most one source, so source never specified) |
+| `set` | `set <id>.<field> <value>` \| `set <id>.<param> <value>` \| `set <id>.<param>.<field> <value>` (node fields ∈ {`parent`, `index`, `bypassed`, `name`}; param fields ∈ {`range`, `min`, `max`, `step`, `mid`, `skew`}) |
+| `get` | same path shapes as `set` plus read-only `<id>.<param>.<source>`, `<id>.<param>.<parent>` |
+| `rename` | `rename <nodeId> as "<newId>"` |
+| `save` | `save` (writes current network to disk if file-backed; embeds in project if in-memory) |
+| `reset` | `reset` (clears network to empty `root`) |
+| `screenshot` | `screenshot scale <N> file "<path>"` |
+| `show` | `show <nodeId>` |
+| `list` | `list networks [<filter>]` \| `list modules [<filter>]` \| `list connections [<filter>]` \| `list tree [<filter>]` (greedy: filter is case-insensitive substring matched against any displayed column — id, type, path, source, target, file name) |
+| `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [step <s>] [mid <m>] [skew <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
+| `cd` / `ls` / `pwd` | navigation |
+
+Examples:
+
+```
+                                                                      # entered via `/dsp MyScriptFX`; cwd is MyScriptFX.my_dsp
+add core.gain as "g1"
+add core.osc as "osc1"
+set osc1.index 0
+connect osc1 to g1.Gain matched
+disconnect g1.Gain
+set g1.Gain 1.5
+set g1.Gain.range [0, 2]
+set g1.Gain.skew 0.3
+set g1.Gain.range [0, 2], g1.Gain.skew 0.3, g1.Gain.step 0.01
+set g1.parent root2
+set g1.index 0
+set g1.bypassed 1
+set g1.bypassed 0
+get g1.Gain.source
+get g1.Gain.parent
+get g1.Gain.max
+list networks
+list connections
+screenshot scale 50% file "patch.png"
+create_parameter root.Cutoff [20, 20000] default 1000 skew 0.3
+```
+
+## Quoting
+
+- Single-word identifier (no spaces, no special chars): bare or quoted, equivalent.
+- Multi-word string: quotes required.
+- Reserved word in path position (after `.`): bare. `add math.add as "x"`, `set X.range [...]`, `set X.min 0` — all fine.
+- Reserved word in identifier-start position (where it could be parsed as a verb or role keyword): quotes required. Both verb-keywords and role-keywords work quoted: `add Synth as "to"`, `add Synth as "as"`, `add Filter as "set"` — all create nodes named literally `to`, `as`, `set`.
+- Quoted identifier always wins over keyword recognition. `show "tree"` queries a node named `tree`, not the tree listing.
+- Quoted segments inside dotted paths bypass keyword recognition for that segment. After `add Synth as "to"`, the node is referenced via `set "to".bypassed 1` or `cd "to"` — the quoted segment is one identifier in the path.
+
+## Comma chaining
+
+Only the verb inherits across commas. Every clause provides full arguments and full identifier paths. Each verb defines what its clause shape is (see BNF).
+
+Verbs that support chaining: `set`, `get`, `add`, `remove`, `connect`, `disconnect`. Other verbs are single-statement only.
+
+```
+set Master.Volume -6, Master.Pan 0
+set Play.x 120, Play.y 220
+set g1.Gain.range [0, 2], g1.Gain.skew 0.3, g1.Gain.step 0.01
+connect lfo to g1.Gain, lfo to g2.Pan
+add Synth as "A", Synth as "B"
+set A.bypassed 1, B.bypassed 1
+remove A, B, C
+```
+
+## Reserved words
+
+Verbs and role keywords are reserved across all modes. Using any of them as an identifier requires quoting.
+
+Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `list`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `create_parameter`.
+
+Role keywords: `as`, `to`, `file`, `scale`, `matched`, `default`, `step`, `mid`, `skew`.
+
+Field names (after dot in `set`/`get` paths), grouped by scope:
+
+- **Universal** (any entity): `parent`, `index` (zero-based sibling order; `-1` = append at end), `bypassed`, `name` (display label only — to change identity use `rename`; `id` is the path itself, not a field)
+- **Builder** (HISE modules): `samplemap`, `network`, `effect`, `routing` (with subfield `routing.send` and read-only `routing.resizable`, `routing.routable`, `routing.numDestinationChannels`), plus module-type-specific properties (e.g. `Volume`, `Pan`)
+- **UI** (components): `bounds`, `position`, `size`, `x`, `y`, `width`, `height`, `text`, plus type-specific properties
+- **DSP** (parameter subfields): `range`, `min`, `max`, `step`, `mid`, `skew`, `source` (read-only)
+
+## Grammar (BNF)
+
+Each verb has its own production with verb-specific comma continuation. Verbs that don't list `(',' ...)*` accept one statement only (no comma chaining).
+
+```
+Statement            := AddStmt | RemoveStmt | RenameStmt | CloneStmt
+                     |  SetStmt | GetStmt | ShowStmt | ListStmt
+                     |  CdStmt | LsStmt | PwdStmt
+                     |  ResetStmt | SaveStmt
+                     |  ConnectStmt | DisconnectStmt
+                     |  ScreenshotStmt | CreateParameterStmt
+
+AddStmt              := SingleAdd | ChainedAdd
+SingleAdd            := 'add' TypeRef 'as' QuotedString ['to' PathExpr]
+ChainedAdd           := 'add' AddClause (',' AddClause){1,}     ; ≥2 clauses, no 'to' permitted
+AddClause            := TypeRef 'as' QuotedString               ; cwd-only in chained form
+
+RemoveStmt           := 'remove' PathExpr (',' PathExpr)*
+RenameStmt           := 'rename' PathExpr 'as' QuotedString
+CloneStmt            := 'clone' PathExpr Number
+
+SetStmt              := 'set' SetClause (',' SetClause)*
+SetClause            := DottedPath Value                     ; ≥2 segments — bare node assignment is invalid
+
+GetStmt              := 'get' DottedPath (',' DottedPath)*
+
+ShowStmt             := 'show' PathExpr
+ListStmt             := 'list' ListNoun [Filter]
+
+CdStmt               := 'cd' PathExpr
+LsStmt               := 'ls'
+PwdStmt              := 'pwd'
+
+ResetStmt            := 'reset'
+SaveStmt             := 'save'
+
+ConnectStmt          := 'connect' ConnectClause (',' ConnectClause)*
+ConnectClause        := PathExpr 'to' PathExpr ['matched']  ; validator: target must include .paramName unless target is a routing node
+DisconnectStmt       := 'disconnect' DottedPath (',' DottedPath)*
+
+ScreenshotStmt       := 'screenshot' 'scale' ScalarValue 'file' QuotedString
+
+CreateParameterStmt  := 'create_parameter' DottedPath Array2
+                        ['default' Number] ['step' Number]
+                        ['mid' Number] ['skew' Number]
+
+TypeRef              := Identifier ['.' Identifier]          ; 2-segment for DSP factory.node
+ListNoun             := BuilderNoun | UiNoun | DspNoun       ; mode-restricted
+BuilderNoun          := 'types' | 'tree'
+UiNoun               := 'tree'
+DspNoun              := 'networks' | 'modules' | 'connections' | 'tree'
+Filter               := QuotedString | BareWord
+
+PathExpr             := DottedPath | BarePath | '..'
+DottedPath           := Identifier ('.' Identifier)+         ; ≥2 segments, dot-separated
+BarePath             := Identifier                            ; single segment
+
+Value                := QuotedString | Number | Percent | Boolean | ArrayValue | PathExpr
+ArrayValue           := Array2 | Array4 | ArrayN              ; whitelist; new arities added explicitly
+Array2               := '[' Number ',' Number ']'             ; for fields: position, size (int), range (number)
+Array4               := '[' Number ',' Number ',' Number ',' Number ']' ; for fields: bounds (int)
+ArrayN               := '[' Number (',' Number)* ']'          ; for fields: routing, routing.send (1..NUM_MAX_CHANNELS integers, dst-channel indices or -1)
+ScalarValue          := Number | Percent                      ; used outside arrays (e.g. screenshot scale)
+Number               := IntLit | FloatLit
+Percent              := Number '%'
+Boolean              := 'true' | 'false'                     ; aliases for 1/0; field type decides interpretation
+IntLit               := /[+-]?[0-9]+/
+FloatLit             := /[+-]?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+\.?[0-9]*[eE][+-]?[0-9]+)/   ; permissive: .5, 1., 1.5, 1e-3, 2.5E+10, +1.0
+
+QuotedString         := '"' (EscapedChar | NonQuote)* '"'
+EscapedChar          := '\' ('"' | '\' | 'n' | 't' | 'r')   ; standard JSON escapes
+NonQuote             := /[^"\\]/
+
+Identifier           := BareWord | QuotedString
+BareWord             := /[A-Za-z_][A-Za-z0-9_]*/
+
+Comment              := ('#' | '//') /[^\n]*/                 ; line comment, ignored by parser
+```
+
+## Implementation status
+
+The routing-matrix surface — `set <proc>.routing` (array and preset forms), `set <proc>.routing.send`, and the read-only subfields `routing.resizable`, `routing.routable`, `routing.numDestinationChannels` — is **not yet implemented** in hise-cli. The REST contract is already defined: see the `set_routing` op variant on `POST /api/builder/apply` (mutually-exclusive `matrix` / `send` / `preset` payloads) and the `routing` block embedded in each processor node returned by `GET /api/builder/tree` (`openapi.json`). Once the parser supports this grammar, the CLI client will dispatch the surface forms above to those endpoints — array writes and preset writes map to `set_routing` ops, reads come from the tree response. Delete this section once implementation lands; the rest of this document is the authoritative parser grammar.
