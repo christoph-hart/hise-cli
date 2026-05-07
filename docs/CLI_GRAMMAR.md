@@ -125,6 +125,18 @@ set Button.visible true        # equivalent to: set Button.visible 1
 set g1.bypassed false          # equivalent to: set g1.bypassed 0
 ```
 
+## Hex literal
+
+`0xAARRGGBB` — exactly 8 hexadecimal digits. The byte order is alpha, red, green, blue. Used for colour-typed fields (`NodeColour`, theme colours, etc.). Parser stores the literal as a 32-bit unsigned integer.
+
+Shorter forms are parse errors so callers cannot silently omit the alpha channel. To get a fully-opaque colour, prefix `FF`: `0xFF<RGB>` (e.g. `0xFFFFAA00` for opaque orange). The lowercase `0x` prefix is required; `0X...` does not lex.
+
+```
+set core1.NodeColour 0xFF8800AA    # opaque RGB 88 00 AA
+set core1.NodeColour 0x8000FF00    # 50% transparent green
+set core1.NodeColour 0xFFAA00      # ERROR: 6 digits, alpha missing
+```
+
 ## Builder mode
 
 Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `list types`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
@@ -372,7 +384,7 @@ PathExpr             := DottedPath | BarePath | '..'
 DottedPath           := Identifier ('.' Identifier)+         ; ≥2 segments, dot-separated
 BarePath             := Identifier                            ; single segment
 
-Value                := QuotedString | Number | Percent | Boolean | ArrayValue | PathExpr
+Value                := QuotedString | Number | Percent | Boolean | HexLiteral | ArrayValue | PathExpr
 ArrayValue           := Array2 | Array4 | ArrayN              ; whitelist; new arities added explicitly
 Array2               := '[' Number ',' Number ']'             ; for fields: position, size (int), range (number)
 Array4               := '[' Number ',' Number ',' Number ',' Number ']' ; for fields: bounds (int)
@@ -381,6 +393,7 @@ ScalarValue          := Number | Percent                      ; used outside arr
 Number               := IntLit | FloatLit
 Percent              := Number '%'
 Boolean              := 'true' | 'false'                     ; aliases for 1/0; field type decides interpretation
+HexLiteral           := /0x[0-9a-fA-F]{8}/                    ; exactly 8 digits — AARRGGBB; shorter forms are parse errors
 IntLit               := /[+-]?[0-9]+/
 FloatLit             := /[+-]?([0-9]+\.[0-9]*|\.[0-9]+|[0-9]+\.?[0-9]*[eE][+-]?[0-9]+)/   ; permissive: .5, 1., 1.5, 1e-3, 2.5E+10, +1.0
 

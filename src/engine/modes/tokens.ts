@@ -18,9 +18,20 @@ export const QuotedString = createToken({
 	pattern: /"(?:[^"\\]|\\.)*"/,
 });
 
+// Strict 8-digit AARRGGBB. Shorter (`0xFFAA00`) or longer hex strings
+// fail to lex; the value-parser enforces the 8-digit invariant for
+// colour fields. Pattern accepts only exactly 8 hex digits so the
+// token boundary is unambiguous.
 export const HexLiteral = createToken({
 	name: "HexLiteral",
-	pattern: /0x[0-9a-fA-F]+/,
+	pattern: /0x[0-9a-fA-F]{8}/,
+});
+
+// Percent literal — consumed before NumberLiteral so the trailing `%`
+// is captured. value-parser normalizes to `n / 100`.
+export const PercentLiteral = createToken({
+	name: "PercentLiteral",
+	pattern: /[+-]?(\d+\.\d*|\.\d+|\d+)%/,
 });
 
 export const NumberLiteral = createToken({
@@ -147,6 +158,59 @@ export const Types = createToken({
 	longer_alt: Identifier,
 });
 
+export const List = createToken({
+	name: "List",
+	pattern: /list/i,
+	longer_alt: Identifier,
+});
+
+// Navigation verbs (builder, UI, DSP all gain cd/ls/pwd).
+export const Cd = createToken({
+	name: "Cd",
+	pattern: /cd/i,
+	longer_alt: Identifier,
+});
+
+export const Ls = createToken({
+	name: "Ls",
+	pattern: /ls/i,
+	longer_alt: Identifier,
+});
+
+export const Pwd = createToken({
+	name: "Pwd",
+	pattern: /pwd/i,
+	longer_alt: Identifier,
+});
+
+// `..` parent path expression. Distinct token so the parser can match
+// the full PathExpr alternative without parsing two adjacent dots.
+export const DoubleDot = createToken({
+	name: "DoubleDot",
+	pattern: /\.\./,
+});
+
+// Booleans alias 1/0; receiving field's type spec decides whether
+// the value lands as bool, int, or float.
+export const BooleanLiteral = createToken({
+	name: "BooleanLiteral",
+	pattern: /(true|false)/i,
+	longer_alt: Identifier,
+});
+
+// `screenshot scale 50% file "patch.png"` clauses (DSP).
+export const Scale = createToken({
+	name: "Scale",
+	pattern: /scale/i,
+	longer_alt: Identifier,
+});
+
+export const File = createToken({
+	name: "File",
+	pattern: /file/i,
+	longer_alt: Identifier,
+});
+
 // ── UI keywords ────────────────────────────────────────────────────
 export const At = createToken({
 	name: "At",
@@ -163,6 +227,26 @@ export const Dot = createToken({
 export const Comma = createToken({
 	name: "Comma",
 	pattern: /,/,
+});
+
+// Array literals `[a, b, c, d]`. Whitelisted arities enforced in the
+// value-parser, not the lexer.
+export const LBracket = createToken({
+	name: "LBracket",
+	pattern: /\[/,
+});
+
+export const RBracket = createToken({
+	name: "RBracket",
+	pattern: /\]/,
+});
+
+// Line comment — `#` and `//` accepted, end-of-line terminated. Skipped
+// at lex time so parser rules never see the tokens.
+export const Comment = createToken({
+	name: "Comment",
+	pattern: /(#|\/\/)[^\n]*/,
+	group: Lexer.SKIPPED,
 });
 
 // ── Token order for the builder lexer ───────────────────────────────
