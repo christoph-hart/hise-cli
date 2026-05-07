@@ -59,11 +59,11 @@ Two path forms only — no slash absolute syntax:
 
 Per-mode hierarchy and landing on mode entry:
 
-| Mode | Top entities | Path shape | `/<mode>` lands at | `/<mode> <X>` lands at |
-|------|--------------|------------|--------------------|------------------------|
-| Builder | `Master` (sole project root) | `Master.<chain>.<module>` | `Master` | n/a |
-| UI | scripts | `<Script>.<components>` | `Interface` | `<X>` |
-| DSP | host modules with networks | `<ScriptFX>.<NetworkName>.<nodes>` (root container named after the assigned network) | host-module selection (no entity, reach by `cd ..` from inside) | `<X>.<NetworkName>` (inside the network) |
+| Mode | Top entities | Path shape | `/<mode>` lands at | `/<mode> <X>` lands at | Navigation |
+|------|--------------|------------|--------------------|------------------------|------------|
+| Builder | `Master` (sole project root) | `Master.<chain>.<module>` | `Master` | n/a | `cd`/`ls`/`pwd` |
+| UI | scripts | `<Script>.<components>` | `Interface` | `<X>` | `cd`/`ls`/`pwd` |
+| DSP | host modules with networks | `<ScriptFX>.<NetworkName>.<nodes>` (root container named after the assigned network) | host-module selection (no entity, reach by `cd ..` from inside) | `<X>.<NetworkName>` (inside the network) | `cd`/`ls`/`pwd` |
 
 ## Core rules
 
@@ -219,8 +219,12 @@ Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScr
 | `rename` | `rename <target> as "<name>"` |
 | `show` | `show <target>` |
 | `list` | `list tree [<filter>]` (greedy substring on id/type/path) |
+| `cd` / `ls` / `pwd` | navigation |
+| `reset` | `reset` (returns cwd to `Interface`; component tree is unaffected — use `remove` to delete components) |
 
-Component fields: `bounds [x, y, w, h]`, `position [x, y]`, `size [w, h]`, `x`, `y`, `width`, `height`, `parent`, `index`, `text`, `name`, plus type-specific properties.
+Component fields: `bounds [x, y, w, h]`, `position [x, y]`, `size [w, h]`, `x`, `y`, `width`, `height`, `parent`, `index`, `text`, `value`, plus type-specific properties.
+
+`set X.value V` writes the runtime control value via `/api/set_component_value` (separate from the `set_attributes` apply path used for static properties). `set X.parent Y` and `set X.index N` reparent / reorder; both translate to a `move` op on `/api/ui/apply`.
 
 Examples:
 

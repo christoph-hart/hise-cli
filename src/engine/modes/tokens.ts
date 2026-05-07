@@ -303,31 +303,41 @@ export const VERB_KEYWORDS: ReadonlySet<string> = new _Set([
 export const builderLexer = new Lexer(BUILDER_TOKENS);
 
 // ── UI mode token order ─────────────────────────────────────────────
-// Shares most tokens with builder but adds At, drops builder-only tokens.
+// Same shape as BUILDER_TOKENS minus builder-specific tokens.
 
 export const UI_TOKENS = [
 	WhiteSpace,
+	Comment,
 	QuotedString,
+	HexLiteral,
+	PercentLiteral,
 	NumberLiteral,
 	Add,
 	Remove,
-	Move,
 	Rename,
-	Into,
 	Show,
 	Set,
 	Get,
+	List,
+	Cd,
+	Ls,
+	Pwd,
+	Reset,
 	To,
 	As,
-	At,
 	Tree,
+	Types,
+	BooleanLiteral,
 	Comma,
+	DoubleDot,
 	Dot,
+	LBracket,
+	RBracket,
 	Identifier,
 ];
 
 export const UI_VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"add", "remove", "move", "rename", "set", "get", "show",
+	"set", "get", "add", "remove",
 ]);
 
 export const uiLexer = new Lexer(UI_TOKENS);

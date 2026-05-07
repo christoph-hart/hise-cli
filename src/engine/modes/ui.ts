@@ -1,8 +1,5 @@
 // ── UI mode — main class + barrel re-exports ─────────────────────────
 
-// Component CRUD against live HISE via POST /api/ui/apply.
-// Falls back to local-only validation when no connection is available.
-
 import type { CommandResult, TreeNode } from "../result.js";
 import { errorResult, jsonResult, preformattedResult, tableResult, textResult } from "../result.js";
 import type { TokenSpan } from "../highlight/tokens.js";
@@ -15,7 +12,6 @@ import { findNodeById, resolveNodeByPath } from "../tree-utils.js";
 import { renderTreeBox } from "./builder-ops.js";
 import {
 	normalizeUiTreeResponse,
-	normalizeUiApplyResult,
 	applyUiDiffToTree,
 	collectComponentIds,
 	cleanUiTreeForLlm,
@@ -23,8 +19,14 @@ import {
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
 import { uiLexer } from "./tokens.js";
+import { resolvePath } from "../grammar/path-resolver.js";
+import {
+	pathRefSegments,
+	pathRefToString,
+	type PathRef,
+} from "../grammar/path-parser.js";
 
-// ── Re-exports from sub-modules ──────────────────────────────────
+// ── Re-exports ──────────────────────────────────────────────────
 
 export {
 	VALID_COMPONENT_TYPES,
@@ -34,30 +36,36 @@ export type {
 	ComponentPropertyDef,
 	ComponentPropertyMap,
 	UiAddCommand,
+	UiAddChainCommand,
 	UiRemoveCommand,
 	UiSetCommand,
-	UiMoveCommand,
+	UiSetClause,
 	UiRenameCommand,
 	UiGetCommand,
 	UiShowCommand,
+	UiListCommand,
+	UiCdCommand,
+	UiLsCommand,
+	UiPwdCommand,
+	UiResetCommand,
 	UiCommand,
-	UiOp,
 } from "./ui-parser.js";
 export {
 	parseSingleUiCommand,
 	parseUiInput,
 	validateComponentType,
-	commandToOps,
 } from "./ui-parser.js";
+export type { UiOp } from "./ui-ops.js";
+export { commandToOps } from "./ui-ops.js";
 
-// Import for local use (UiMode methods)
 import type {
 	ComponentPropertyMap,
+	UiCdCommand,
 	UiCommand,
+	UiGetCommand,
+	UiListCommand,
 	UiSetCommand,
 	UiShowCommand,
-	UiGetCommand,
-	UiOp,
 } from "./ui-parser.js";
 import {
 	VALID_COMPONENT_TYPES,
@@ -65,12 +73,12 @@ import {
 	parseUiInput,
 	findLastUnquotedComma,
 	validateComponentType,
-	commandToOps,
 } from "./ui-parser.js";
+import type { UiOp } from "./ui-ops.js";
+import { commandToOps } from "./ui-ops.js";
 
-// ── Helper functions ─────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────
 
-/** Build CompletionItems from component IDs. Auto-quotes IDs with spaces. */
 function componentIdCompletionItems(tree: TreeNode | null): CompletionItem[] {
 	if (!tree) return [];
 	const ids = collectComponentIds(tree);
@@ -79,7 +87,6 @@ function componentIdCompletionItems(tree: TreeNode | null): CompletionItem[] {
 		insertText: id.includes(" ") ? `"${id}"` : id,
 	}));
 }
-
 
 // ── UI mode class ────────────────────────────────────────────────
 
@@ -109,62 +116,32 @@ export class UiMode implements Mode {
 		}
 	}
 
-	tokenizeInput(value: string): TokenSpan[] {
-		return tokenizeUi(value);
-	}
-
-	// ── Tree sidebar support ────────────────────────────────────
+	tokenizeInput(value: string): TokenSpan[] { return tokenizeUi(value); }
 
 	getTree(): TreeNode | null {
 		if (!this.treeRoot) return null;
 		return structuredClone(this.treeRoot);
 	}
-
-	getSelectedPath(): string[] {
-		return [...this.currentPath];
-	}
-
-	selectNode(path: string[]): void {
-		this.currentPath = [...path];
-	}
-
-	get contextLabel(): string {
-		return this.currentPath.join(".");
-	}
-
+	getSelectedPath(): string[] { return [...this.currentPath]; }
+	selectNode(path: string[]): void { this.currentPath = [...path]; }
+	get contextLabel(): string { return this.currentPath.join("."); }
 	setContext(path: string): void {
 		this.currentPath = path.split(".").filter((s) => s !== "");
 	}
-
-	invalidateTree(): void {
-		this.treeFetched = false;
-	}
-
-	async onEnter(session: SessionContext): Promise<void> {
-		await this.ensureTree(session);
-	}
+	invalidateTree(): void { this.treeFetched = false; }
+	async onEnter(session: SessionContext): Promise<void> { await this.ensureTree(session); }
 
 	// ── Completion ──────────────────────────────────────────────
 
 	complete(input: string, _cursor: number): CompletionResult {
-		// Handle comma chaining: complete only the last segment
 		const lastComma = findLastUnquotedComma(input);
 		if (lastComma !== -1) {
-			return this.completeSegment(
-				input.slice(lastComma + 1),
-				lastComma + 1,
-				input.length,
-			);
+			return this.completeSegment(input.slice(lastComma + 1), lastComma + 1, input.length);
 		}
-
 		return this.completeSegment(input, 0, input.length);
 	}
 
-	private completeSegment(
-		segment: string,
-		offset: number,
-		inputLength: number,
-	): CompletionResult {
+	private completeSegment(segment: string, offset: number, inputLength: number): CompletionResult {
 		const trimmed = segment.trimStart();
 		const leadingSpaces = segment.length - trimmed.length;
 		const trailingSpace = segment.endsWith(" ");
@@ -174,10 +151,9 @@ export class UiMode implements Mode {
 
 		const empty: CompletionResult = { items: [], from: offset, to: inputLength };
 
-		// No tokens or typing first word — suggest UI keywords
 		if (tokens.length === 0 || (tokens.length === 1 && !trailingSpace)) {
 			const prefix = tokens.length > 0 ? tokens[0].image.toLowerCase() : "";
-			const keywords = ["add", "remove", "set", "get", "move", "rename", "show", "cd", "ls", "pwd"];
+			const keywords = ["add", "remove", "set", "get", "rename", "show", "list", "cd", "ls", "pwd", "reset"];
 			const items: CompletionItem[] = keywords
 				.filter((k) => k.startsWith(prefix))
 				.map((k) => ({ label: k }));
@@ -190,42 +166,44 @@ export class UiMode implements Mode {
 		}
 
 		const verb = tokens[0].image.toLowerCase();
-
-		// ── cd <child> ──
-		if (verb === "cd") {
-			return this.completeCd(tokens, trailingSpace, offset, inputLength, segment);
-		}
+		if (verb === "cd") return this.completeCd(tokens, trailingSpace, offset, inputLength, segment);
 
 		const componentItems = componentIdCompletionItems(this.treeRoot);
 
-		// ── add <type> ──
-		if (verb === "add") {
-			return this.completeAdd(tokens, trailingSpace, offset, inputLength, segment);
-		}
+		if (verb === "add") return this.completeAdd(tokens, trailingSpace, offset, inputLength, segment);
 
-		// ── set <target>.<prop> [to] <value> ──
-		// ── get <target>.<prop> ──
 		if (verb === "set" || verb === "get") {
 			return this.completeSet(tokens, trailingSpace, offset, inputLength, segment, componentItems);
 		}
 
-		// ── show tree | show <target> ──
 		if (verb === "show") {
-			const treeItem: CompletionItem = { label: "tree", detail: "Show component tree" };
 			if (tokens.length === 1 && trailingSpace) {
-				return { items: [treeItem, ...componentItems], from: offset + segment.length, to: inputLength, label: "Show" };
+				return { items: componentItems, from: offset + segment.length, to: inputLength, label: "Components" };
 			}
 			if (tokens.length === 2 && !trailingSpace) {
 				const prefix = tokens[1].image;
-				const items = fuzzyFilter(prefix, [treeItem, ...componentItems]);
+				const items = fuzzyFilter(prefix, componentItems);
 				const from = offset + tokens[1].startOffset;
-				return { items, from, to: inputLength, label: "Show" };
+				return { items, from, to: inputLength, label: "Components" };
 			}
-			return { items: [], from: offset, to: inputLength };
+			return empty;
 		}
 
-		// ── Commands that take a single target: remove, move, rename ──
-		const TARGET_COMMANDS = ["remove", "move", "rename"];
+		if (verb === "list") {
+			const nouns: CompletionItem[] = [{ label: "tree", detail: "component tree" }];
+			if (tokens.length === 1 && trailingSpace) {
+				return { items: nouns, from: offset + segment.length, to: inputLength, label: "List nouns" };
+			}
+			if (tokens.length === 2 && !trailingSpace) {
+				const prefix = tokens[1].image.toLowerCase();
+				const items = nouns.filter((i) => i.label.startsWith(prefix));
+				const from = offset + tokens[1].startOffset;
+				return { items, from, to: inputLength, label: "List nouns" };
+			}
+			return empty;
+		}
+
+		const TARGET_COMMANDS = ["remove", "rename"];
 		if (TARGET_COMMANDS.includes(verb)) {
 			return this.completeTarget(tokens, trailingSpace, offset, inputLength, segment, componentItems, "Components");
 		}
@@ -279,8 +257,6 @@ export class UiMode implements Mode {
 			label: t,
 			detail: "component",
 		}));
-
-		// Position 1: component type
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: typeItems, from: offset + segment.length, to: inputLength, label: "Component types" };
 		}
@@ -290,7 +266,6 @@ export class UiMode implements Mode {
 			const from = offset + tokens[1].startOffset;
 			return { items, from, to: inputLength, label: "Component types" };
 		}
-
 		return { items: [], from: offset, to: inputLength };
 	}
 
@@ -302,15 +277,12 @@ export class UiMode implements Mode {
 		segment: string,
 		componentItems: CompletionItem[],
 	): CompletionResult {
-		// After "set " — complete with component IDs
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: componentItems, from: offset + segment.length, to: inputLength, label: "Components" };
 		}
 
-		// Find the dot separating target from property
 		const dotIndex = tokens.findIndex((t) => t.image === ".");
 		if (dotIndex === -1) {
-			// No dot yet — still typing target
 			if (!trailingSpace) {
 				const lastToken = tokens[tokens.length - 1];
 				const prefix = lastToken.image;
@@ -321,7 +293,6 @@ export class UiMode implements Mode {
 			return { items: componentItems, from: offset + segment.length, to: inputLength, label: "Components" };
 		}
 
-		// Dot found — resolve target and complete property names
 		const targetTokens = tokens.slice(1, dotIndex);
 		let targetName: string;
 		if (targetTokens.length === 1 && targetTokens[0].tokenType.name === "QuotedString") {
@@ -330,7 +301,6 @@ export class UiMode implements Mode {
 			targetName = targetTokens.map((t) => t.image).join(" ");
 		}
 
-		// Look up component type from tree, then get properties
 		const propItems = this.getPropertyCompletionItems(targetName);
 
 		const propIndex = dotIndex + 1;
@@ -347,19 +317,12 @@ export class UiMode implements Mode {
 		return { items: [], from: offset, to: inputLength };
 	}
 
-	/** Get property completion items for a component by looking up its type in the tree and property map. */
 	private getPropertyCompletionItems(componentId: string): CompletionItem[] {
 		const items: CompletionItem[] = [];
-
-		// Read-only meta property exposed by /api/get_component_properties
 		items.push({ label: "type", detail: "read-only" });
-
-		// Common properties shared by all ScriptComponent subclasses
 		for (const p of COMMON_COMPONENT_PROPERTIES) {
 			items.push({ label: p, detail: "common" });
 		}
-
-		// Type-specific properties from the property map
 		if (this.componentProperties) {
 			const node = findNodeById(this.treeRoot, componentId);
 			const componentType = node?.type;
@@ -372,7 +335,6 @@ export class UiMode implements Mode {
 				}
 			}
 		}
-
 		return items;
 	}
 
@@ -388,7 +350,6 @@ export class UiMode implements Mode {
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: componentItems, from: offset + segment.length, to: inputLength, label };
 		}
-
 		if (!trailingSpace) {
 			const lastToken = tokens[tokens.length - 1];
 			const prefix = lastToken.image;
@@ -396,14 +357,11 @@ export class UiMode implements Mode {
 			const from = offset + lastToken.startOffset;
 			return { items, from, to: inputLength, label };
 		}
-
 		return { items: [], from: offset, to: inputLength };
 	}
 
 	// ── Tree fetching ───────────────────────────────────────────
 
-	/** Fetch the component tree from HISE and update treeRoot.
-	 *  Detects plan state via undo diff — uses ?group=current when a plan group is active. */
 	async fetchTree(connection: import("../hise.js").HiseConnection): Promise<void> {
 		let inPlan = false;
 		const diffResp = await connection.get("/api/undo/diff?scope=group");
@@ -411,7 +369,6 @@ export class UiMode implements Mode {
 			const groupName = diffResp.groupName as string | undefined;
 			inPlan = typeof groupName === "string" && groupName !== "root";
 		}
-
 		const base = `/api/ui/tree?moduleId=${encodeURIComponent(this.moduleId)}`;
 		const endpoint = inPlan ? `${base}&group=current` : base;
 		const response = await connection.get(endpoint);
@@ -425,7 +382,6 @@ export class UiMode implements Mode {
 		}
 	}
 
-	/** Lazily fetch the tree on first parse if connected and not yet fetched. */
 	private async ensureTree(session: SessionContext): Promise<void> {
 		if (!this.treeFetched && session.connection) {
 			this.treeFetched = true;
@@ -435,37 +391,11 @@ export class UiMode implements Mode {
 
 	// ── Parse entry point ───────────────────────────────────────
 
-	async parse(
-		input: string,
-		session: SessionContext,
-	): Promise<CommandResult> {
+	async parse(input: string, session: SessionContext): Promise<CommandResult> {
 		await this.ensureTree(session);
 
-		const trimmed = input.trim();
-		const parts = trimmed.split(/\s+/);
-		const keyword = parts[0]?.toLowerCase();
-
-		// ── Navigation commands (handled before Chevrotain parser) ──
-		if (keyword === "cd") {
-			let cdTarget = parts.slice(1).join(" ").trim();
-			if (cdTarget.startsWith('"') && cdTarget.endsWith('"')) {
-				cdTarget = cdTarget.slice(1, -1);
-			}
-			return this.handleCd(cdTarget, session);
-		}
-		if (keyword === "ls" || keyword === "dir") {
-			return this.handleLs();
-		}
-		if (keyword === "pwd") {
-			return this.handlePwd();
-		}
-
-		// ── Chevrotain-parsed UI commands ──
 		const result = parseUiInput(input);
-
-		if ("error" in result) {
-			return errorResult(result.error);
-		}
+		if ("error" in result) return errorResult(result.error);
 
 		let lastResult: CommandResult = textResult("(no commands)");
 		for (const cmd of result.commands) {
@@ -477,35 +407,27 @@ export class UiMode implements Mode {
 
 	// ── Navigation handlers ─────────────────────────────────────
 
-	private handleCd(target: string, session: SessionContext): CommandResult {
-		if (!target || target === "/") {
-			this.currentPath = [];
-			return textResult("/");
-		}
-
-		if (target === "..") {
-			if (this.currentPath.length === 0) {
-				return session.popMode();
-			}
+	private handleCd(cmd: UiCdCommand, session: SessionContext): CommandResult {
+		if (cmd.target.kind === "parent") {
+			if (this.currentPath.length === 0) return session.popMode();
 			this.currentPath.pop();
 			return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 		}
 
-		const segments = target.split(".").filter((s) => s !== "");
-		for (const seg of segments) {
-			if (seg === "..") {
-				if (this.currentPath.length > 0) this.currentPath.pop();
-			} else {
-				if (this.treeRoot) {
-					const node = findNodeById(this.treeRoot, seg);
-					if (!node) {
-						return errorResult(`"${seg}" not found in component tree.`);
-					}
-				}
-				this.currentPath.push(seg);
-			}
+		if (!this.treeRoot) {
+			const segs = pathRefSegments(cmd.target);
+			for (const seg of segs) this.currentPath.push(seg.id);
+			return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 		}
-		return textResult(this.currentPath.join("."));
+
+		const r = resolvePath(this.treeRoot, this.currentPath, cmd.target, "cd");
+		if (!r.ok) return errorResult(r.message);
+		const rootId = this.treeRoot.id;
+		const stripped = (rootId && r.fullPath[0]?.toLowerCase() === rootId.toLowerCase())
+			? r.fullPath.slice(1)
+			: r.fullPath;
+		this.currentPath = stripped;
+		return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 	}
 
 	private handleLs(): CommandResult {
@@ -514,29 +436,31 @@ export class UiMode implements Mode {
 			return textResult(`${path}: listing children requires a HISE connection`);
 		}
 
-		let node: TreeNode | null = this.treeRoot;
-		if (this.currentPath.length > 0) {
-			node = findNodeById(this.treeRoot, this.currentPath[this.currentPath.length - 1]);
-		}
-		if (!node) {
-			return errorResult(`Path not found: ${this.currentPath.join(".")}`);
-		}
-
-		if (!node.children || node.children.length === 0) {
-			return textResult(`${node.label}: (no children)`);
-		}
+		const node = resolveNodeByPath(this.treeRoot, this.currentPath) ?? this.treeRoot;
+		if (!node) return errorResult(`Path not found: ${this.currentPath.join(".")}`);
+		if (!node.children || node.children.length === 0) return textResult(`${node.label}: (no children)`);
 
 		return tableResult(
 			["Name", "Type"],
-			node.children.map((c) => [
-				c.label,
-				c.type ?? "",
-			]),
+			node.children.map((c) => [c.label, c.type ?? ""]),
 		);
 	}
 
 	private handlePwd(): CommandResult {
 		return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
+	}
+
+	private handleReset(): CommandResult {
+		// UI mode has no `/api/ui/reset` endpoint; treat reset as cwd reset.
+		this.currentPath = [];
+		return textResult("/");
+	}
+
+	private async handleList(cmd: UiListCommand): Promise<CommandResult> {
+		if (cmd.noun !== "tree") return errorResult(`unknown list noun: ${cmd.noun}`);
+		if (!this.treeRoot) return textResult("No component tree available (requires HISE connection).");
+		const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(this.treeRoot, this.currentPath) : null;
+		return preformattedResult(renderTreeBox(this.treeRoot, { pwdNode }), undefined, true);
 	}
 
 	// ── Command dispatch and execution ──────────────────────────
@@ -545,74 +469,81 @@ export class UiMode implements Mode {
 		cmd: UiCommand,
 		session: SessionContext,
 	): Promise<CommandResult> {
-		// Get command — fetch single property or component value
-		if (cmd.type === "get") {
-			if (cmd.prop === "value") {
-				return this.handleGetValue(cmd.target, session.connection ?? null);
-			}
-			return this.handleGet(cmd, session.connection ?? null);
+		switch (cmd.type) {
+			case "cd": return this.handleCd(cmd, session);
+			case "ls": return this.handleLs();
+			case "pwd": return this.handlePwd();
+			case "reset": return this.handleReset();
+			case "get": return this.handleGet(cmd, session.connection ?? null);
+			case "show": return this.handleShow(cmd, session);
+			case "list": return this.handleList(cmd);
+			default: break;
 		}
 
-		// Set value — uses dedicated /api/set_component_value endpoint
-		if (cmd.type === "set" && cmd.prop === "value") {
-			return this.handleSetValue(cmd.target, cmd.value, session.connection ?? null);
-		}
-
-		// Show command — fetch properties from HISE and display as table
-		if (cmd.type === "show") {
-			return this.handleShow(cmd, session);
-		}
-
-		// Local validation for add commands
+		// Local validation for add commands (single + chained)
 		if (cmd.type === "add") {
 			const typeError = validateComponentType(cmd.componentType);
-			if (typeError) {
-				return errorResult(typeError);
+			if (typeError) return errorResult(typeError);
+		}
+		if (cmd.type === "addChain") {
+			for (const cl of cmd.clauses) {
+				const typeError = validateComponentType(cl.componentType);
+				if (typeError) return errorResult(typeError);
 			}
 		}
 
-		// If no connection, return local-only result
-		if (!session.connection) {
-			return this.localFallback(cmd);
-		}
+		if (!session.connection) return this.localFallback(cmd);
 
-		// Build API operations
-		const opsResult = commandToOps(cmd, this.currentPath);
-		if ("error" in opsResult) {
-			return errorResult(opsResult.error);
-		}
+		const opsResult = commandToOps(cmd, this.treeRoot, this.currentPath);
+		if ("error" in opsResult) return errorResult(opsResult.error);
 
 		const result = await this.executeOps(opsResult.ops, session.connection);
 
-		if (result.type !== "error") {
-			session.markProjectTreeDirty?.();
-		}
+		if (result.type !== "error") session.markProjectTreeDirty?.();
 
-		// For successful set commands, fetch the actual value back from HISE
-		if (cmd.type === "set" && result.type !== "error") {
-			const echo = await this.echoSetProperty(cmd, session.connection);
+		if (cmd.type === "set" && result.type !== "error" && cmd.clauses.length === 1) {
+			const echo = await this.echoSetClause(cmd.clauses[0]!, session.connection);
 			if (echo) return echo;
 		}
 
 		return result;
 	}
 
-	/** Execute operations against POST /api/ui/apply, re-fetch tree. */
+	/** Execute mixed apply / set_value ops. */
 	private async executeOps(
 		ops: UiOp[],
 		connection: import("../hise.js").HiseConnection,
 	): Promise<CommandResult> {
+		const valueOps = ops.filter((o) => o.op === "set_value");
+		const applyOps = ops.filter((o) => o.op !== "set_value");
+
+		for (const op of valueOps) {
+			const response = await connection.post("/api/set_component_value", {
+				moduleId: this.moduleId,
+				id: op.target,
+				value: op.value,
+			});
+			if (isErrorResponse(response)) return errorResult(response.message);
+			if (isEnvelopeResponse(response) && !response.success) {
+				const msg = response.errors.length > 0
+					? response.errors.map((e) => e.errorMessage).join("\n")
+					: `Failed to set value on "${op.target as string}"`;
+				return errorResult(msg);
+			}
+		}
+
+		if (applyOps.length === 0) {
+			await this.fetchTree(connection);
+			return textResult(valueOps.length > 0 ? "OK" : "");
+		}
+
 		const response = await connection.post("/api/ui/apply", {
 			moduleId: this.moduleId,
-			operations: ops,
+			operations: applyOps,
 		});
 
-		if (isErrorResponse(response)) {
-			return errorResult(response.message);
-		}
-		if (!isEnvelopeResponse(response)) {
-			return errorResult("Unexpected response from HISE");
-		}
+		if (isErrorResponse(response)) return errorResult(response.message);
+		if (!isEnvelopeResponse(response)) return errorResult("Unexpected response from HISE");
 		if (!response.success) {
 			const msg = response.errors.length > 0
 				? response.errors.map((e) => e.errorMessage).join("\n")
@@ -620,14 +551,10 @@ export class UiMode implements Mode {
 			return errorResult(msg);
 		}
 
-		// Re-fetch the tree to get the updated state
 		await this.fetchTree(connection);
 
-		// Apply diff markers only for the operations in this batch —
-		// not the cumulative diff from the undo system, which would
-		// mark every component added this session as "added".
 		if (this.treeRoot) {
-			const localDiff = ops.map(op => {
+			const localDiff = applyOps.map(op => {
 				const action = op.op === "add" ? "+" as const
 					: op.op === "remove" ? "-" as const
 					: "*" as const;
@@ -639,218 +566,152 @@ export class UiMode implements Mode {
 			applyUiDiffToTree(this.treeRoot, localDiff);
 		}
 
-		// Build a human-readable summary from logs
 		const summary = response.logs.length > 0
 			? response.logs.join("; ")
-			: ops.map((o) => `${o.op} ${(o as Record<string, unknown>).target ?? (o as Record<string, unknown>).id ?? ""}`).join(", ") || "OK";
+			: applyOps.map((o) => `${o.op} ${(o as Record<string, unknown>).target ?? (o as Record<string, unknown>).id ?? ""}`).join(", ") || "OK";
 
 		return textResult(summary);
 	}
 
-	/** Handle show command — show tree or fetch component properties from HISE. */
-	private async handleShow(
-		cmd: UiShowCommand,
-		session: SessionContext,
-	): Promise<CommandResult> {
-		const connection = session.connection ?? null;
-		if (cmd.what === "tree") {
-			if (session.forLlm) {
-				if (!this.lastTreeResult) {
-					return textResult("No component tree available (requires HISE connection).");
-				}
-				return jsonResult(cleanUiTreeForLlm(this.lastTreeResult));
-			}
-			if (!this.treeRoot) {
-				return textResult("No component tree available (requires HISE connection).");
-			}
-			const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(this.treeRoot, this.currentPath) : null;
-			return preformattedResult(renderTreeBox(this.treeRoot, { pwdNode }), undefined, true);
+	private resolveRefForRead(ref: PathRef): { id: string } | { error: string } {
+		if (!this.treeRoot) {
+			const segs = pathRefSegments(ref);
+			if (segs.length === 0) return { error: "cannot resolve `..`" };
+			return { id: segs[segs.length - 1].id };
 		}
+		const r = resolvePath(this.treeRoot, this.currentPath, ref, "lookup");
+		if (!r.ok) return { error: r.message };
+		return { id: r.node.id ?? r.fullPath[r.fullPath.length - 1] };
+	}
 
-		if (!connection) {
-			return textResult(`show ${cmd.target} (no HISE connection)`);
-		}
+	private async handleShow(cmd: UiShowCommand, session: SessionContext): Promise<CommandResult> {
+		const connection = session.connection ?? null;
+		const r = this.resolveRefForRead(cmd.target);
+		if ("error" in r) return errorResult(r.error);
+
+		if (!connection) return textResult(`show ${r.id} (no HISE connection)`);
 
 		const response = await connection.get(
-			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(cmd.target!)}`,
+			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(r.id)}`,
 		);
+		if (isErrorResponse(response)) return errorResult(response.message);
 
-		if (isErrorResponse(response)) {
-			return errorResult(response.message);
-		}
-
-		// The response shape is { success, type, properties: [{id, value, isDefault}] }
-		// — not the standard envelope (no "result" field).
 		const data = response as unknown as Record<string, unknown>;
 		if (!data.success) {
 			const errors = (data as { errors?: Array<{ errorMessage: string }> }).errors;
-			const msg = errors?.[0]?.errorMessage ?? `Could not fetch properties for "${cmd.target}"`;
+			const msg = errors?.[0]?.errorMessage ?? `Could not fetch properties for "${r.id}"`;
 			return errorResult(msg);
+		}
+
+		if (session.forLlm) {
+			return jsonResult(cleanUiTreeForLlm(data));
 		}
 
 		const properties = data.properties as Array<{ id: string; value: unknown; isDefault: boolean }> | undefined;
-		if (!properties || !Array.isArray(properties)) {
-			return textResult(`${cmd.target}: no properties`);
-		}
+		if (!properties || !Array.isArray(properties)) return textResult(`${r.id}: no properties`);
 
-		const componentType = typeof data.type === "string" ? data.type : "";
-		const rows = properties.map((p) => [
-			p.id,
-			String(p.value),
-			p.isDefault ? "" : "*",
-		]);
-
-		return tableResult(
-			["Property", "Value", ""],
-			rows,
-		);
+		const rows = properties.map((p) => [p.id, String(p.value), p.isDefault ? "" : "*"]);
+		return tableResult(["Property", "Value", ""], rows);
 	}
 
-	/** Set a component's runtime value via /api/set_component_value. */
-	private async handleSetValue(
-		target: string,
-		value: string | number,
-		connection: import("../hise.js").HiseConnection | null,
-	): Promise<CommandResult> {
-		if (!connection) {
-			return textResult(`set ${target}.value ${value} (no HISE connection)`);
-		}
-
-		const response = await connection.post("/api/set_component_value", {
-			moduleId: this.moduleId,
-			id: target,
-			value,
-		});
-
-		if (isErrorResponse(response)) {
-			return errorResult(response.message);
-		}
-		if (isEnvelopeResponse(response) && !response.success) {
-			const msg = response.errors.length > 0
-				? response.errors.map((e) => e.errorMessage).join("\n")
-				: `Failed to set value on "${target}"`;
-			return errorResult(msg);
-		}
-
-		// Echo back the actual value from HISE
-		const echo = await this.handleGetValue(target, connection);
-		return echo;
-	}
-
-	/** Get a component's runtime value via /api/get_component_value. */
-	private async handleGetValue(
-		target: string,
-		connection: import("../hise.js").HiseConnection | null,
-	): Promise<CommandResult> {
-		if (!connection) {
-			return textResult(`get ${target}.value (no HISE connection)`);
-		}
-
-		const response = await connection.get(
-			`/api/get_component_value?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(target)}`,
-		);
-
-		if (isErrorResponse(response)) {
-			return errorResult(response.message);
-		}
-
-		const data = response as unknown as Record<string, unknown>;
-		if (data.success === false) {
-			const errors = (data as { errors?: Array<{ errorMessage: string }> }).errors;
-			const msg = errors?.[0]?.errorMessage ?? `Could not get value for "${target}"`;
-			return errorResult(msg);
-		}
-
-		return textResult(String(data.value ?? ""));
-	}
-
-	/** Handle get command — fetch a single property value from HISE. */
 	private async handleGet(
 		cmd: UiGetCommand,
 		connection: import("../hise.js").HiseConnection | null,
 	): Promise<CommandResult> {
-		if (!connection) {
-			return textResult(`get ${cmd.target}.${cmd.prop} (no HISE connection)`);
+		if (cmd.paths.length === 0) return errorResult("get: no paths");
+		const ref = cmd.paths[0];
+		const segs = pathRefSegments(ref);
+		if (segs.length < 2) return errorResult("get: path must have at least 2 segments");
+		const fieldName = segs[segs.length - 1].id;
+		const targetName = segs[segs.length - 2].id;
+
+		if (!connection) return textResult(`get ${pathRefToString(ref)} (no HISE connection)`);
+
+		// Field "value" → /api/get_component_value
+		if (fieldName.toLowerCase() === "value") {
+			const response = await connection.get(
+				`/api/get_component_value?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(targetName)}`,
+			);
+			if (isErrorResponse(response)) return errorResult(response.message);
+			const data = response as unknown as Record<string, unknown>;
+			if (data.success === false) {
+				const errors = (data as { errors?: Array<{ errorMessage: string }> }).errors;
+				const msg = errors?.[0]?.errorMessage ?? `Could not get value for "${targetName}"`;
+				return errorResult(msg);
+			}
+			return textResult(String(data.value ?? ""));
 		}
 
 		const response = await connection.get(
-			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(cmd.target)}`,
+			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(targetName)}`,
 		);
-
-		if (isErrorResponse(response)) {
-			return errorResult(response.message);
-		}
-
+		if (isErrorResponse(response)) return errorResult(response.message);
 		const data = response as unknown as Record<string, unknown>;
 		if (!data.success) {
 			const errors = (data as { errors?: Array<{ errorMessage: string }> }).errors;
-			const msg = errors?.[0]?.errorMessage ?? `Could not fetch properties for "${cmd.target}"`;
+			const msg = errors?.[0]?.errorMessage ?? `Could not fetch properties for "${targetName}"`;
 			return errorResult(msg);
 		}
 
-		// Special case: .type is exposed as a top-level field on the response,
-		// not inside the properties array.
-		if (cmd.prop === "type") {
-			if (typeof data.type !== "string") {
-				return errorResult(`Component "${cmd.target}" has no type`);
-			}
+		// Special case: .type lives at top-level of the response.
+		if (fieldName === "type") {
+			if (typeof data.type !== "string") return errorResult(`Component "${targetName}" has no type`);
 			return textResult(data.type);
 		}
 
 		const properties = data.properties as Array<{ id: string; value: unknown }> | undefined;
-		if (!properties) {
-			return errorResult(`${cmd.target}: no properties`);
-		}
-
-		const prop = properties.find((p) => p.id === cmd.prop);
-		if (!prop) {
-			return errorResult(`Property "${cmd.prop}" not found on "${cmd.target}"`);
-		}
-
+		if (!properties) return errorResult(`${targetName}: no properties`);
+		const prop = properties.find((p) => p.id === fieldName);
+		if (!prop) return errorResult(`Property "${fieldName}" not found on "${targetName}"`);
 		return textResult(String(prop.value));
 	}
 
-	/** After a successful set, fetch the property back from HISE and echo it. */
-	private async echoSetProperty(
-		cmd: UiSetCommand,
+	private async echoSetClause(
+		clause: { path: PathRef; value: unknown },
 		connection: import("../hise.js").HiseConnection,
 	): Promise<CommandResult | null> {
+		const segs = pathRefSegments(clause.path);
+		if (segs.length < 2) return null;
+		const fieldName = segs[segs.length - 1].id;
+		const fieldLower = fieldName.toLowerCase();
+		// Skip echo for non-property writes.
+		if (fieldLower === "parent" || fieldLower === "index" || fieldLower === "value") return null;
+		const targetName = segs[segs.length - 2].id;
+
 		const response = await connection.get(
-			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(cmd.target)}`,
+			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(targetName)}`,
 		);
 		if (isErrorResponse(response)) return null;
 		const data = response as unknown as Record<string, unknown>;
 		if (!data.success) return null;
 		const properties = data.properties as Array<{ id: string; value: unknown }> | undefined;
 		if (!properties) return null;
-		const prop = properties.find((p) => p.id === cmd.prop);
+		const prop = properties.find((p) => p.id === fieldName);
 		if (!prop) return null;
-		return textResult(`${cmd.target}.${cmd.prop}: ${prop.value}`);
+		return textResult(`${targetName}.${fieldName}: ${prop.value}`);
 	}
 
-	/** Fallback for disconnected mode — description only. */
 	private localFallback(cmd: UiCommand): CommandResult {
 		switch (cmd.type) {
 			case "add": {
-				const parts = [`add ${cmd.componentType}`];
-				if (cmd.name) parts.push(`"${cmd.name}"`);
-				if (cmd.x !== undefined) {
-					parts.push(`at ${cmd.x} ${cmd.y} ${cmd.width} ${cmd.height}`);
-				}
+				const parts = [`add ${cmd.componentType} as "${cmd.alias}"`];
+				if (cmd.parent) parts.push(`to ${pathRefToString(cmd.parent)}`);
 				return textResult(`${parts.join(" ")} (no HISE connection)`);
 			}
+			case "addChain": {
+				const parts = cmd.clauses.map((c) => `${c.componentType} as "${c.alias}"`);
+				return textResult(`add ${parts.join(", ")} (no HISE connection)`);
+			}
 			case "remove":
-				return textResult(`remove ${cmd.target} (no HISE connection)`);
+				return textResult(`remove ${cmd.targets.map(pathRefToString).join(", ")} (no HISE connection)`);
 			case "set":
-				return textResult(`set ${cmd.target}.${cmd.prop} to ${cmd.value} (no HISE connection)`);
-			case "move":
-				return textResult(`move ${cmd.target} to ${cmd.parent}${cmd.index !== undefined ? ` at ${cmd.index}` : ""} (no HISE connection)`);
+				return textResult(`set ${cmd.clauses.map((c) => pathRefToString(c.path)).join(", ")} (no HISE connection)`);
 			case "rename":
-				return textResult(`rename ${cmd.target} to "${cmd.newName}" (no HISE connection)`);
+				return textResult(`rename ${pathRefToString(cmd.target)} as "${cmd.name}" (no HISE connection)`);
 			case "get":
-				return textResult(`get ${cmd.target}.${cmd.prop} (no HISE connection)`);
-			case "show":
-				return textResult(`show ${cmd.target ?? "tree"} (no HISE connection)`);
+				return textResult(`get ${cmd.paths.map(pathRefToString).join(", ")} (no HISE connection)`);
+			default:
+				return textResult("(no HISE connection)");
 		}
 	}
 }
