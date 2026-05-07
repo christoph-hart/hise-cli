@@ -39,12 +39,6 @@ export const NumberLiteral = createToken({
 	pattern: /-?\d+(\.\d+)?/,
 });
 
-// Multiplier token: x4, x10, etc. Must come before Identifier.
-export const XCount = createToken({
-	name: "XCount",
-	pattern: /x\d+/i,
-});
-
 // ── Identifiers ─────────────────────────────────────────────────────
 export const DotPath = createToken({
 	name: "DotPath",
@@ -80,39 +74,9 @@ export const Remove = createToken({
 	longer_alt: Identifier,
 });
 
-export const Move = createToken({
-	name: "Move",
-	pattern: /move/i,
-	longer_alt: Identifier,
-});
-
 export const Rename = createToken({
 	name: "Rename",
 	pattern: /rename/i,
-	longer_alt: Identifier,
-});
-
-export const Load = createToken({
-	name: "Load",
-	pattern: /load/i,
-	longer_alt: Identifier,
-});
-
-export const Into = createToken({
-	name: "Into",
-	pattern: /into/i,
-	longer_alt: Identifier,
-});
-
-export const Bypass = createToken({
-	name: "Bypass",
-	pattern: /bypass/i,
-	longer_alt: Identifier,
-});
-
-export const Enable = createToken({
-	name: "Enable",
-	pattern: /enable/i,
 	longer_alt: Identifier,
 });
 
@@ -344,36 +308,6 @@ export const uiLexer = new Lexer(UI_TOKENS);
 
 // ── DSP keywords ────────────────────────────────────────────────────
 
-export const From = createToken({
-	name: "From",
-	pattern: /from/i,
-	longer_alt: Identifier,
-});
-
-export const Of = createToken({
-	name: "Of",
-	pattern: /of/i,
-	longer_alt: Identifier,
-});
-
-export const Use = createToken({
-	name: "Use",
-	pattern: /use/i,
-	longer_alt: Identifier,
-});
-
-export const Init = createToken({
-	name: "Init",
-	pattern: /init/i,
-	longer_alt: Identifier,
-});
-
-export const Create = createToken({
-	name: "Create",
-	pattern: /create/i,
-	longer_alt: Identifier,
-});
-
 export const Save = createToken({
 	name: "Save",
 	pattern: /save/i,
@@ -416,77 +350,22 @@ export const Modules = createToken({
 	longer_alt: Identifier,
 });
 
-export const Source = createToken({
-	name: "Source",
-	pattern: /source/i,
-	longer_alt: Identifier,
-});
-
-export const Parent = createToken({
-	name: "Parent",
-	pattern: /parent/i,
-	longer_alt: Identifier,
-});
-
-export const Default = createToken({
-	name: "Default",
-	pattern: /default/i,
-	longer_alt: Identifier,
-});
-
-export const Step = createToken({
-	name: "Step",
-	// Broadened to accept range-write field aliases. `stepSize` and
-	// `interval` lex as the same token as `step`. Longer alternatives
-	// listed first so they win the regex match.
-	pattern: /(stepSize|interval|step)/i,
-	longer_alt: Identifier,
-});
-
-export const Mid = createToken({
-	name: "Mid",
-	pattern: /(middlePosition|mid)/i,
-	longer_alt: Identifier,
-});
-
-export const Skew = createToken({
-	name: "Skew",
-	pattern: /(skewFactor|skew)/i,
-	longer_alt: Identifier,
-});
-
-export const Min = createToken({
-	name: "Min",
-	pattern: /min/i,
-	longer_alt: Identifier,
-});
-
-export const Max = createToken({
-	name: "Max",
-	pattern: /max/i,
-	longer_alt: Identifier,
-});
-
-export const Range = createToken({
-	name: "Range",
-	pattern: /range/i,
-	longer_alt: Identifier,
-});
-
-export const Matched = createToken({
-	name: "Matched",
-	pattern: /(matched|normalize)/i,
+export const Screenshot = createToken({
+	name: "Screenshot",
+	pattern: /screenshot/i,
 	longer_alt: Identifier,
 });
 
 // DSP token order — keywords before Identifier. CreateParameter must
-// come before Create/Connect to avoid prefix conflicts: lexer tries
-// tokens in array order, so the longer multi-char keyword wins on
-// inputs like `create_parameter`.
+// come before Connect to avoid prefix conflicts: lexer tries tokens
+// in array order, so the longer multi-char keyword wins on inputs
+// like `create_parameter`.
 export const DSP_TOKENS = [
 	WhiteSpace,
+	Comment,
 	QuotedString,
 	HexLiteral,
+	PercentLiteral,
 	NumberLiteral,
 	CreateParameter,
 	Disconnect,
@@ -494,45 +373,36 @@ export const DSP_TOKENS = [
 	Connect,
 	Networks,
 	Modules,
+	Screenshot,
 	Add,
 	Remove,
-	Move,
-	Bypass,
-	Enable,
+	Rename,
 	Show,
 	Set,
 	Get,
-	Use,
-	Init,
-	Load,
-	Create,
-	Save,
+	List,
+	Cd,
+	Ls,
+	Pwd,
 	Reset,
-	Source,
-	Parent,
-	Default,
-	Range,
-	Matched,
-	Mid,
-	Skew,
-	Step,
-	Min,
-	Max,
-	From,
-	Of,
-	Into,
+	Save,
 	To,
 	As,
-	At,
 	Tree,
+	Types,
+	Scale,
+	File,
+	BooleanLiteral,
 	Comma,
+	DoubleDot,
 	Dot,
+	LBracket,
+	RBracket,
 	Identifier,
 ];
 
 export const DSP_VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"add", "remove", "move", "set", "get",
-	"bypass", "enable", "connect", "disconnect",
+	"set", "get", "add", "remove", "connect", "disconnect",
 ]);
 
 export const dspLexer = new Lexer(DSP_TOKENS);

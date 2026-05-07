@@ -1,205 +1,173 @@
 // ── DSP Chevrotain CST parser + command types ────────────────────────
+//
+// Grammar surface per docs/CLI_GRAMMAR.md §225-288 and §330-408.
+// Native MANY_SEP comma chaining for set/get/add/remove/connect/disconnect.
 
 import { CstParser, type CstNode, type IToken } from "chevrotain";
 import {
 	Add,
 	As,
-	At,
-	Bypass,
+	BooleanLiteral,
+	Cd,
+	Comma,
 	Connect,
 	Connections,
-	Create,
 	CreateParameter,
-	Default,
 	Disconnect,
-	DSP_TOKENS,
-	DSP_VERB_KEYWORDS,
 	Dot,
-	Enable,
-	From,
+	DoubleDot,
+	DSP_TOKENS,
+	File,
 	Get,
 	HexLiteral,
 	Identifier,
-	Init,
-	Into,
-	Load,
-	Matched,
-	Max,
-	Mid,
-	Min,
+	LBracket,
+	List,
+	Ls,
 	Modules,
-	Move,
 	Networks,
 	NumberLiteral,
-	Of,
-	Parent,
+	PercentLiteral,
+	Pwd,
 	QuotedString,
-	Range,
+	RBracket,
 	Remove,
+	Rename,
 	Reset,
 	Save,
+	Scale,
+	Screenshot,
 	Set,
 	Show,
-	Skew,
-	Source,
-	Step,
 	To,
 	Tree,
-	Use,
+	Types,
 	dspLexer,
 } from "./tokens.js";
-import { splitByComma, stripQuotes, findLastUnquotedComma } from "../string-utils.js";
+import {
+	parseBooleanLiteral,
+	parseHexLiteral,
+	parseNumberLiteral,
+	parseNumericArray,
+	parsePercentLiteral,
+	parseQuotedString,
+	type Value,
+	type ValueResult,
+} from "../grammar/value-parser.js";
+import {
+	buildPathFromSegments,
+	type PathRef,
+} from "../grammar/path-parser.js";
 
-// ── Parsed command types ──────────────────────────────────────────
-
-export type ShowCommand =
-	| { type: "show"; what: "tree" | "networks" | "modules" | "connections" }
-	| { type: "show"; what: "node"; nodeId: string };
-
-export interface UseCommand {
-	type: "use";
-	moduleId: string;
-}
-
-export type InitMode = "auto" | "load" | "create";
-
-export interface InitCommand {
-	type: "init";
-	name: string;
-	mode: InitMode;
-}
-
-export interface SaveCommand {
-	type: "save";
-}
-
-export interface ResetCommand {
-	type: "reset";
-}
+// ── Command types ─────────────────────────────────────────────────
 
 export interface AddCommand {
 	type: "add";
-	factoryPath: string;
-	alias?: string;
-	parent?: string;
-	index?: number;
+	factory: string;
+	node: string;
+	alias: string;
+	parent?: PathRef;
+}
+
+export interface AddChainCommand {
+	type: "addChain";
+	clauses: { factory: string; node: string; alias: string }[];
 }
 
 export interface RemoveCommand {
 	type: "remove";
-	nodeId: string;
+	targets: PathRef[];
 }
 
-export interface MoveCommand {
-	type: "move";
-	nodeId: string;
-	parent: string;
-	index?: number;
+export interface RenameCommand {
+	type: "rename";
+	target: PathRef;
+	name: string;
+}
+
+export interface SetClause {
+	path: PathRef;
+	value: Value;
+}
+
+export interface SetCommand {
+	type: "set";
+	clauses: SetClause[];
+}
+
+export interface GetCommand {
+	type: "get";
+	paths: PathRef[];
+}
+
+export interface ConnectClause {
+	source: PathRef;
+	target: PathRef;
+	matched: boolean;
 }
 
 export interface ConnectCommand {
 	type: "connect";
-	source: string;
-	/** Optional source output — parameter name (string) or slot index (number). */
-	sourceOutput?: string | number;
-	target: string;
-	/**
-	 * Target parameter. Optional: `connect <src> to <target>` (no `.param`)
-	 * is accepted as a shorthand — HISE resolves the default routing target
-	 * server-side (e.g. routing.send → routing.receive via the Connection
-	 * property).
-	 */
-	parameter?: string;
-	/**
-	 * `matched` / `normalize` trailing flag — copies target parameter's range
-	 * onto source after wiring (mirrors the IDE normalize button).
-	 */
-	matchRange?: boolean;
+	clauses: ConnectClause[];
 }
 
 export interface DisconnectCommand {
 	type: "disconnect";
-	source: string;
-	target: string;
-	parameter: string;
-}
-
-/**
- * Set command — three shapes against the same `set` op:
- *
- *   1. Value-write   `set X.p [to] <v>`   → `value` set, range fields absent.
- *   2. Range-write   `set X.p range <min> <max> [step|mid|skew ...]`
- *                    → `min`/`max` (and any of stepSize/middlePosition/
- *                    skewFactor) set, `value` absent.
- *   3. Single-field  `set X.p.<field> <n>` → `rangeField` set + `value`
- *                    holds the new field value. Translator merges with
- *                    existing tree to emit a full range-write payload.
- *
- * The translator picks the variant by inspecting which fields are present
- * (rangeField first, then any of min/max/stepSize/middlePosition/skewFactor,
- * else value).
- */
-export interface SetCommand {
-	type: "set";
-	nodeId: string;
-	parameterId: string;
-	// Boolean is accepted so callers can construct network-level root
-	// property writes (AllowPolyphonic, HasTail, ...) directly. The
-	// grammar only emits string|number for value-write; boolean is for
-	// programmatic construction.
-	value?: string | number | boolean;
-	min?: number;
-	max?: number;
-	stepSize?: number;
-	middlePosition?: number;
-	skewFactor?: number;
-	rangeField?: "min" | "max" | "stepSize" | "middlePosition" | "skewFactor";
-}
-
-export type GetCommand =
-	| { type: "get"; query: "factory"; nodeId: string }
-	| { type: "get"; query: "param"; nodeId: string; parameterId: string }
-	| { type: "get"; query: "source"; nodeId: string; parameterId: string }
-	| { type: "get"; query: "parent"; nodeId: string; parameterId: string };
-
-export interface BypassCommand {
-	type: "bypass";
-	nodeId: string;
-}
-
-export interface EnableCommand {
-	type: "enable";
-	nodeId: string;
+	targets: PathRef[];
 }
 
 export interface CreateParameterCommand {
-	type: "create_parameter";
-	nodeId: string;
-	parameterId: string;
-	min?: number;
-	max?: number;
+	type: "createParameter";
+	container: PathRef;
+	paramName: string;
+	range: [number, number];
 	defaultValue?: number;
 	stepSize?: number;
 	middlePosition?: number;
 	skewFactor?: number;
 }
 
+export interface ScreenshotCommand {
+	type: "screenshot";
+	scale: number;
+	file: string;
+}
+
+export interface ShowCommand {
+	type: "show";
+	target: PathRef;
+}
+
+export interface ListCommand {
+	type: "list";
+	noun: "networks" | "modules" | "connections" | "tree";
+	filter?: string;
+}
+
+export interface CdCommand { type: "cd"; target: PathRef }
+export interface LsCommand { type: "ls" }
+export interface PwdCommand { type: "pwd" }
+export interface ResetCommand { type: "reset" }
+export interface SaveCommand { type: "save" }
+
 export type DspCommand =
-	| ShowCommand
-	| UseCommand
-	| InitCommand
-	| SaveCommand
-	| ResetCommand
 	| AddCommand
+	| AddChainCommand
 	| RemoveCommand
-	| MoveCommand
-	| ConnectCommand
-	| DisconnectCommand
+	| RenameCommand
 	| SetCommand
 	| GetCommand
-	| BypassCommand
-	| EnableCommand
-	| CreateParameterCommand;
+	| ConnectCommand
+	| DisconnectCommand
+	| CreateParameterCommand
+	| ScreenshotCommand
+	| ShowCommand
+	| ListCommand
+	| CdCommand
+	| LsCommand
+	| PwdCommand
+	| ResetCommand
+	| SaveCommand;
 
 // ── Chevrotain CST parser ─────────────────────────────────────────
 
@@ -209,349 +177,218 @@ class DspParser extends CstParser {
 		this.performSelfAnalysis();
 	}
 
-	// Multi-word target ref (for Use — module IDs may contain spaces)
-	public targetRef = this.RULE("targetRef", () => {
+	public pathExpr = this.RULE("pathExpr", () => {
 		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quoted" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "words" })) },
-		]);
-	});
-
-	// Flexible identifier — accepts a plain Identifier OR any DSP keyword
-	// token. Used at grammar positions where only an identifier makes
-	// sense (after a `.`, after a verb keyword, after `to`/`from`/`as`),
-	// so keyword images are unambiguous. Fixes both the
-	// property-name-collides-with-verb class (`set X.Connection`,
-	// `set X.Save`) and the node-id-collides-with-verb class
-	// (`add math.add` → default id `add`, then `remove add`,
-	// `bypass add`, `set add.Value` all need to parse).
-	public propName = this.RULE("propName", () => {
-		this.OR([
-			{ ALT: () => this.CONSUME(Identifier) },
-			{ ALT: () => this.CONSUME(Add) },
-			{ ALT: () => this.CONSUME(Remove) },
-			{ ALT: () => this.CONSUME(Move) },
-			{ ALT: () => this.CONSUME(Bypass) },
-			{ ALT: () => this.CONSUME(Enable) },
-			{ ALT: () => this.CONSUME(Show) },
-			{ ALT: () => this.CONSUME(Set) },
-			{ ALT: () => this.CONSUME(Get) },
-			{ ALT: () => this.CONSUME(Use) },
-			{ ALT: () => this.CONSUME(Init) },
-			{ ALT: () => this.CONSUME(Load) },
-			{ ALT: () => this.CONSUME(Create) },
-			{ ALT: () => this.CONSUME(Save) },
-			{ ALT: () => this.CONSUME(Reset) },
-			{ ALT: () => this.CONSUME(Connect) },
-			{ ALT: () => this.CONSUME(Disconnect) },
-			{ ALT: () => this.CONSUME(Connections) },
-			{ ALT: () => this.CONSUME(CreateParameter) },
-			{ ALT: () => this.CONSUME(Networks) },
-			{ ALT: () => this.CONSUME(Modules) },
-			{ ALT: () => this.CONSUME(Source) },
-			{ ALT: () => this.CONSUME(Parent) },
-			{ ALT: () => this.CONSUME(Default) },
-			{ ALT: () => this.CONSUME(Step) },
-			{ ALT: () => this.CONSUME(From) },
-			{ ALT: () => this.CONSUME(Of) },
-			{ ALT: () => this.CONSUME(Into) },
-			{ ALT: () => this.CONSUME(To) },
-			{ ALT: () => this.CONSUME(As) },
-			{ ALT: () => this.CONSUME(At) },
-			{ ALT: () => this.CONSUME(Tree) },
-			// Min/Max/Mid/Skew may appear as parameter names. Range and
-			// Matched are kept out: they're sentinel tokens for the
-			// range-write and connect-normalize subgrammars and would
-			// create first-token ambiguity with those alternatives.
-			{ ALT: () => this.CONSUME(Min) },
-			{ ALT: () => this.CONSUME(Max) },
-			{ ALT: () => this.CONSUME(Mid) },
-			{ ALT: () => this.CONSUME(Skew) },
-		]);
-	});
-
-	// show (networks | modules | tree | connections | <nodeId>)
-	public showCommand = this.RULE("showCommand", () => {
-		this.CONSUME(Show);
-		this.OR([
-			{ ALT: () => this.CONSUME(Networks, { LABEL: "networks" }) },
-			{ ALT: () => this.CONSUME(Modules, { LABEL: "modules" }) },
-			{ ALT: () => this.CONSUME(Tree, { LABEL: "tree" }) },
-			{ ALT: () => this.CONSUME(Connections, { LABEL: "connections" }) },
-			{ ALT: () => this.CONSUME(Identifier, { LABEL: "nodeId" }) },
-		]);
-	});
-
-	// use <moduleId>
-	public useCommand = this.RULE("useCommand", () => {
-		this.CONSUME(Use);
-		this.SUBRULE(this.targetRef, { LABEL: "moduleId" });
-	});
-
-	// init <name> | load <name> | create <name>
-	// Three verbs collapse into one command with different `mode` values.
-	public initCommand = this.RULE("initCommand", () => {
-		this.OR([
-			{ ALT: () => this.CONSUME(Init, { LABEL: "initVerb" }) },
-			{ ALT: () => this.CONSUME(Load, { LABEL: "loadVerb" }) },
-			{ ALT: () => this.CONSUME(Create, { LABEL: "createVerb" }) },
-		]);
-		this.CONSUME(Identifier, { LABEL: "name" });
-	});
-
-	// save
-	public saveCommand = this.RULE("saveCommand", () => {
-		this.CONSUME(Save);
-	});
-
-	// reset
-	public resetCommand = this.RULE("resetCommand", () => {
-		this.CONSUME(Reset);
-	});
-
-	// add <factory.node> [as <alias>] [to <parent>]
-	// The `node` half of the factory path is a subrule because scriptnode
-	// factories ship nodes whose names collide with DSP verbs — e.g.
-	// `math.add`, `math.set` etc. Same positional-disambiguation
-	// argument as propName: after the `.` only an identifier makes sense.
-	public addCommand = this.RULE("addCommand", () => {
-		this.CONSUME(Add);
-		this.CONSUME(Identifier, { LABEL: "factory" });
-		this.CONSUME(Dot);
-		this.SUBRULE(this.propName, { LABEL: "node" });
-		this.OPTION(() => {
-			this.CONSUME(As);
-			this.OR([
-				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "alias" }) },
-				{ ALT: () => this.SUBRULE2(this.propName, { LABEL: "aliasId" }) },
-			]);
-		});
-		this.OPTION2(() => {
-			this.CONSUME(To);
-			this.SUBRULE3(this.propName, { LABEL: "parent" });
-		});
-		this.OPTION3(() => {
-			this.CONSUME(At);
-			this.CONSUME(NumberLiteral, { LABEL: "index" });
-		});
-	});
-
-	// remove <nodeId>
-	public removeCommand = this.RULE("removeCommand", () => {
-		this.CONSUME(Remove);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
-	});
-
-	// move <nodeId> to <parent> [at <index>]
-	public moveCommand = this.RULE("moveCommand", () => {
-		this.CONSUME(Move);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
-		this.CONSUME(To);
-		this.SUBRULE2(this.propName, { LABEL: "parent" });
-		this.OPTION(() => {
-			this.CONSUME(At);
-			this.CONSUME(NumberLiteral, { LABEL: "index" });
-		});
-	});
-
-	// connect <source>[.<output>] to <target>[.<param>]
-	// <output> is a parameter name (Identifier) or a numeric slot index
-	// (NumberLiteral, e.g. xfader1.0, xfader1.1). When `.<param>` is
-	// omitted on the target, HISE routes the command to its default
-	// routing target internally (e.g. routing.send → routing.receive).
-	public connectCommand = this.RULE("connectCommand", () => {
-		this.CONSUME(Connect);
-		this.SUBRULE(this.propName, { LABEL: "source" });
-		this.OPTION(() => {
-			this.CONSUME(Dot);
-			this.OR([
-				{ ALT: () => this.SUBRULE2(this.propName, { LABEL: "sourceOutputId" }) },
-				{ ALT: () => this.CONSUME(NumberLiteral, { LABEL: "sourceOutputIndex" }) },
-			]);
-		});
-		this.CONSUME(To);
-		this.SUBRULE3(this.propName, { LABEL: "target" });
-		this.OPTION2(() => {
-			this.CONSUME2(Dot);
-			this.SUBRULE4(this.propName, { LABEL: "parameter" });
-		});
-		this.OPTION3(() => {
-			this.CONSUME(Matched, { LABEL: "matched" });
-		});
-	});
-
-	// disconnect <source> from <target>.<param>
-	public disconnectCommand = this.RULE("disconnectCommand", () => {
-		this.CONSUME(Disconnect);
-		this.SUBRULE(this.propName, { LABEL: "source" });
-		this.CONSUME(From);
-		this.SUBRULE2(this.propName, { LABEL: "target" });
-		this.CONSUME(Dot);
-		this.SUBRULE3(this.propName, { LABEL: "parameter" });
-	});
-
-	// Three shapes share the same head `set <node>.<param>`:
-	//
-	//   set X.p [to] <value>                                  (value-write)
-	//   set X.p range <min> <max> [step|mid|skew ...]          (range-write)
-	//   set X.p.<min|max|step|mid|skew> <number>               (single-field)
-	//
-	// First-token disambiguation: Alt1 starts with Dot, Alt2 with Range,
-	// Alt3 with To|NumberLiteral|HexLiteral|QuotedString|propName. Range
-	// and Matched are kept out of propName for this reason.
-	public setCommand = this.RULE("setCommand", () => {
-		this.CONSUME(Set);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
-		this.CONSUME(Dot);
-		this.SUBRULE2(this.propName, { LABEL: "parameterId" });
-		this.OR([
-			// Single-field range-write: set X.p.<field> <number>
-			{
-				ALT: () => {
-					this.CONSUME2(Dot);
-					this.OR2([
-						{ ALT: () => this.CONSUME(Min, { LABEL: "fieldMin" }) },
-						{ ALT: () => this.CONSUME(Max, { LABEL: "fieldMax" }) },
-						{ ALT: () => this.CONSUME(Step, { LABEL: "fieldStep" }) },
-						{ ALT: () => this.CONSUME(Mid, { LABEL: "fieldMid" }) },
-						{ ALT: () => this.CONSUME(Skew, { LABEL: "fieldSkew" }) },
-					]);
-					this.CONSUME(NumberLiteral, { LABEL: "fieldValue" });
-				},
-			},
-			// Full range-write: set X.p range <min> <max> [step|mid|skew ...]
-			{
-				ALT: () => {
-					this.CONSUME(Range);
-					this.CONSUME2(NumberLiteral, { LABEL: "rangeMin" });
-					this.CONSUME3(NumberLiteral, { LABEL: "rangeMax" });
-					this.MANY(() => {
-						this.OR3([
-							{
-								ALT: () => {
-									this.CONSUME2(Step);
-									this.CONSUME4(NumberLiteral, { LABEL: "rangeStep" });
-								},
-							},
-							{
-								ALT: () => {
-									this.CONSUME2(Mid);
-									this.CONSUME5(NumberLiteral, { LABEL: "rangeMid" });
-								},
-							},
-							{
-								ALT: () => {
-									this.CONSUME2(Skew);
-									this.CONSUME6(NumberLiteral, { LABEL: "rangeSkew" });
-								},
-							},
-						]);
-					});
-				},
-			},
-			// Value-write: set X.p [to] <value>
-			{
-				ALT: () => {
-					this.OPTION(() => {
-						this.CONSUME(To);
-					});
-					this.OR4([
-						{ ALT: () => this.CONSUME(HexLiteral, { LABEL: "hexValue" }) },
-						{ ALT: () => this.CONSUME7(NumberLiteral, { LABEL: "numValue" }) },
-						{ ALT: () => this.CONSUME(QuotedString, { LABEL: "strValue" }) },
-						{ ALT: () => this.SUBRULE3(this.propName, { LABEL: "idValue" }) },
-					]);
-				},
-			},
-		]);
-	});
-
-	// get <node> | get <node>.<param> | get source of <node>.<param> | get parent of <node>.<param>
-	public getCommand = this.RULE("getCommand", () => {
-		this.CONSUME(Get);
-		this.OR([
+			{ ALT: () => this.CONSUME(DoubleDot) },
 			{ ALT: () => {
-				this.OR2([
-					{ ALT: () => this.CONSUME(Source, { LABEL: "queryKind" }) },
-					{ ALT: () => this.CONSUME(Parent, { LABEL: "queryKind" }) },
-				]);
-				this.CONSUME(Of);
-				this.CONSUME(Identifier, { LABEL: "nodeId" });
-				this.CONSUME(Dot);
-				this.SUBRULE(this.propName, { LABEL: "parameterId" });
-			}},
-			{ ALT: () => {
-				this.CONSUME2(Identifier, { LABEL: "plainNodeId" });
-				this.OPTION(() => {
-					this.CONSUME2(Dot);
-					this.SUBRULE2(this.propName, { LABEL: "plainParameterId" });
+				this.SUBRULE(this.pathSegment, { LABEL: "first" });
+				this.MANY(() => {
+					this.CONSUME(Dot);
+					this.SUBRULE2(this.pathSegment, { LABEL: "rest" });
 				});
 			}},
 		]);
 	});
 
-	// bypass <nodeId>
-	public bypassCommand = this.RULE("bypassCommand", () => {
-		this.CONSUME(Bypass);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
+	public pathSegment = this.RULE("pathSegment", () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(NumberLiteral) },
+			{ ALT: () => this.CONSUME(QuotedString) },
+		]);
 	});
 
-	// enable <nodeId>
-	public enableCommand = this.RULE("enableCommand", () => {
-		this.CONSUME(Enable);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
+	// factory.node — DSP type ref is always 2-segment.
+	public factoryRef = this.RULE("factoryRef", () => {
+		this.CONSUME(Identifier, { LABEL: "factory" });
+		this.CONSUME(Dot);
+		this.SUBRULE(this.pathSegment, { LABEL: "node" });
 	});
 
-	// create_parameter <container>.<name> [<min> <max>] [default <d>] [step <s>] [mid <m>|skew <s>]
+	public arrayValue = this.RULE("arrayValue", () => {
+		this.CONSUME(LBracket);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.CONSUME(NumberLiteral),
+		});
+		this.CONSUME(RBracket);
+	});
+
+	// Note: NumberLiteral handled implicitly via pathExpr (pathSegment
+	// accepts NumberLiteral so `xfader1.0` and `set X.p 0.5` both parse).
+	// The extractor converts a bare-numeric segment back to a number.
+	public value = this.RULE("value", () => {
+		this.OR([
+			{ ALT: () => this.SUBRULE(this.arrayValue) },
+			{ ALT: () => this.CONSUME(HexLiteral) },
+			{ ALT: () => this.CONSUME(PercentLiteral) },
+			{ ALT: () => this.CONSUME(BooleanLiteral) },
+			{ ALT: () => this.SUBRULE(this.pathExpr) },
+		]);
+	});
+
+	public addClause = this.RULE("addClause", () => {
+		this.SUBRULE(this.factoryRef, { LABEL: "factory" });
+		this.CONSUME(As);
+		this.CONSUME(QuotedString, { LABEL: "alias" });
+		this.OPTION(() => {
+			this.CONSUME(To);
+			this.SUBRULE(this.pathExpr, { LABEL: "parent" });
+		});
+	});
+
+	public addCommand = this.RULE("addCommand", () => {
+		this.CONSUME(Add);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.addClause),
+		});
+	});
+
+	public removeCommand = this.RULE("removeCommand", () => {
+		this.CONSUME(Remove);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }),
+		});
+	});
+
+	public renameCommand = this.RULE("renameCommand", () => {
+		this.CONSUME(Rename);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+		this.CONSUME(As);
+		this.CONSUME(QuotedString, { LABEL: "name" });
+	});
+
+	public setClause = this.RULE("setClause", () => {
+		this.SUBRULE(this.pathExpr, { LABEL: "path" });
+		this.SUBRULE(this.value, { LABEL: "value" });
+	});
+
+	public setCommand = this.RULE("setCommand", () => {
+		this.CONSUME(Set);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.setClause),
+		});
+	});
+
+	public getCommand = this.RULE("getCommand", () => {
+		this.CONSUME(Get);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.pathExpr, { LABEL: "path" }),
+		});
+	});
+
+	// connect <pathExpr> to <pathExpr> [Identifier 'matched']
+	public connectClause = this.RULE("connectClause", () => {
+		this.SUBRULE(this.pathExpr, { LABEL: "source" });
+		this.CONSUME(To);
+		this.SUBRULE2(this.pathExpr, { LABEL: "target" });
+		this.OPTION(() => {
+			this.CONSUME(Identifier, { LABEL: "matchedFlag" });
+		});
+	});
+
+	public connectCommand = this.RULE("connectCommand", () => {
+		this.CONSUME(Connect);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.connectClause),
+		});
+	});
+
+	public disconnectCommand = this.RULE("disconnectCommand", () => {
+		this.CONSUME(Disconnect);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }),
+		});
+	});
+
+	// create_parameter <DottedPath> <Array2> [Identifier <NumberLiteral>]*
+	// The optional clauses are post-validated as one of:
+	//   default | stepSize | middlePosition | skewFactor
+	public createParamClause = this.RULE("createParamClause", () => {
+		this.CONSUME(Identifier, { LABEL: "name" });
+		this.CONSUME(NumberLiteral, { LABEL: "value" });
+	});
+
 	public createParameterCommand = this.RULE("createParameterCommand", () => {
 		this.CONSUME(CreateParameter);
-		this.SUBRULE(this.propName, { LABEL: "nodeId" });
-		this.CONSUME(Dot);
-		this.SUBRULE2(this.propName, { LABEL: "parameterId" });
-		this.OPTION(() => {
-			this.CONSUME(NumberLiteral, { LABEL: "min" });
-			this.CONSUME2(NumberLiteral, { LABEL: "max" });
-		});
+		this.SUBRULE(this.pathExpr, { LABEL: "path" });
+		this.SUBRULE(this.arrayValue, { LABEL: "range" });
 		this.MANY(() => {
-			this.OR([
-				{ ALT: () => {
-					this.CONSUME(Default);
-					this.CONSUME3(NumberLiteral, { LABEL: "defaultValue" });
-				}},
-				{ ALT: () => {
-					this.CONSUME(Step);
-					this.CONSUME4(NumberLiteral, { LABEL: "stepSize" });
-				}},
-				{ ALT: () => {
-					this.CONSUME(Mid);
-					this.CONSUME5(NumberLiteral, { LABEL: "middlePosition" });
-				}},
-				{ ALT: () => {
-					this.CONSUME(Skew);
-					this.CONSUME6(NumberLiteral, { LABEL: "skewFactor" });
-				}},
+			this.SUBRULE(this.createParamClause);
+		});
+	});
+
+	// screenshot scale <ScalarValue> file <QuotedString>
+	public screenshotCommand = this.RULE("screenshotCommand", () => {
+		this.CONSUME(Screenshot);
+		this.CONSUME(Scale);
+		this.OR([
+			{ ALT: () => this.CONSUME(NumberLiteral, { LABEL: "scaleNum" }) },
+			{ ALT: () => this.CONSUME(PercentLiteral, { LABEL: "scalePct" }) },
+		]);
+		this.CONSUME(File);
+		this.CONSUME(QuotedString, { LABEL: "file" });
+	});
+
+	public showCommand = this.RULE("showCommand", () => {
+		this.CONSUME(Show);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+	});
+
+	public listCommand = this.RULE("listCommand", () => {
+		this.CONSUME(List);
+		this.OR([
+			{ ALT: () => this.CONSUME(Networks, { LABEL: "noun_networks" }) },
+			{ ALT: () => this.CONSUME(Modules, { LABEL: "noun_modules" }) },
+			{ ALT: () => this.CONSUME(Connections, { LABEL: "noun_connections" }) },
+			{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
+		]);
+		this.OPTION(() => {
+			this.OR2([
+				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
+				{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
 			]);
 		});
 	});
 
+	public cdCommand = this.RULE("cdCommand", () => {
+		this.CONSUME(Cd);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+	});
+
+	public lsCommand = this.RULE("lsCommand", () => { this.CONSUME(Ls); });
+	public pwdCommand = this.RULE("pwdCommand", () => { this.CONSUME(Pwd); });
+	public resetCommand = this.RULE("resetCommand", () => { this.CONSUME(Reset); });
+	public saveCommand = this.RULE("saveCommand", () => { this.CONSUME(Save); });
+
 	public command = this.RULE("command", () => {
 		this.OR([
-			{ ALT: () => this.SUBRULE(this.showCommand) },
-			{ ALT: () => this.SUBRULE(this.useCommand) },
-			{ ALT: () => this.SUBRULE(this.initCommand) },
-			{ ALT: () => this.SUBRULE(this.saveCommand) },
-			{ ALT: () => this.SUBRULE(this.resetCommand) },
 			{ ALT: () => this.SUBRULE(this.addCommand) },
 			{ ALT: () => this.SUBRULE(this.removeCommand) },
-			{ ALT: () => this.SUBRULE(this.moveCommand) },
-			{ ALT: () => this.SUBRULE(this.connectCommand) },
-			{ ALT: () => this.SUBRULE(this.disconnectCommand) },
+			{ ALT: () => this.SUBRULE(this.renameCommand) },
 			{ ALT: () => this.SUBRULE(this.setCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
-			{ ALT: () => this.SUBRULE(this.bypassCommand) },
-			{ ALT: () => this.SUBRULE(this.enableCommand) },
+			{ ALT: () => this.SUBRULE(this.connectCommand) },
+			{ ALT: () => this.SUBRULE(this.disconnectCommand) },
 			{ ALT: () => this.SUBRULE(this.createParameterCommand) },
+			{ ALT: () => this.SUBRULE(this.screenshotCommand) },
+			{ ALT: () => this.SUBRULE(this.showCommand) },
+			{ ALT: () => this.SUBRULE(this.listCommand) },
+			{ ALT: () => this.SUBRULE(this.cdCommand) },
+			{ ALT: () => this.SUBRULE(this.lsCommand) },
+			{ ALT: () => this.SUBRULE(this.pwdCommand) },
+			{ ALT: () => this.SUBRULE(this.resetCommand) },
+			{ ALT: () => this.SUBRULE(this.saveCommand) },
 		]);
+		// Suppress "unused token" complaints for tokens kept solely for the
+		// shared lexer (inherited from the BUILDER/UI section).
+		void Types;
 	});
 }
 
@@ -559,250 +396,334 @@ const parser = new DspParser();
 
 // ── CST extractors ────────────────────────────────────────────────
 
-const asNode = (el: import("chevrotain").CstElement) => el as CstNode;
-const asToken = (el: import("chevrotain").CstElement) => el as IToken;
+function extractPathSegmentImage(node: CstNode): string {
+	const c = node.children;
+	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
+	if (c.NumberLiteral) return (c.NumberLiteral[0] as IToken).image;
+	throw new Error("pathSegment: no Identifier / QuotedString / NumberLiteral");
+}
 
-/** Extract the image of whichever token alternative the propName subrule matched. */
-function extractPropName(node: CstNode): string {
-	for (const children of Object.values(node.children)) {
-		for (const child of children) {
-			if (child && typeof (child as IToken).image === "string") {
-				return (child as IToken).image;
-			}
+function extractPathExpr(node: CstNode): { ref: PathRef } | { error: string } {
+	const c = node.children;
+	if (c.DoubleDot) return { ref: { kind: "parent" } };
+	const segments: string[] = [];
+	if (c.first) segments.push(extractPathSegmentImage(c.first[0] as CstNode));
+	if (c.rest) {
+		for (const seg of c.rest as import("chevrotain").CstElement[]) {
+			segments.push(extractPathSegmentImage(seg as CstNode));
 		}
 	}
-	return "";
+	const r = buildPathFromSegments(segments);
+	if (!r.ok) return { error: r.error };
+	return { ref: r.ref };
 }
 
-function extractCommand(cst: CstNode): { command: DspCommand } | { error: string } {
-	const c = cst.children;
-	if (c.showCommand) return extractShow(c.showCommand[0] as CstNode);
-	if (c.useCommand) return extractUse(c.useCommand[0] as CstNode);
-	if (c.initCommand) return extractInit(c.initCommand[0] as CstNode);
-	if (c.saveCommand) return { command: { type: "save" } };
-	if (c.resetCommand) return { command: { type: "reset" } };
-	if (c.addCommand) return extractAdd(c.addCommand[0] as CstNode);
-	if (c.removeCommand) return extractRemove(c.removeCommand[0] as CstNode);
-	if (c.moveCommand) return extractMove(c.moveCommand[0] as CstNode);
-	if (c.connectCommand) return extractConnect(c.connectCommand[0] as CstNode);
-	if (c.disconnectCommand) return extractDisconnect(c.disconnectCommand[0] as CstNode);
-	if (c.setCommand) return extractSet(c.setCommand[0] as CstNode);
-	if (c.getCommand) return extractGet(c.getCommand[0] as CstNode);
-	if (c.bypassCommand) return extractBypass(c.bypassCommand[0] as CstNode);
-	if (c.enableCommand) return extractEnable(c.enableCommand[0] as CstNode);
-	if (c.createParameterCommand) return extractCreateParameter(c.createParameterCommand[0] as CstNode);
-	return { error: "Unknown command" };
+function pathRefSegmentCount(ref: PathRef): number {
+	if (ref.kind === "parent") return 0;
+	if (ref.kind === "bare") return 1;
+	return ref.segments.length;
 }
 
-function extractTargetRef(node: CstNode): string {
-	if (node.children.quoted) {
-		return stripQuotes(asToken(node.children.quoted[0]).image);
+function extractFactoryRef(node: CstNode): { factory: string; node: string } | { error: string } {
+	const c = node.children;
+	const factory = (c.factory![0] as IToken).image;
+	const nodeNode = c.node![0] as CstNode;
+	const nodeImage = extractPathSegmentImage(nodeNode);
+	// Strip quotes if quoted
+	const nodeName = nodeImage.startsWith('"')
+		? (() => {
+			const r = parseQuotedString(nodeImage);
+			if (!r.ok || r.value.kind !== "string") return null;
+			return r.value.s;
+		})()
+		: nodeImage;
+	if (nodeName === null) return { error: `invalid node segment: ${nodeImage}` };
+	return { factory, node: nodeName };
+}
+
+function extractArrayValue(node: CstNode): ValueResult {
+	const tokens = (node.children.NumberLiteral ?? []) as IToken[];
+	const elements: Value[] = [];
+	for (const t of tokens) {
+		const r = parseNumberLiteral(t.image);
+		if (!r.ok) return r;
+		elements.push(r.value);
 	}
-	return (node.children.words as IToken[]).map((t) => t.image).join(" ");
+	return parseNumericArray(elements, "N");
 }
 
-function extractShow(node: CstNode): { command: ShowCommand } {
-	if (node.children.networks) return { command: { type: "show", what: "networks" } };
-	if (node.children.modules) return { command: { type: "show", what: "modules" } };
-	if (node.children.connections) return { command: { type: "show", what: "connections" } };
-	if (node.children.nodeId) {
-		const nodeId = asToken(node.children.nodeId[0]).image;
-		return { command: { type: "show", what: "node", nodeId } };
-	}
-	return { command: { type: "show", what: "tree" } };
-}
-
-function extractUse(node: CstNode): { command: UseCommand } {
-	const moduleId = extractTargetRef(asNode(node.children.moduleId[0]));
-	return { command: { type: "use", moduleId } };
-}
-
-function extractInit(node: CstNode): { command: InitCommand } {
-	const name = asToken(node.children.name[0]).image;
-	const mode: InitMode = node.children.loadVerb
-		? "load"
-		: node.children.createVerb
-			? "create"
-			: "auto";
-	return { command: { type: "init", name, mode } };
-}
-
-function extractAdd(node: CstNode): { command: AddCommand } | { error: string } {
-	const factory = asToken(node.children.factory[0]).image;
-	const nodeName = extractPropName(asNode(node.children.node[0]));
-	const factoryPath = `${factory}.${nodeName}`;
-	let alias: string | undefined;
-	if (node.children.alias) {
-		alias = stripQuotes(asToken(node.children.alias[0]).image);
-	} else if (node.children.aliasId) {
-		alias = extractPropName(asNode(node.children.aliasId[0]));
-	}
-	const parent = node.children.parent
-		? extractPropName(asNode(node.children.parent[0]))
-		: undefined;
-	const index = node.children.index
-		? parseInt(asToken(node.children.index[0]).image, 10)
-		: undefined;
-	return { command: { type: "add", factoryPath, alias, parent, index } };
-}
-
-function extractRemove(node: CstNode): { command: RemoveCommand } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	return { command: { type: "remove", nodeId } };
-}
-
-function extractMove(node: CstNode): { command: MoveCommand } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	const parent = extractPropName(asNode(node.children.parent[0]));
-	const index = node.children.index
-		? parseInt(asToken(node.children.index[0]).image, 10)
-		: undefined;
-	return { command: { type: "move", nodeId, parent, index } };
-}
-
-function extractConnect(node: CstNode): { command: ConnectCommand } {
-	const source = extractPropName(asNode(node.children.source[0]));
-	let sourceOutput: string | number | undefined;
-	if (node.children.sourceOutputIndex) {
-		sourceOutput = parseInt(asToken(node.children.sourceOutputIndex[0]).image, 10);
-	} else if (node.children.sourceOutputId) {
-		sourceOutput = extractPropName(asNode(node.children.sourceOutputId[0]));
-	}
-	const target = extractPropName(asNode(node.children.target[0]));
-	const parameter = node.children.parameter
-		? extractPropName(asNode(node.children.parameter[0]))
-		: undefined;
-	const matchRange = node.children.matched ? true : undefined;
-	return { command: { type: "connect", source, sourceOutput, target, parameter, matchRange } };
-}
-
-function extractDisconnect(node: CstNode): { command: DisconnectCommand } {
-	const source = extractPropName(asNode(node.children.source[0]));
-	const target = extractPropName(asNode(node.children.target[0]));
-	const parameter = extractPropName(asNode(node.children.parameter[0]));
-	return { command: { type: "disconnect", source, target, parameter } };
-}
-
-function extractSet(node: CstNode): { command: SetCommand } | { error: string } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	const parameterId = extractPropName(asNode(node.children.parameterId[0]));
-
-	// Single-field range-write: set X.p.<field> <number>
-	if (node.children.fieldValue) {
-		const field: SetCommand["rangeField"] = node.children.fieldMin
-			? "min"
-			: node.children.fieldMax
-				? "max"
-				: node.children.fieldStep
-					? "stepSize"
-					: node.children.fieldMid
-						? "middlePosition"
-						: "skewFactor";
-		const value = parseFloat(asToken(node.children.fieldValue[0]).image);
-		return { command: { type: "set", nodeId, parameterId, rangeField: field, value } };
-	}
-
-	// Full range-write: set X.p range <min> <max> [step|mid|skew ...]
-	if (node.children.rangeMin) {
-		const cmd: SetCommand = {
-			type: "set",
-			nodeId,
-			parameterId,
-			min: parseFloat(asToken(node.children.rangeMin[0]).image),
-			max: parseFloat(asToken(node.children.rangeMax[0]).image),
-		};
-		if (node.children.rangeStep) {
-			cmd.stepSize = parseFloat(asToken(node.children.rangeStep[0]).image);
+function extractValue(node: CstNode): ValueResult {
+	const c = node.children;
+	if (c.arrayValue) return extractArrayValue(c.arrayValue[0] as CstNode);
+	if (c.HexLiteral) return parseHexLiteral((c.HexLiteral[0] as IToken).image);
+	if (c.PercentLiteral) return parsePercentLiteral((c.PercentLiteral[0] as IToken).image);
+	if (c.BooleanLiteral) return parseBooleanLiteral((c.BooleanLiteral[0] as IToken).image);
+	if (c.pathExpr) {
+		const r = extractPathExpr(c.pathExpr[0] as CstNode);
+		if ("error" in r) return { ok: false, error: r.error };
+		if (r.ref.kind === "bare" && r.ref.segment.quoted) {
+			return { ok: true, value: { kind: "string", s: r.ref.segment.id } };
 		}
-		if (node.children.rangeMid) {
-			cmd.middlePosition = parseFloat(asToken(node.children.rangeMid[0]).image);
+		// A bare unquoted segment whose image is purely numeric is a
+		// scalar literal (the parser routes numbers via pathExpr to keep
+		// `xfader1.0` parseable; see comment on the `value` rule).
+		if (r.ref.kind === "bare" && !r.ref.segment.quoted && /^-?\d+(\.\d+)?$/.test(r.ref.segment.id)) {
+			return parseNumberLiteral(r.ref.segment.id);
 		}
-		if (node.children.rangeSkew) {
-			cmd.skewFactor = parseFloat(asToken(node.children.rangeSkew[0]).image);
+		return { ok: true, value: { kind: "path", ref: r.ref } };
+	}
+	return { ok: false, error: "value: no alternative matched" };
+}
+
+function extractAddCommand(node: CstNode): { command: DspCommand } | { error: string } {
+	const clauseNodes = (node.children.addClause ?? []) as CstNode[];
+	if (clauseNodes.length === 0) return { error: "add: no clauses" };
+	const clauses: { factory: string; node: string; alias: string; parent?: PathRef }[] = [];
+	for (const clNode of clauseNodes) {
+		const cl = clNode.children;
+		const fr = extractFactoryRef(cl.factory![0] as CstNode);
+		if ("error" in fr) return { error: fr.error };
+		const aliasRes = parseQuotedString((cl.alias![0] as IToken).image);
+		if (!aliasRes.ok || aliasRes.value.kind !== "string") return { error: "add: invalid alias" };
+		let parent: PathRef | undefined;
+		if (cl.parent) {
+			const p = extractPathExpr(cl.parent[0] as CstNode);
+			if ("error" in p) return { error: p.error };
+			parent = p.ref;
 		}
-		return { command: cmd };
+		clauses.push({ factory: fr.factory, node: fr.node, alias: aliasRes.value.s, parent });
 	}
-
-	// Value-write: set X.p [to] <value>
-	let value: string | number;
-	if (node.children.hexValue) {
-		value = parseInt(asToken(node.children.hexValue[0]).image.slice(2), 16);
-	} else if (node.children.numValue) {
-		value = parseFloat(asToken(node.children.numValue[0]).image);
-	} else if (node.children.strValue) {
-		value = stripQuotes(asToken(node.children.strValue[0]).image);
-	} else if (node.children.idValue) {
-		value = extractPropName(asNode(node.children.idValue[0]));
-	} else {
-		return { error: "set: missing value" };
+	if (clauses.length === 1) {
+		const c = clauses[0];
+		return { command: { type: "add", factory: c.factory, node: c.node, alias: c.alias, parent: c.parent } };
 	}
-	return { command: { type: "set", nodeId, parameterId, value } };
-}
-
-function extractGet(node: CstNode): { command: GetCommand } {
-	if (node.children.queryKind) {
-		const kindImage = asToken(node.children.queryKind[0]).image.toLowerCase();
-		const query: "source" | "parent" = kindImage === "parent" ? "parent" : "source";
-		const nodeId = asToken(node.children.nodeId[0]).image;
-		const parameterId = extractPropName(asNode(node.children.parameterId[0]));
-		return { command: { type: "get", query, nodeId, parameterId } };
+	for (const c of clauses) {
+		if (c.parent) return { error: "`to` clause is forbidden in chained `add` — chained adds use cwd only" };
 	}
-	const nodeId = asToken(node.children.plainNodeId[0]).image;
-	if (node.children.plainParameterId) {
-		const parameterId = extractPropName(asNode(node.children.plainParameterId[0]));
-		return { command: { type: "get", query: "param", nodeId, parameterId } };
-	}
-	return { command: { type: "get", query: "factory", nodeId } };
-}
-
-function extractBypass(node: CstNode): { command: BypassCommand } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	return { command: { type: "bypass", nodeId } };
-}
-
-function extractEnable(node: CstNode): { command: EnableCommand } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	return { command: { type: "enable", nodeId } };
-}
-
-function extractCreateParameter(node: CstNode): { command: CreateParameterCommand } {
-	const nodeId = extractPropName(asNode(node.children.nodeId[0]));
-	const parameterId = extractPropName(asNode(node.children.parameterId[0]));
-	const min = node.children.min ? parseFloat(asToken(node.children.min[0]).image) : undefined;
-	const max = node.children.max ? parseFloat(asToken(node.children.max[0]).image) : undefined;
-	const defaultValue = node.children.defaultValue
-		? parseFloat(asToken(node.children.defaultValue[0]).image)
-		: undefined;
-	const stepSize = node.children.stepSize
-		? parseFloat(asToken(node.children.stepSize[0]).image)
-		: undefined;
-	const middlePosition = node.children.middlePosition
-		? parseFloat(asToken(node.children.middlePosition[0]).image)
-		: undefined;
-	const skewFactor = node.children.skewFactor
-		? parseFloat(asToken(node.children.skewFactor[0]).image)
-		: undefined;
 	return {
 		command: {
-			type: "create_parameter",
-			nodeId,
-			parameterId,
-			min,
-			max,
-			defaultValue,
-			stepSize,
-			middlePosition,
-			skewFactor,
+			type: "addChain",
+			clauses: clauses.map((c) => ({ factory: c.factory, node: c.node, alias: c.alias })),
 		},
 	};
 }
 
+function extractRemoveCommand(node: CstNode): { command: RemoveCommand } | { error: string } {
+	const targets: PathRef[] = [];
+	for (const t of (node.children.target ?? []) as import("chevrotain").CstElement[]) {
+		const r = extractPathExpr(t as CstNode);
+		if ("error" in r) return { error: r.error };
+		targets.push(r.ref);
+	}
+	if (targets.length === 0) return { error: "remove: no targets" };
+	return { command: { type: "remove", targets } };
+}
+
+function extractRenameCommand(node: CstNode): { command: RenameCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	const nameRes = parseQuotedString((node.children.name![0] as IToken).image);
+	if (!nameRes.ok || nameRes.value.kind !== "string") return { error: "rename: invalid name" };
+	return { command: { type: "rename", target: target.ref, name: nameRes.value.s } };
+}
+
+function extractSetCommand(node: CstNode): { command: SetCommand } | { error: string } {
+	const clauseNodes = (node.children.setClause ?? []) as CstNode[];
+	if (clauseNodes.length === 0) return { error: "set: no clauses" };
+	const clauses: SetClause[] = [];
+	for (const clNode of clauseNodes) {
+		const c = clNode.children;
+		const path = extractPathExpr(c.path![0] as CstNode);
+		if ("error" in path) return { error: path.error };
+		if (pathRefSegmentCount(path.ref) < 2) {
+			return { error: "set: path must have at least 2 segments (use `set <node>.<field> <value>`)" };
+		}
+		const value = extractValue(c.value![0] as CstNode);
+		if (!value.ok) return { error: value.error };
+		clauses.push({ path: path.ref, value: value.value });
+	}
+	return { command: { type: "set", clauses } };
+}
+
+function extractGetCommand(node: CstNode): { command: GetCommand } | { error: string } {
+	const paths: PathRef[] = [];
+	for (const p of (node.children.path ?? []) as import("chevrotain").CstElement[]) {
+		const r = extractPathExpr(p as CstNode);
+		if ("error" in r) return { error: r.error };
+		if (pathRefSegmentCount(r.ref) < 2) {
+			return { error: "get: path must have at least 2 segments (use `get <node>.<field>`)" };
+		}
+		paths.push(r.ref);
+	}
+	if (paths.length === 0) return { error: "get: no paths" };
+	return { command: { type: "get", paths } };
+}
+
+function extractConnectCommand(node: CstNode): { command: ConnectCommand } | { error: string } {
+	const clauseNodes = (node.children.connectClause ?? []) as CstNode[];
+	if (clauseNodes.length === 0) return { error: "connect: no clauses" };
+	const clauses: ConnectClause[] = [];
+	for (const clNode of clauseNodes) {
+		const cl = clNode.children;
+		const src = extractPathExpr(cl.source![0] as CstNode);
+		if ("error" in src) return { error: src.error };
+		const tgt = extractPathExpr(cl.target![0] as CstNode);
+		if ("error" in tgt) return { error: tgt.error };
+		let matched = false;
+		if (cl.matchedFlag) {
+			const image = (cl.matchedFlag[0] as IToken).image.toLowerCase();
+			if (image !== "matched") {
+				return { error: `connect: unexpected trailing token "${image}" — expected "matched" or end-of-statement` };
+			}
+			matched = true;
+		}
+		clauses.push({ source: src.ref, target: tgt.ref, matched });
+	}
+	return { command: { type: "connect", clauses } };
+}
+
+function extractDisconnectCommand(node: CstNode): { command: DisconnectCommand } | { error: string } {
+	const targets: PathRef[] = [];
+	for (const t of (node.children.target ?? []) as import("chevrotain").CstElement[]) {
+		const r = extractPathExpr(t as CstNode);
+		if ("error" in r) return { error: r.error };
+		if (pathRefSegmentCount(r.ref) < 2) {
+			return { error: "disconnect: path must have at least 2 segments (use `disconnect <node>.<param>`)" };
+		}
+		targets.push(r.ref);
+	}
+	if (targets.length === 0) return { error: "disconnect: no targets" };
+	return { command: { type: "disconnect", targets } };
+}
+
+const VALID_CREATE_PARAM_KEYS = new globalThis.Set(["default", "stepsize", "middleposition", "skewfactor"]);
+
+function extractCreateParameterCommand(node: CstNode): { command: CreateParameterCommand } | { error: string } {
+	const path = extractPathExpr(node.children.path![0] as CstNode);
+	if ("error" in path) return { error: path.error };
+	if (pathRefSegmentCount(path.ref) < 2) {
+		return { error: "create_parameter: path must have at least 2 segments (use `create_parameter <container>.<name>`)" };
+	}
+	// Strip the last segment as the new parameter name; resolve container from prefix.
+	if (path.ref.kind !== "dotted") return { error: "create_parameter: path must be a dotted path" };
+	const segs = path.ref.segments;
+	const paramName = segs[segs.length - 1].id;
+	const container: PathRef = segs.length === 2
+		? { kind: "bare", segment: segs[0] }
+		: { kind: "dotted", segments: segs.slice(0, -1) };
+
+	const rangeVal = extractArrayValue(node.children.range![0] as CstNode);
+	if (!rangeVal.ok) return { error: rangeVal.error };
+	const arr = rangeVal.value;
+	if (arr.kind !== "arrayN") return { error: "create_parameter: range must be a numeric array" };
+	if (arr.n.length !== 2) {
+		return { error: `create_parameter: range must be 2 elements [min, max] (got ${arr.n.length})` };
+	}
+	const range: [number, number] = [arr.n[0], arr.n[1]];
+
+	const cmd: CreateParameterCommand = {
+		type: "createParameter",
+		container,
+		paramName,
+		range,
+	};
+
+	const clauseNodes = (node.children.createParamClause ?? []) as CstNode[];
+	for (const clNode of clauseNodes) {
+		const c = clNode.children;
+		const name = (c.name![0] as IToken).image;
+		const lowerName = name.toLowerCase();
+		if (!VALID_CREATE_PARAM_KEYS.has(lowerName)) {
+			return { error: `create_parameter: unknown clause "${name}" (expected default, stepSize, middlePosition, or skewFactor)` };
+		}
+		const valueRes = parseNumberLiteral((c.value![0] as IToken).image);
+		if (!valueRes.ok) return { error: valueRes.error };
+		if (valueRes.value.kind !== "number") return { error: "create_parameter: clause value must be numeric" };
+		const n = valueRes.value.n;
+		switch (lowerName) {
+			case "default": cmd.defaultValue = n; break;
+			case "stepsize": cmd.stepSize = n; break;
+			case "middleposition": cmd.middlePosition = n; break;
+			case "skewfactor": cmd.skewFactor = n; break;
+		}
+	}
+	return { command: cmd };
+}
+
+function extractScreenshotCommand(node: CstNode): { command: ScreenshotCommand } | { error: string } {
+	const c = node.children;
+	let scale: number;
+	if (c.scaleNum) {
+		const r = parseNumberLiteral((c.scaleNum[0] as IToken).image);
+		if (!r.ok || r.value.kind !== "number") return { error: "screenshot: invalid scale" };
+		scale = r.value.n;
+	} else {
+		const r = parsePercentLiteral((c.scalePct![0] as IToken).image);
+		if (!r.ok || r.value.kind !== "number") return { error: "screenshot: invalid scale" };
+		scale = r.value.n;
+	}
+	const fileRes = parseQuotedString((c.file![0] as IToken).image);
+	if (!fileRes.ok || fileRes.value.kind !== "string") return { error: "screenshot: invalid file" };
+	return { command: { type: "screenshot", scale, file: fileRes.value.s } };
+}
+
+function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "show", target: target.ref } };
+}
+
+function extractListCommand(node: CstNode): { command: ListCommand } | { error: string } {
+	const c = node.children;
+	const noun: ListCommand["noun"] = c.noun_networks
+		? "networks"
+		: c.noun_modules
+			? "modules"
+			: c.noun_connections
+				? "connections"
+				: "tree";
+	let filter: string | undefined;
+	if (c.filterQuoted) {
+		const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
+		if (!r.ok || r.value.kind !== "string") return { error: "list: invalid filter" };
+		filter = r.value.s;
+	} else if (c.filterBare) {
+		filter = (c.filterBare[0] as IToken).image;
+	}
+	return { command: { type: "list", noun, filter } };
+}
+
+function extractCdCommand(node: CstNode): { command: CdCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "cd", target: target.ref } };
+}
+
+function extractCommand(cst: CstNode): { command: DspCommand } | { error: string } {
+	const c = cst.children;
+	if (c.addCommand) return extractAddCommand(c.addCommand[0] as CstNode);
+	if (c.removeCommand) return extractRemoveCommand(c.removeCommand[0] as CstNode);
+	if (c.renameCommand) return extractRenameCommand(c.renameCommand[0] as CstNode);
+	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
+	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
+	if (c.connectCommand) return extractConnectCommand(c.connectCommand[0] as CstNode);
+	if (c.disconnectCommand) return extractDisconnectCommand(c.disconnectCommand[0] as CstNode);
+	if (c.createParameterCommand) return extractCreateParameterCommand(c.createParameterCommand[0] as CstNode);
+	if (c.screenshotCommand) return extractScreenshotCommand(c.screenshotCommand[0] as CstNode);
+	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
+	if (c.listCommand) return extractListCommand(c.listCommand[0] as CstNode);
+	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
+	if (c.lsCommand) return { command: { type: "ls" } };
+	if (c.pwdCommand) return { command: { type: "pwd" } };
+	if (c.resetCommand) return { command: { type: "reset" } };
+	if (c.saveCommand) return { command: { type: "save" } };
+	return { error: "Unknown command structure" };
+}
+
 // ── Parse functions ───────────────────────────────────────────────
 
-/** Parse a single DSP command string. */
-export function parseSingleDspCommand(
-	input: string,
-): { command: DspCommand } | { error: string } {
+export function parseSingleDspCommand(input: string): { command: DspCommand } | { error: string } {
 	const lexResult = dspLexer.tokenize(input);
 	if (lexResult.errors.length > 0) {
 		return { error: `Lexer error: ${lexResult.errors[0].message}` };
@@ -815,57 +736,30 @@ export function parseSingleDspCommand(
 	return extractCommand(cst);
 }
 
-// All top-level command keywords accepted at segment start. A segment
-// starting with any of these parses directly. `DSP_VERB_KEYWORDS` is
-// the subset whose verbs may be inherited by later bare-argument
-// segments in a comma chain.
-const _NativeSet = globalThis.Set;
-const DSP_COMMAND_KEYWORDS: ReadonlySet<string> = new _NativeSet([
-	"show", "use", "init", "load", "create", "save", "reset",
-	"add", "remove", "move", "connect", "disconnect",
-	"set", "get", "bypass", "enable", "create_parameter",
-]);
-
 /**
- * Parse DSP input with comma chaining support.
- *
- * Verb inheritance: a segment without a leading keyword inherits the
- * previous segment's verb (only for verbs in DSP_VERB_KEYWORDS).
- * Non-chainable commands (init, save, reset, show, use) always need
- * their keyword explicit.
+ * Parse DSP input and split chainable statements into individual
+ * commands so the dispatcher can execute and report each one.
  */
-export function parseDspInput(
-	input: string,
-): { commands: DspCommand[] } | { error: string } {
-	const segments = splitByComma(input);
-	let lastVerb: string | null = null;
-	const commands: DspCommand[] = [];
-
-	for (const seg of segments) {
-		const trimmed = seg.trim();
-		if (!trimmed) continue;
-
-		const firstToken = trimmed.split(/\s/)[0].toLowerCase();
-
-		let toParse: string;
-		if (DSP_COMMAND_KEYWORDS.has(firstToken)) {
-			toParse = trimmed;
-			if (DSP_VERB_KEYWORDS.has(firstToken)) lastVerb = firstToken;
-		} else if (lastVerb) {
-			toParse = `${lastVerb} ${trimmed}`;
-		} else {
-			return { error: `No verb for segment: ${trimmed}` };
-		}
-
-		const result = parseSingleDspCommand(toParse);
-		if ("error" in result) {
-			return { error: `${result.error} (in: ${trimmed})` };
-		}
-		commands.push(result.command);
+export function parseDspInput(input: string): { commands: DspCommand[] } | { error: string } {
+	const result = parseSingleDspCommand(input);
+	if ("error" in result) return result;
+	const cmd = result.command;
+	if (cmd.type === "set") {
+		return { commands: cmd.clauses.map((cl): DspCommand => ({ type: "set", clauses: [cl] })) };
 	}
-
-	if (commands.length === 0) return { error: "Empty command" };
-	return { commands };
+	if (cmd.type === "get") {
+		return { commands: cmd.paths.map((p): DspCommand => ({ type: "get", paths: [p] })) };
+	}
+	if (cmd.type === "remove") {
+		return { commands: cmd.targets.map((t): DspCommand => ({ type: "remove", targets: [t] })) };
+	}
+	if (cmd.type === "connect") {
+		return { commands: cmd.clauses.map((cl): DspCommand => ({ type: "connect", clauses: [cl] })) };
+	}
+	if (cmd.type === "disconnect") {
+		return { commands: cmd.targets.map((t): DspCommand => ({ type: "disconnect", targets: [t] })) };
+	}
+	return { commands: [cmd] };
 }
 
-export { findLastUnquotedComma };
+export { findLastUnquotedComma } from "../string-utils.js";

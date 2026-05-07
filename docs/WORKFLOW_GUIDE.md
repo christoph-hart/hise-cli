@@ -667,20 +667,6 @@ play "smoke_test"
 /exit
 ```
 
-### Pattern: Screenshot after changes
-
-```bash
-hise-cli -hise "screenshot to before.png"
-# ... make changes ...
-hise-cli -hise "screenshot to after.png"
-```
-
-Or capture a specific component:
-
-```bash
-hise-cli -hise "screenshot of VolumeKnob at 200% to knob_detail.png"
-```
-
 ---
 
 ## 9. Common mistakes to avoid
