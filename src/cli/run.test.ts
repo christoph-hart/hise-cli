@@ -175,7 +175,7 @@ describe("executeCliCommand", () => {
 			errors: [],
 		}));
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-builder", "add", "LFO"],
+			["node", "hise-cli", "-builder", 'add LFO as "LFO"'],
 			getCliCommands(),
 			createDataLoader(),
 			conn,

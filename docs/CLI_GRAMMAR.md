@@ -157,9 +157,12 @@ Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `S
 Asset reference fields (write only quoted names; no path resolution):
 - `samplemap` — looks up named samplemap in project assets (`set Sampler1.samplemap "My Piano"`).
 - `effect` — looks up compiled hardcoded effect by name (`set MasterFX.effect "my_cpp_fx"`).
-- `network` — DSP network reference. Two forms:
-  - Bare name (`"my_dsp"`) — in-memory network. Fails if `my_dsp.xml` exists on disk; error message suggests the `.xml` form.
-  - `.xml` extension (`"my_dsp.xml"`) — file-backed network. Must exist on disk.
+- `network` — DSP network reference. Dispatches to `POST /api/dsp/init` with body `{ name, mode }`:
+
+  | Surface | `name` body | `mode` body | Failure |
+  |---------|-------------|-------------|---------|
+  | `set X.network "my_dsp"` (bare) | `"my_dsp"` | `"create"` | errors if `my_dsp.xml` already exists; message suggests the `.xml` form |
+  | `set X.network "my_dsp.xml"` | `"my_dsp"` (extension stripped) | `"load"` | errors if `my_dsp.xml` is missing |
 
 Routing matrix fields (instances implementing `RoutableProcessor` — synth chains, samplers, effects, hardcoded modules):
 - `routing` — channel routing matrix. Two write forms:
@@ -406,7 +409,3 @@ BareWord             := /[A-Za-z_][A-Za-z0-9_]*/
 
 Comment              := ('#' | '//') /[^\n]*/                 ; line comment, ignored by parser
 ```
-
-## Implementation status
-
-The routing-matrix surface — `set <proc>.routing` (array and preset forms), `set <proc>.routing.send`, and the read-only subfields `routing.resizable`, `routing.routable`, `routing.numDestinationChannels` — is **not yet implemented** in hise-cli. The REST contract is already defined: see the `set_routing` op variant on `POST /api/builder/apply` (mutually-exclusive `matrix` / `send` / `preset` payloads) and the `routing` block embedded in each processor node returned by `GET /api/builder/tree` (`openapi.json`). Once the parser supports this grammar, the CLI client will dispatch the surface forms above to those endpoints — array writes and preset writes map to `set_routing` ops, reads come from the tree response. Delete this section once implementation lands; the rest of this document is the authoritative parser grammar.

@@ -1,8 +1,5 @@
 // ── Builder mode — main class + barrel re-exports ────────────────────
 
-// Phase 4.2: Commands execute against live HISE via POST /api/builder/apply.
-// Falls back to local-only validation when no connection is available.
-
 import type { CommandResult } from "../result.js";
 import {
 	errorResult,
@@ -12,7 +9,6 @@ import {
 	textResult,
 } from "../result.js";
 import type {
-	DataLoader,
 	ModuleList,
 } from "../data.js";
 import { ConstrainerParser } from "../constrainer-parser.js";
@@ -36,21 +32,30 @@ import {
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
 import { builderLexer } from "./tokens.js";
+import { resolvePath } from "../grammar/path-resolver.js";
+import {
+	pathRefSegments,
+	pathRefToString,
+	type PathRef,
+} from "../grammar/path-parser.js";
 
 // ── Re-exports from sub-modules ──────────────────────────────────
 
 export type {
 	AddCommand,
+	AddChainCommand,
 	CloneCommand,
 	RemoveCommand,
-	MoveCommand,
 	RenameCommand,
 	SetCommand,
-	LoadCommand,
-	BypassCommand,
-	EnableCommand,
+	SetClause,
 	GetCommand,
 	ShowCommand,
+	ListCommand,
+	CdCommand,
+	LsCommand,
+	PwdCommand,
+	ResetCommand,
 	BuilderCommand,
 } from "./builder-parser.js";
 export {
@@ -61,6 +66,8 @@ export type { ValidationResult } from "./builder-validate.js";
 export {
 	validateAddCommand,
 	validateSetCommand,
+	validateRenameCommand,
+	validateCloneCommand,
 	resolveModuleTypeId,
 } from "./builder-validate.js";
 export type { BuilderOp, ModuleInstance } from "./builder-ops.js";
@@ -70,12 +77,13 @@ export {
 	collectModuleIds,
 } from "./builder-ops.js";
 
-// Import for local use (BuilderMode methods)
 import type {
 	BuilderCommand,
+	CdCommand,
+	GetCommand,
+	ListCommand,
 	SetCommand,
 	ShowCommand,
-	GetCommand,
 } from "./builder-parser.js";
 import {
 	parseSingleCommand,
@@ -85,11 +93,9 @@ import {
 import {
 	validateAddCommand,
 	validateSetCommand,
-	resolveModuleTypeId,
 } from "./builder-validate.js";
 import type { BuilderOp, ModuleInstance } from "./builder-ops.js";
 import {
-	resolveChainIndex,
 	commandToOps,
 	collectModuleIds,
 	moduleIdCompletionItems,
@@ -102,20 +108,8 @@ import {
 
 const FX_CHAIN_COLOUR = "#3a6666";
 const MIDI_CHAIN_COLOUR = "#C65638";
-const FALLBACK_CHAIN_COLOUR = "#666666"; // grey for chains with no resolved colour
+const FALLBACK_CHAIN_COLOUR = "#666666";
 
-/**
- * Walk a TreeNode tree and propagate chain colors + dot styles.
- *
- * Rules:
- * - Chain nodes: filledDot = false (○). colour = own colour, or
- *   FX/MIDI constant, or inherited from parent chain, or grey fallback.
- * - Module nodes inside a chain: filledDot = true (●). colour = inherited.
- * - Sound generators (not in a chain): no dot (filledDot/colour undefined).
- *   Their children start with a fresh colour context.
- *
- * Mutates the tree in place and returns it.
- */
 type DiffStatus = "added" | "removed" | "modified";
 
 function propagateChainColors(
@@ -124,65 +118,50 @@ function propagateChainColors(
 	parentDiff?: DiffStatus,
 	depth: number = 0,
 ): TreeNode {
-	// ── Resolve diff status ─────────────────────────────────────
-	// Node's own diff wins. Otherwise inherit added/removed from parent.
-	// "modified" is never inherited — it stays on the node that set it.
 	const resolvedDiff: DiffStatus | undefined = node.diff
 		?? (parentDiff === "added" || parentDiff === "removed" ? parentDiff : undefined);
 	node.diff = resolvedDiff;
 
-	// Diff to pass to children: propagate added/removed, not modified
 	const childDiff: DiffStatus | undefined =
 		resolvedDiff === "added" || resolvedDiff === "removed" ? resolvedDiff : undefined;
 
 	if (node.nodeKind === "chain") {
-		// Resolve this chain's colour
 		let colour: string;
 		if (node.colour && typeof node.colour === "string" && node.colour.startsWith("#")) {
-			// Explicit hex colour from data
 			colour = node.colour;
 		} else if (node.label === "FX Chain") {
 			colour = FX_CHAIN_COLOUR;
 		} else if (node.label === "MIDI Processor Chain") {
 			colour = MIDI_CHAIN_COLOUR;
 		} else if (parentChainColour) {
-			// Inherit from parent chain (sub-chains like AttackTimeModulation)
 			colour = parentChainColour;
 		} else {
 			colour = FALLBACK_CHAIN_COLOUR;
 		}
 
 		node.colour = colour;
-		node.filledDot = false; // unfilled ○
-		// Dim empty chains (no children or empty children array)
+		node.filledDot = false;
 		node.dimmed = !node.children || node.children.length === 0;
 
-		// Propagate to children
 		if (node.children) {
 			for (const child of node.children) {
 				propagateChainColors(child, colour, childDiff, depth + 1);
 			}
 		}
 	} else if (node.nodeKind === "module" && parentChainColour) {
-		// Module inside a chain — filled dot, inherited colour
 		node.colour = parentChainColour;
-		node.filledDot = true; // filled ●
+		node.filledDot = true;
 
-		// Module's children (e.g. AHDSR's sub-chains) inherit the same colour
 		if (node.children) {
 			for (const child of node.children) {
 				propagateChainColors(child, parentChainColour, childDiff, depth + 1);
 			}
 		}
 	} else {
-		// Sound generator or module not in a chain — no dot
 		node.colour = undefined;
 		node.filledDot = undefined;
-		// Sound generators at depth > 0 get topMargin for visual separation
-		// (root node is excluded — sidebar top padding handles that separately)
 		node.topMargin = depth > 0;
 
-		// Children start with fresh colour context (null) but inherit diff
 		if (node.children) {
 			for (const child of node.children) {
 				propagateChainColors(child, null, childDiff, depth + 1);
@@ -205,8 +184,6 @@ export class BuilderMode implements Mode {
 	private readonly completionEngine: CompletionEngine | null;
 	private currentPath: string[] = [];
 	private treeRoot: TreeNode | null = null;
-	/** Raw HISE response.result from the most recent fetchTree call.
-	 *  Used by `show tree` in forLlm sessions to bypass ASCII rendering. */
 	private lastTreeResult: unknown = null;
 	compactView = false;
 
@@ -223,8 +200,6 @@ export class BuilderMode implements Mode {
 		return tokenizeBuilder(value);
 	}
 
-	// ── Tree sidebar support ────────────────────────────────────
-
 	getTree(): TreeNode | null {
 		if (!this.treeRoot) return null;
 		let tree = propagateChainColors(structuredClone(this.treeRoot));
@@ -240,7 +215,6 @@ export class BuilderMode implements Mode {
 		this.currentPath = [...path];
 	}
 
-	/** Dynamic context path shown in prompt (e.g. "SineGenerator.pitch") */
 	get contextLabel(): string {
 		return this.currentPath.length > 0 ? this.currentPath.join(".") : "";
 	}
@@ -262,7 +236,6 @@ export class BuilderMode implements Mode {
 			return { items: [], from: 0, to: input.length };
 		}
 
-		// Handle comma chaining: complete only the last segment
 		const lastComma = findLastUnquotedComma(input);
 		if (lastComma !== -1) {
 			return this.completeSegment(
@@ -275,10 +248,6 @@ export class BuilderMode implements Mode {
 		return this.completeSegment(input, 0, input.length);
 	}
 
-	/**
-	 * Complete a single segment (no commas). `offset` is the position
-	 * within the full input where this segment starts.
-	 */
 	private completeSegment(
 		segment: string,
 		offset: number,
@@ -289,13 +258,11 @@ export class BuilderMode implements Mode {
 		const leadingSpaces = segment.length - trimmed.length;
 		const trailingSpace = segment.endsWith(" ");
 
-		// Lex with Chevrotain to get proper tokens (handles quotes, numbers, keywords)
 		const lexResult = builderLexer.tokenize(trimmed);
 		const tokens = lexResult.tokens;
 
 		const empty: CompletionResult = { items: [], from: offset, to: inputLength };
 
-		// No tokens or typing first word - suggest keywords
 		if (tokens.length === 0 || (tokens.length === 1 && !trailingSpace)) {
 			const prefix = tokens.length > 0 ? tokens[0].image.toLowerCase() : "";
 			const items = engine.completeBuilderKeyword(prefix);
@@ -309,7 +276,6 @@ export class BuilderMode implements Mode {
 
 		const verb = tokens[0].image.toLowerCase();
 
-		// ── cd <child> — complete with children of current node ──
 		if (verb === "cd") {
 			return this.completeCd(tokens, trailingSpace, offset, inputLength, segment);
 		}
@@ -317,38 +283,45 @@ export class BuilderMode implements Mode {
 		const modules = collectModuleIds(this.treeRoot);
 		const moduleItems = moduleIdCompletionItems(modules);
 
-		// ── add <type> [as "<name>"] [to <target>[.<chain>]] ──
 		if (verb === "add") {
 			return this.completeAdd(tokens, trailingSpace, offset, inputLength, segment, modules, moduleItems);
 		}
 
-		// ── set <target>.<param> [to] <value> ──
-		// ── get <target>.<param> ──
 		if (verb === "set" || verb === "get") {
 			return this.completeSet(tokens, trailingSpace, offset, inputLength, segment, modules);
 		}
 
-		// ── show tree | types [filter] | <target> ──
 		if (verb === "show") {
 			if (tokens.length === 1 && trailingSpace) {
-				// Merge show subcommands + module IDs
-				const showItems = engine.completeBuilderShow("");
-				const items = [...showItems, ...moduleItems];
-				return { items, from: offset + segment.length, to: inputLength, label: "Show arguments" };
+				return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Show targets" };
 			}
 			if (tokens.length === 2 && !trailingSpace) {
 				const prefix = tokens[1].image;
-				const showItems = engine.completeBuilderShow(prefix);
-				const idItems = fuzzyFilter(prefix, moduleItems);
-				const items = [...showItems, ...idItems];
+				const items = fuzzyFilter(prefix, moduleItems);
 				const from = offset + (tokens[1].startOffset ?? 0) + leadingSpaces;
-				return { items, from, to: inputLength, label: "Show arguments" };
+				return { items, from, to: inputLength, label: "Show targets" };
 			}
 			return empty;
 		}
 
-		// ── Commands that take a single target: remove, clone, bypass, enable, rename ──
-		const TARGET_COMMANDS = ["remove", "clone", "bypass", "enable", "rename", "move", "load"];
+		if (verb === "list") {
+			const nouns: CompletionItem[] = [
+				{ label: "types", detail: "module type catalog" },
+				{ label: "tree", detail: "module tree" },
+			];
+			if (tokens.length === 1 && trailingSpace) {
+				return { items: nouns, from: offset + segment.length, to: inputLength, label: "List nouns" };
+			}
+			if (tokens.length === 2 && !trailingSpace) {
+				const prefix = tokens[1].image.toLowerCase();
+				const items = nouns.filter((i) => i.label.startsWith(prefix));
+				const from = offset + (tokens[1].startOffset ?? 0) + leadingSpaces;
+				return { items, from, to: inputLength, label: "List nouns" };
+			}
+			return empty;
+		}
+
+		const TARGET_COMMANDS = ["remove", "clone", "rename"];
 		if (TARGET_COMMANDS.includes(verb)) {
 			return this.completeTarget(tokens, trailingSpace, offset, inputLength, segment, moduleItems);
 		}
@@ -365,27 +338,22 @@ export class BuilderMode implements Mode {
 	): CompletionResult {
 		const empty: CompletionResult = { items: [], from: offset, to: inputLength };
 
-		// Find the node at the current path
 		const contextNode = resolveNodeByPath(this.treeRoot, this.currentPath) ?? this.treeRoot;
 		if (!contextNode?.children) return empty;
 
-		// Build completion items from children
 		const childItems: CompletionItem[] = contextNode.children.map((c) => ({
 			label: c.label,
 			detail: c.nodeKind === "chain" ? "chain" : (c.type ?? ""),
 			insertText: c.label.includes(" ") ? `"${c.label}"` : c.label,
 		}));
 
-		// "cd " — show all children
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: childItems, from: offset + segment.length, to: inputLength, label: "Children" };
 		}
 
-		// "cd Fx" or "cd "FX Ch" — filter by prefix
 		if (tokens.length >= 2) {
 			const prefixTokens = tokens.slice(1);
 			let prefix = prefixTokens.map((t) => t.image).join(" ");
-			// Strip quotes from QuotedString tokens
 			if (prefix.startsWith('"')) prefix = prefix.slice(1);
 			if (prefix.endsWith('"')) prefix = prefix.slice(0, -1);
 			const from = offset + prefixTokens[0].startOffset;
@@ -396,7 +364,6 @@ export class BuilderMode implements Mode {
 		return empty;
 	}
 
-	/** Filter module type completions by the current chain's constrainer. */
 	private filterByChainContext(items: CompletionItem[]): CompletionItem[] {
 		const contextNode = resolveNodeByPath(this.treeRoot, this.currentPath);
 		if (!contextNode || contextNode.nodeKind !== "chain" || !contextNode.chainConstrainer) {
@@ -405,7 +372,6 @@ export class BuilderMode implements Mode {
 
 		const constrainer = new ConstrainerParser(contextNode.chainConstrainer);
 		return items.filter((item) => {
-			// detail is the type ID (e.g., "SineSynth"), insertText is also the type ID
 			const typeId = item.insertText ?? item.detail ?? item.label;
 			const mod = this.moduleList?.modules.find((m) => m.id === typeId);
 			if (!mod) return false;
@@ -419,12 +385,11 @@ export class BuilderMode implements Mode {
 		offset: number,
 		inputLength: number,
 		segment: string,
-		modules: ModuleInstance[],
+		_modules: ModuleInstance[],
 		moduleItems: CompletionItem[],
 	): CompletionResult {
 		const engine = this.completionEngine!;
 
-		// Position 1: module type (filtered by chain context if cd'd into a chain)
 		if (tokens.length === 1 && trailingSpace) {
 			const items = this.filterByChainContext(engine.completeModuleType(""));
 			return { items, from: offset + segment.length, to: inputLength, label: "Module types" };
@@ -436,19 +401,15 @@ export class BuilderMode implements Mode {
 			return { items, from, to: inputLength, label: "Module types" };
 		}
 
-		// After type + space: check if "to" or "as" already present
 		const lastToken = tokens[tokens.length - 1];
 		const lastImage = lastToken.image.toLowerCase();
 
-		// After "to" keyword - complete with module instance IDs
 		if (lastImage === "to" && trailingSpace) {
 			return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Module targets" };
 		}
 
-		// Typing after "to " - completing a target
 		const toIndex = tokens.findIndex((t) => t.image.toLowerCase() === "to");
 		if (toIndex !== -1 && toIndex < tokens.length - 1) {
-			// Currently typing a target after "to"
 			const targetTokens = tokens.slice(toIndex + 1);
 			const lastTargetToken = targetTokens[targetTokens.length - 1];
 			if (!trailingSpace && lastTargetToken.image !== ".") {
@@ -473,15 +434,12 @@ export class BuilderMode implements Mode {
 		const engine = this.completionEngine!;
 		const moduleItems = moduleIdCompletionItems(modules);
 
-		// After "set " - complete with module IDs (target before dot)
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Module targets" };
 		}
 
-		// Find the dot that separates target from param
 		const dotIndex = tokens.findIndex((t) => t.image === ".");
 		if (dotIndex === -1) {
-			// No dot yet - still typing target
 			if (!trailingSpace) {
 				const lastToken = tokens[tokens.length - 1];
 				const prefix = lastToken.image;
@@ -489,11 +447,9 @@ export class BuilderMode implements Mode {
 				const from = offset + lastToken.startOffset;
 				return { items, from, to: inputLength, label: "Module targets" };
 			}
-			// Trailing space but no dot - still accumulating multi-word target
 			return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Module targets" };
 		}
 
-		// Dot found - resolve target type and complete params
 		const targetTokens = tokens.slice(1, dotIndex);
 		let targetName: string;
 		if (targetTokens.length === 1 && targetTokens[0].tokenType.name === "QuotedString") {
@@ -502,18 +458,14 @@ export class BuilderMode implements Mode {
 			targetName = targetTokens.map((t) => t.image).join(" ");
 		}
 
-		// Resolve instance to type for parameter lookup
-		const moduleType = resolveInstanceType(targetName, modules)
-			?? targetName; // fallback to treating target as type name
+		const moduleType = resolveInstanceType(targetName, modules) ?? targetName;
 
 		const paramIndex = dotIndex + 1;
 		if (paramIndex >= tokens.length) {
-			// "set Target." or "set Target. " - complete params (dot is last token)
 			const items = engine.completeModuleParam(moduleType, "");
 			return { items, from: offset + segment.length, to: inputLength, label: `${targetName} parameters` };
 		}
 		if (!trailingSpace) {
-			// "set Target.Att" - filtering params
 			const prefix = tokens[paramIndex].image;
 			const items = engine.completeModuleParam(moduleType, prefix);
 			const from = offset + tokens[paramIndex].startOffset;
@@ -531,12 +483,10 @@ export class BuilderMode implements Mode {
 		segment: string,
 		moduleItems: CompletionItem[],
 	): CompletionResult {
-		// After verb + space: complete with module IDs
 		if (tokens.length === 1 && trailingSpace) {
 			return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Module targets" };
 		}
 
-		// Typing the target
 		if (!trailingSpace) {
 			const lastToken = tokens[tokens.length - 1];
 			const prefix = lastToken.image;
@@ -552,10 +502,7 @@ export class BuilderMode implements Mode {
 
 	private treeFetched = false;
 
-	/** Fetch the module tree from HISE and update treeRoot.
-	 *  Detects plan state via undo diff — uses ?group=current when a plan group is active. */
 	async fetchTree(connection: import("../hise.js").HiseConnection): Promise<void> {
-		// Detect plan state: if groupName !== "root", use plan tree endpoint
 		let inPlan = false;
 		const diffResp = await connection.get("/api/undo/diff?scope=group");
 		if (isEnvelopeResponse(diffResp) && diffResp.success) {
@@ -575,7 +522,6 @@ export class BuilderMode implements Mode {
 		}
 	}
 
-	/** Lazily fetch the tree on first parse if connected and not yet fetched. */
 	private async ensureTree(session: SessionContext): Promise<void> {
 		if (!this.treeFetched && session.connection) {
 			this.treeFetched = true;
@@ -583,12 +529,10 @@ export class BuilderMode implements Mode {
 		}
 	}
 
-	/** Mark the cached tree as stale so it re-fetches on next parse. */
 	invalidateTree(): void {
 		this.treeFetched = false;
 	}
 
-	/** Fetch tree on mode entry so the sidebar shows content immediately. */
 	async onEnter(session: SessionContext): Promise<void> {
 		await this.ensureTree(session);
 	}
@@ -601,37 +545,11 @@ export class BuilderMode implements Mode {
 	): Promise<CommandResult> {
 		await this.ensureTree(session);
 
-		const trimmed = input.trim();
-		const parts = trimmed.split(/\s+/);
-		const keyword = parts[0]?.toLowerCase();
-
-		// ── Navigation commands (handled before Chevrotain parser) ──
-		if (keyword === "cd") {
-			let cdTarget = parts.slice(1).join(" ").trim();
-			// Strip surrounding quotes
-			if (cdTarget.startsWith('"') && cdTarget.endsWith('"')) {
-				cdTarget = cdTarget.slice(1, -1);
-			}
-			return this.handleCd(cdTarget, session);
-		}
-		if (keyword === "ls" || keyword === "dir") {
-			return this.handleLs();
-		}
-		if (keyword === "pwd") {
-			return this.handlePwd();
-		}
-		if (keyword === "reset") {
-			return this.handleReset(session);
-		}
-
-		// ── Chevrotain-parsed builder commands ──
 		const result = parseBuilderInput(input);
-
 		if ("error" in result) {
 			return errorResult(result.error);
 		}
 
-		// Execute all commands from comma chaining; return last result
 		let lastResult: CommandResult = textResult("(no commands)");
 		for (const cmd of result.commands) {
 			lastResult = await this.dispatchCommand(cmd, session);
@@ -642,13 +560,8 @@ export class BuilderMode implements Mode {
 
 	// ── Navigation handlers ─────────────────────────────────────────
 
-	private handleCd(target: string, session: SessionContext): CommandResult {
-		if (!target || target === "/") {
-			this.currentPath = [];
-			return textResult("/");
-		}
-
-		if (target === "..") {
+	private handleCd(cmd: CdCommand, session: SessionContext): CommandResult {
+		if (cmd.target.kind === "parent") {
 			if (this.currentPath.length === 0) {
 				return session.popMode();
 			}
@@ -656,38 +569,34 @@ export class BuilderMode implements Mode {
 			return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 		}
 
-		// Navigate down — validate against tree if available
-		const segments = target.split(".").filter((s) => s !== "");
-		for (const seg of segments) {
-			if (seg === "..") {
-				if (this.currentPath.length > 0) this.currentPath.pop();
-			} else {
-				// Validate the segment exists in the tree
-				if (this.treeRoot) {
-					const node = findNodeById(this.treeRoot, seg);
-					if (!node) {
-						return errorResult(`"${seg}" not found in module tree.`);
-					}
-				}
-				this.currentPath.push(seg);
-			}
+		if (!this.treeRoot) {
+			// Offline — accept the literal segments as a relative descent.
+			const segs = pathRefSegments(cmd.target);
+			for (const seg of segs) this.currentPath.push(seg.id);
+			return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 		}
-		return textResult(this.currentPath.join("."));
+
+		const r = resolvePath(this.treeRoot, this.currentPath, cmd.target, "cd");
+		if (!r.ok) {
+			return errorResult(r.message);
+		}
+		const rootId = this.treeRoot.id;
+		const stripped = (rootId && r.fullPath[0]?.toLowerCase() === rootId.toLowerCase())
+			? r.fullPath.slice(1)
+			: r.fullPath;
+		this.currentPath = stripped;
+		return textResult(this.currentPath.length > 0 ? this.currentPath.join(".") : "/");
 	}
 
 	private handleLs(): CommandResult {
 		if (!this.treeRoot) {
 			const path = this.currentPath.length > 0 ? this.currentPath.join(".") : "/";
 			return textResult(
-				`${path}: listing children requires a HISE connection (use show types for available module types)`,
+				`${path}: listing children requires a HISE connection (use list types for available module types)`,
 			);
 		}
 
-		// Find the node at the current path
-		let node: TreeNode | null = this.treeRoot;
-		if (this.currentPath.length > 0) {
-			node = findNodeById(this.treeRoot, this.currentPath[this.currentPath.length - 1]);
-		}
+		const node = resolveNodeByPath(this.treeRoot, this.currentPath) ?? this.treeRoot;
 		if (!node) {
 			return errorResult(`Path not found: ${this.currentPath.join(".")}`);
 		}
@@ -727,7 +636,6 @@ export class BuilderMode implements Mode {
 		this.treeRoot = null;
 		this.currentPath = [];
 		this.treeFetched = false;
-		// HISE discards undo groups on reset — sync the TUI's plan state
 		session.resetPlanState?.();
 		await this.fetchTree(session.connection);
 		return textResult(response.logs.length > 0 ? response.logs.join("; ") : "Module tree reset");
@@ -739,28 +647,16 @@ export class BuilderMode implements Mode {
 		cmd: BuilderCommand,
 		session: SessionContext,
 	): Promise<CommandResult> {
-		// Get command — fetch single parameter value
-		if (cmd.type === "get") {
-			return this.handleGet(cmd, session.connection ?? null);
-		}
-
-		// Show commands are always local (except show target which may fetch params)
-		if (cmd.type === "show") {
-			return this.handleShow(cmd, session);
-		}
-
-		// Move is not yet in C++ API
-		if (cmd.type === "move") {
-			const dest = cmd.chain ? `${cmd.parent}.${cmd.chain}` : cmd.parent;
-			return textResult(`move ${cmd.target} to ${dest} (not yet in HISE C++ API)`);
-		}
-
-		// Never allow removing the root container
-		if (cmd.type === "remove" && this.treeRoot) {
-			const rootId = this.treeRoot.id ?? this.treeRoot.label;
-			if (cmd.target.toLowerCase() === rootId.toLowerCase()) {
-				return errorResult("Cannot remove the root container.");
-			}
+		switch (cmd.type) {
+			case "cd": return this.handleCd(cmd, session);
+			case "ls": return this.handleLs();
+			case "pwd": return this.handlePwd();
+			case "reset": return this.handleReset(session);
+			case "get": return this.handleGet(cmd, session.connection ?? null);
+			case "show": return this.handleShow(cmd, session);
+			case "list": return this.handleList(cmd);
+			default:
+				break;
 		}
 
 		// Local validation for add and set
@@ -777,25 +673,32 @@ export class BuilderMode implements Mode {
 			}
 		}
 
-		// If no connection, return local-only result
+		// Disallow removing the root container.
+		if (cmd.type === "remove" && this.treeRoot) {
+			const rootId = this.treeRoot.id ?? this.treeRoot.label;
+			for (const t of cmd.targets) {
+				const segs = pathRefSegments(t);
+				if (segs.length === 1 && segs[0].id.toLowerCase() === rootId.toLowerCase()) {
+					return errorResult("Cannot remove the root container.");
+				}
+			}
+		}
+
 		if (!session.connection) {
 			return this.localFallback(cmd);
 		}
 
-		// Build API operations
 		const opsResult = commandToOps(cmd, this.treeRoot, this.moduleList, this.currentPath);
 		if ("error" in opsResult) {
 			return errorResult(opsResult.error);
 		}
 
-		// Execute against HISE
 		const result = await this.executeOps(opsResult.ops, session.connection);
 
 		if (result.type !== "error") {
 			session.markProjectTreeDirty?.();
 		}
 
-		// For successful set commands, echo the changed parameter as a table row
 		if (cmd.type === "set" && result.type !== "error") {
 			const echo = await this.echoSetParam(cmd, session.connection);
 			if (echo) return echo;
@@ -804,12 +707,37 @@ export class BuilderMode implements Mode {
 		return result;
 	}
 
-	/** Execute operations against POST /api/builder/apply, re-fetch tree. */
+	/** Execute mixed apply / init_network ops. Apply ops batch into one
+	 *  POST /api/builder/apply; init ops dispatch one POST /api/dsp/init each. */
 	private async executeOps(
 		ops: BuilderOp[],
 		connection: import("../hise.js").HiseConnection,
 	): Promise<CommandResult> {
-		const response = await connection.post("/api/builder/apply", { operations: ops });
+		const initOps = ops.filter((o) => o.op === "init_network");
+		const applyOps = ops.filter((o) => o.op !== "init_network");
+
+		for (const op of initOps) {
+			const moduleId = op.moduleId as string;
+			const body = { name: op.name as string, mode: op.mode as "create" | "load" };
+			const response = await connection.post(
+				`/api/dsp/init?moduleId=${encodeURIComponent(moduleId)}`,
+				body,
+			);
+			if (isErrorResponse(response)) return errorResult(response.message);
+			if (!isEnvelopeResponse(response) || !response.success) {
+				const msg = isEnvelopeResponse(response) && response.errors.length > 0
+					? response.errors.map((e) => e.errorMessage).join("\n")
+					: `network ${body.mode} failed`;
+				return errorResult(msg);
+			}
+		}
+
+		if (applyOps.length === 0) {
+			await this.fetchTree(connection);
+			return textResult(initOps.length > 0 ? "OK" : "");
+		}
+
+		const response = await connection.post("/api/builder/apply", { operations: applyOps });
 
 		if (isErrorResponse(response)) {
 			return errorResult(response.message);
@@ -824,18 +752,14 @@ export class BuilderMode implements Mode {
 			return errorResult(msg);
 		}
 
-		// Parse the diff result — new API has scope/groupName/diff at top level
 		const applyResult = normalizeBuilderApplyResult(response);
 
-		// Re-fetch the tree to get the updated state
 		await this.fetchTree(connection);
 
-		// Apply diff markers to the refreshed tree for sidebar indicators
 		if (applyResult?.diff && this.treeRoot) {
 			applyDiffToTree(this.treeRoot, applyResult.diff);
 		}
 
-		// Build a human-readable summary from logs
 		const summary = response.logs.length > 0
 			? response.logs.join("; ")
 			: (applyResult?.diff ?? []).map((d) => `${d.action} ${d.target}`).join(", ") || "OK";
@@ -843,13 +767,25 @@ export class BuilderMode implements Mode {
 		return textResult(summary);
 	}
 
-	/** After a successful set, fetch the updated parameter and return it as a single-row table. */
 	private async echoSetParam(
 		cmd: SetCommand,
 		connection: import("../hise.js").HiseConnection,
 	): Promise<CommandResult | null> {
+		if (cmd.clauses.length !== 1) return null;
+		const clause = cmd.clauses[0];
+		const segs = pathRefSegments(clause.path);
+		if (segs.length < 2) return null;
+		const fieldName = segs[segs.length - 1].id;
+		// Skip echoing for ops that don't map to module parameters.
+		const tail = fieldName.toLowerCase();
+		if (["bypassed", "samplemap", "network", "effect", "routing", "send", "parent", "index"].includes(tail)) {
+			return null;
+		}
+		const targetSegs = segs.slice(0, -1);
+		const targetName = targetSegs[targetSegs.length - 1].id;
+
 		const response = await connection.get(
-			`/api/builder/tree?moduleId=${encodeURIComponent(cmd.target)}`,
+			`/api/builder/tree?moduleId=${encodeURIComponent(targetName)}`,
 		);
 		if (!isEnvelopeResponse(response) || !response.success) return null;
 		const raw = response.result as Record<string, unknown>;
@@ -861,7 +797,7 @@ export class BuilderMode implements Mode {
 			defaultValue: number;
 		}> | undefined;
 		if (!params) return null;
-		const param = params.find((p) => p.id === cmd.param);
+		const param = params.find((p) => p.id === fieldName);
 		if (!param) return null;
 		return tableResult(
 			["Parameter", "Value", "Range", "Default"],
@@ -874,48 +810,44 @@ export class BuilderMode implements Mode {
 		);
 	}
 
-	/** Fallback for disconnected mode — validation + description only. */
 	private localFallback(cmd: BuilderCommand): CommandResult {
 		switch (cmd.type) {
 			case "add": {
-				const parts = [`add ${cmd.moduleType}`];
-				if (cmd.alias) parts.push(`as "${cmd.alias}"`);
-				if (cmd.parent) {
-					const dest = cmd.chain ? `${cmd.parent}.${cmd.chain}` : cmd.parent;
-					parts.push(`to ${dest}`);
-				}
+				const parts = [`add ${cmd.moduleType} as "${cmd.alias}"`];
+				if (cmd.parent) parts.push(`to ${pathRefToString(cmd.parent)}`);
 				return textResult(`${parts.join(" ")} (no HISE connection)`);
 			}
-			case "set":
-				return textResult(`set ${cmd.target}.${cmd.param} to ${cmd.value} (no HISE connection)`);
-			case "clone": {
-				const parts = [`clone ${cmd.source}`];
-				if (cmd.count > 1) parts.push(`x${cmd.count}`);
-				return textResult(`${parts.join(" ")} (no HISE connection)`);
+			case "addChain": {
+				const parts = cmd.clauses.map((c) => `${c.moduleType} as "${c.alias}"`);
+				return textResult(`add ${parts.join(", ")} (no HISE connection)`);
 			}
+			case "set": {
+				const parts = cmd.clauses.map((c) => {
+					const v = c.value;
+					const valueStr = v.kind === "string" ? `"${v.s}"`
+						: v.kind === "number" || v.kind === "hex" ? String(v.n)
+						: v.kind === "boolean" ? String(v.b)
+						: v.kind === "array2" || v.kind === "array4" || v.kind === "arrayN" ? `[${(v.n as readonly number[]).join(", ")}]`
+						: pathRefToString(v.ref);
+					return `${pathRefToString(c.path)} ${valueStr}`;
+				});
+				return textResult(`set ${parts.join(", ")} (no HISE connection)`);
+			}
+			case "clone":
+				return textResult(`clone ${pathRefToString(cmd.target)} ${cmd.count} (no HISE connection)`);
 			case "remove":
-				return textResult(`remove ${cmd.target} (no HISE connection)`);
+				return textResult(`remove ${cmd.targets.map(pathRefToString).join(", ")} (no HISE connection)`);
 			case "rename":
-				return textResult(`rename ${cmd.target} to "${cmd.name}" (no HISE connection)`);
-			case "load":
-				return textResult(`load "${cmd.source}" into ${cmd.target} (no HISE connection)`);
-			case "bypass":
-				return textResult(`bypass ${cmd.target} (no HISE connection)`);
-			case "enable":
-				return textResult(`enable ${cmd.target} (no HISE connection)`);
+				return textResult(`rename ${pathRefToString(cmd.target)} as "${cmd.name}" (no HISE connection)`);
 			case "get":
-				return textResult(`get ${cmd.target}.${cmd.param} (no HISE connection)`);
+				return textResult(`get ${cmd.paths.map(pathRefToString).join(", ")} (no HISE connection)`);
 			default:
 				return textResult("(no HISE connection)");
 		}
 	}
 
-	private async handleShow(
-		cmd: ShowCommand,
-		session: SessionContext,
-	): Promise<CommandResult> {
-		const connection = session.connection ?? null;
-		if (cmd.what === "types") {
+	private async handleList(cmd: ListCommand): Promise<CommandResult> {
+		if (cmd.noun === "types") {
 			if (!this.moduleList) {
 				return errorResult("Module data not loaded");
 			}
@@ -931,32 +863,17 @@ export class BuilderMode implements Mode {
 			if (modules.length === 0) {
 				return textResult(
 					cmd.filter
-						? `(no module types match "${cmd.filter}" — try "show types" without a filter to list all)`
+						? `(no module types match "${cmd.filter}" — try \`list types\` without a filter)`
 						: "(no module types available)",
 				);
 			}
 			return tableResult(
 				["Module", "Type", "Subtype", "Category"],
-				modules.map((m) => [
-					m.id,
-					m.type,
-					m.subtype,
-					m.category.join(", "),
-				]),
+				modules.map((m) => [m.id, m.type, m.subtype, m.category.join(", ")]),
 			);
 		}
 
-		if (cmd.what === "target") {
-			return this.handleShowTarget(cmd.target!, connection);
-		}
-
-		// show tree — emit cleaned HISE result for LLM sessions, ASCII tree otherwise
-		if (session.forLlm) {
-			if (!this.lastTreeResult) {
-				return textResult("No module tree available (requires HISE connection).");
-			}
-			return jsonResult(cleanBuilderTreeForLlm(this.lastTreeResult));
-		}
+		// list tree
 		if (!this.treeRoot) {
 			return textResult("No module tree available (requires HISE connection).");
 		}
@@ -966,51 +883,18 @@ export class BuilderMode implements Mode {
 		return preformattedResult(renderTreeBox(tree, { pwdNode, compact: this.compactView }), undefined, true);
 	}
 
-	private async handleGet(
-		cmd: GetCommand,
-		connection: import("../hise.js").HiseConnection | null,
+	private async handleShow(
+		cmd: ShowCommand,
+		session: SessionContext,
 	): Promise<CommandResult> {
-		if (!connection) {
-			return textResult(`get ${cmd.target}.${cmd.param} (no HISE connection)`);
-		}
+		const connection = session.connection ?? null;
+		const r = this.resolveRefForRead(cmd.target);
+		if ("error" in r) return errorResult(r.error);
 
-		const response = await connection.get(
-			`/api/builder/tree?moduleId=${encodeURIComponent(cmd.target)}`,
-		);
-
-		if (!isEnvelopeResponse(response) || !response.success) {
-			return errorResult(`Module "${cmd.target}" not found`);
-		}
-
-		const raw = response.result as Record<string, unknown>;
-		const params = raw.parameters as Array<{
-			id: string;
-			value: number;
-			valueAsString: string;
-			range: { min: number; max: number };
-			defaultValue: number;
-		}> | undefined;
-
-		if (!params) {
-			return errorResult(`Module "${cmd.target}" has no parameters`);
-		}
-
-		const param = params.find((p) => p.id === cmd.param);
-		if (!param) {
-			return errorResult(`Parameter "${cmd.param}" not found on "${cmd.target}"`);
-		}
-
-		return textResult(param.valueAsString ?? String(param.value));
-	}
-
-	private async handleShowTarget(
-		target: string,
-		connection: import("../hise.js").HiseConnection | null,
-	): Promise<CommandResult> {
-		// Fetch live parameters from HISE
+		// Live fetch when connected.
 		if (connection) {
 			const response = await connection.get(
-				`/api/builder/tree?moduleId=${encodeURIComponent(target)}`,
+				`/api/builder/tree?moduleId=${encodeURIComponent(r.id)}`,
 			);
 			if (isEnvelopeResponse(response) && response.success) {
 				const raw = response.result as Record<string, unknown>;
@@ -1021,6 +905,10 @@ export class BuilderMode implements Mode {
 					range: { min: number; max: number };
 					defaultValue: number;
 				}> | undefined;
+
+				if (session.forLlm) {
+					return jsonResult(raw);
+				}
 
 				if (params && params.length > 0) {
 					return tableResult(
@@ -1034,24 +922,79 @@ export class BuilderMode implements Mode {
 					);
 				}
 
-				// Module found but no parameters
-				const label = (raw.processorId as string) ?? target;
+				const label = (raw.processorId as string) ?? r.id;
 				const type = (raw.prettyName as string) ?? (raw.id as string) ?? "unknown";
 				return textResult(`${label} (${type}) — no parameters`);
 			}
 		}
 
-		// Fallback: use cached tree for basic info
+		// Offline fallback — render the cached tree row.
 		if (this.treeRoot) {
-			const node = findNodeById(this.treeRoot, target);
+			const node = findNodeById(this.treeRoot, r.id);
 			if (node) {
 				const info = [`${node.label} (${node.type ?? "unknown"})`];
-				if (node.children) {
-					info.push(`  ${node.children.length} children`);
-				}
+				if (node.children) info.push(`  ${node.children.length} children`);
 				return textResult(info.join("\n"));
 			}
 		}
-		return errorResult(`Module "${target}" not found`);
+		return errorResult(`Module "${r.id}" not found`);
+	}
+
+	private async handleGet(
+		cmd: GetCommand,
+		connection: import("../hise.js").HiseConnection | null,
+	): Promise<CommandResult> {
+		if (cmd.paths.length === 0) return errorResult("get: no paths");
+		const ref = cmd.paths[0];
+		const segs = pathRefSegments(ref);
+		if (segs.length < 2) return errorResult("get: path must have at least 2 segments");
+		const fieldName = segs[segs.length - 1].id;
+		const targetName = segs[segs.length - 2].id;
+
+		if (!connection) {
+			return textResult(`get ${pathRefToString(ref)} (no HISE connection)`);
+		}
+
+		const response = await connection.get(
+			`/api/builder/tree?moduleId=${encodeURIComponent(targetName)}`,
+		);
+
+		if (!isEnvelopeResponse(response) || !response.success) {
+			return errorResult(`Module "${targetName}" not found`);
+		}
+
+		const raw = response.result as Record<string, unknown>;
+		const params = raw.parameters as Array<{
+			id: string;
+			value: number;
+			valueAsString: string;
+			range: { min: number; max: number };
+			defaultValue: number;
+		}> | undefined;
+
+		if (!params) {
+			return errorResult(`Module "${targetName}" has no parameters`);
+		}
+
+		const param = params.find((p) => p.id === fieldName);
+		if (!param) {
+			return errorResult(`Parameter "${fieldName}" not found on "${targetName}"`);
+		}
+
+		return textResult(param.valueAsString ?? String(param.value));
+	}
+
+	private resolveRefForRead(ref: PathRef): { id: string } | { error: string } {
+		if (!this.treeRoot) {
+			const segs = pathRefSegments(ref);
+			if (segs.length === 0) return { error: "cannot resolve `..`" };
+			return { id: segs[segs.length - 1].id };
+		}
+		const r = resolvePath(this.treeRoot, this.currentPath, ref, "lookup");
+		if (!r.ok) return { error: r.message };
+		return { id: r.node.id ?? r.fullPath[r.fullPath.length - 1] };
 	}
 }
+
+// Re-exported for completion engines and tests.
+export { cleanBuilderTreeForLlm };

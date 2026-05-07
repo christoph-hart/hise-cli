@@ -183,6 +183,12 @@ export const Pwd = createToken({
 	longer_alt: Identifier,
 });
 
+export const Reset = createToken({
+	name: "Reset",
+	pattern: /reset/i,
+	longer_alt: Identifier,
+});
+
 // `..` parent path expression. Distinct token so the parser can match
 // the full PathExpr alternative without parsing two adjacent dots.
 export const DoubleDot = createToken({
@@ -251,39 +257,47 @@ export const Comment = createToken({
 
 // ── Token order for the builder lexer ───────────────────────────────
 // Keywords must come before Identifier so they match first.
-// XCount must come before Identifier (x4 should not lex as Identifier).
+// PercentLiteral must precede NumberLiteral so the trailing `%` is captured.
+// HexLiteral must precede NumberLiteral so `0x...` doesn't lex as `0`.
+// BooleanLiteral must precede Identifier so `true`/`false` lex as bool.
+// DoubleDot must precede Dot so `..` doesn't lex as two dots.
 
 export const BUILDER_TOKENS = [
 	WhiteSpace,
+	Comment,
 	QuotedString,
+	HexLiteral,
+	PercentLiteral,
 	NumberLiteral,
-	XCount,
 	Add,
 	Clone,
 	Remove,
-	Move,
 	Rename,
-	Load,
-	Into,
-	Bypass,
-	Enable,
 	Show,
 	Set,
 	Get,
+	List,
+	Cd,
+	Ls,
+	Pwd,
+	Reset,
 	To,
 	As,
 	Tree,
 	Types,
+	BooleanLiteral,
 	Comma,
+	DoubleDot,
 	Dot,
+	LBracket,
+	RBracket,
 	Identifier,
 ];
 
-// ── Verb keywords (for comma pre-processor) ────────────────────────
+// ── Verb keywords (chainable verbs) ────────────────────────────────
 const _Set = globalThis.Set;
 export const VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"add", "clone", "remove", "move", "rename",
-	"load", "set", "get", "show", "bypass", "enable",
+	"set", "get", "add", "remove",
 ]);
 
 export const builderLexer = new Lexer(BUILDER_TOKENS);
@@ -353,12 +367,6 @@ export const Create = createToken({
 export const Save = createToken({
 	name: "Save",
 	pattern: /save/i,
-	longer_alt: Identifier,
-});
-
-export const Reset = createToken({
-	name: "Reset",
-	pattern: /reset/i,
 	longer_alt: Identifier,
 });
 

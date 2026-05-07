@@ -3,7 +3,9 @@
 import { closest } from "fastest-levenshtein";
 import type { ModuleDefinition, ModuleList } from "../data.js";
 import { ConstrainerParser } from "../constrainer-parser.js";
-import type { AddCommand, SetCommand } from "./builder-parser.js";
+import type { AddCommand, CloneCommand, RenameCommand, SetCommand } from "./builder-parser.js";
+import { coerceFloat } from "../grammar/coercion.js";
+import { pathRefSegments } from "../grammar/path-parser.js";
 
 // ── Validation result ─────────────────────────────────────────────
 
@@ -60,14 +62,11 @@ export function validateAddCommand(
 	const errors: string[] = [];
 	const suggestions: string[] = [];
 
-	// 1. Check module type exists (by pretty name or type ID)
 	const module = findModuleByName(cmd.moduleType, moduleList);
 
 	if (!module) {
-		// Suggest closest match from both pretty names and type IDs
 		const allNames = moduleList.modules.flatMap((m) => [m.prettyName, m.id]);
 		const closestName = closest(cmd.moduleType, allNames);
-		// Map back to the pretty name for display
 		const closestModule = closestName
 			? moduleList.modules.find((m) => m.prettyName === closestName || m.id === closestName)
 			: undefined;
@@ -80,25 +79,33 @@ export function validateAddCommand(
 		return { valid: false, errors, suggestions };
 	}
 
-	// 2. Validate chain constraint if parent.chain specified
-	if (cmd.chain) {
-		const chainError = validateChainConstraint(
-			module,
-			cmd.chain,
-			cmd.parent,
-			moduleList,
-		);
-		if (chainError) {
-			errors.push(chainError);
-		}
-	}
-
-	return {
-		valid: errors.length === 0,
-		errors,
-		suggestions,
-	};
+	return { valid: true, errors: [], suggestions };
 }
+
+export function validateRenameCommand(_cmd: RenameCommand): ValidationResult {
+	return { valid: true, errors: [] };
+}
+
+export function validateCloneCommand(cmd: CloneCommand): ValidationResult {
+	if (cmd.count < 1) {
+		return { valid: false, errors: [`clone count must be ≥ 1 (got ${cmd.count})`] };
+	}
+	return { valid: true, errors: [] };
+}
+
+/**
+ * Validate a single set clause. Path must have ≥2 segments. The first
+ * segment is the target instance name; the tail (last segment) is the
+ * field name. Module-type-specific properties are checked against
+ * moduleList; reserved field names (parent, bypassed, samplemap, …)
+ * are accepted without parameter lookup since they are universal.
+ */
+const RESERVED_FIELD_NAMES = new Set([
+	"parent", "index", "bypassed", "name",
+	"samplemap", "network", "effect",
+	"routing", "send",
+	"resizable", "routable", "numdestinationchannels",
+]);
 
 export function validateSetCommand(
 	cmd: SetCommand,
@@ -106,37 +113,44 @@ export function validateSetCommand(
 ): ValidationResult {
 	const errors: string[] = [];
 
-	// Find the target module by pretty name or type ID (in builder context,
-	// target is a module instance name — but for validation we check param
-	// against all modules of matching type)
-	const module = findModuleByName(cmd.target, moduleList);
-	if (!module) {
-		// Can't validate without knowing the module type
-		return { valid: true, errors: [] };
-	}
-
-	// Check parameter exists
-	const paramNames = module.parameters.map((p) => p.id);
-	const param = module.parameters.find((p) => p.id === cmd.param);
-
-	if (!param) {
-		const suggestion = paramNames.length > 0
-			? closest(cmd.param, paramNames)
-			: undefined;
-		let msg = `Unknown parameter "${cmd.param}" for ${module.id}.`;
-		if (suggestion) {
-			msg += ` Did you mean "${suggestion}"?`;
+	for (const clause of cmd.clauses) {
+		const segs = pathRefSegments(clause.path);
+		if (segs.length < 2) {
+			errors.push("set: path must have at least 2 segments");
+			continue;
 		}
-		errors.push(msg);
-		return { valid: false, errors };
-	}
+		const targetName = segs[0].id;
+		const fieldName = segs[segs.length - 1].id;
+		const fieldLower = fieldName.toLowerCase();
 
-	// Check value range
-	if (typeof cmd.value === "number") {
-		if (cmd.value < param.range.min || cmd.value > param.range.max) {
-			errors.push(
-				`Value ${cmd.value} out of range for ${module.id}.${param.id} (${param.range.min}–${param.range.max}).`,
-			);
+		if (RESERVED_FIELD_NAMES.has(fieldLower)) continue;
+
+		// Look up by target name. In real use the target is an instance ID
+		// whose type comes from the live tree; here we fall back to
+		// matching the name against the module catalog (covers cases where
+		// the user types the type name directly).
+		const module = findModuleByName(targetName, moduleList);
+		if (!module) continue;
+
+		const param = module.parameters.find((p) => p.id === fieldName);
+		if (!param) {
+			const paramNames = module.parameters.map((p) => p.id);
+			let msg = `Unknown parameter "${fieldName}" for ${module.id}.`;
+			if (paramNames.length > 0) {
+				const suggestion = closest(fieldName, paramNames);
+				if (suggestion) msg += ` Did you mean "${suggestion}"?`;
+			}
+			errors.push(msg);
+			continue;
+		}
+
+		const numeric = coerceFloat(clause.value);
+		if (numeric.ok) {
+			if (numeric.out < param.range.min || numeric.out > param.range.max) {
+				errors.push(
+					`Value ${numeric.out} out of range for ${module.id}.${param.id} (${param.range.min}–${param.range.max}).`,
+				);
+			}
 		}
 	}
 
@@ -146,7 +160,7 @@ export function validateSetCommand(
 // ── Internal helpers ──────────────────────────────────────────────
 
 /** Map chain name to the constrainer string from a parent module definition. */
-function resolveChainConstrainer(
+export function resolveChainConstrainer(
 	parentModule: ModuleDefinition,
 	chainName: string,
 ): string | null {
@@ -161,14 +175,9 @@ function resolveChainConstrainer(
 	}
 
 	if (lower === "midi") {
-		// midi chains only accept MidiProcessors - no constrainer string needed,
-		// validated by type check below
 		return null;
 	}
 
-	// Modulation chains: match by name (gain, pitch, or internal chain names)
-	// or by modulationMode (e.g. GlobalModulatorContainer's "Global Modulators"
-	// chain has modulationMode="gain", but its id doesn't contain "gain").
 	for (const mod of parentModule.modulation) {
 		const modName = mod.id.toLowerCase().replace(/\s+/g, "");
 		const modMode = mod.modulationMode?.toLowerCase();
@@ -180,45 +189,34 @@ function resolveChainConstrainer(
 	return null;
 }
 
-function validateChainConstraint(
+/** Check whether a module type can be added under a parent's chain. */
+export function checkChainConstraint(
 	module: ModuleDefinition,
 	chainName: string,
-	parentName: string | undefined,
-	moduleList: ModuleList,
+	parentModule: ModuleDefinition | null,
 ): string | null {
 	const lower = chainName.toLowerCase();
 
-	// Basic type-level check: midi chains only accept MidiProcessors
 	if (lower === "midi" && module.type !== "MidiProcessor") {
-		return `${module.id} is a ${module.type}, not a MidiProcessor. Only MIDI processors can be added to midi chains.`;
+		return `${module.id} is a ${module.type}, not a MidiProcessor.`;
 	}
-
-	// fx chains only accept Effects
 	if (lower === "fx" && module.type !== "Effect") {
-		return `${module.id} is a ${module.type}, not an Effect. Only effects can be added to fx chains.`;
+		return `${module.id} is a ${module.type}, not an Effect.`;
 	}
-
-	// children chains only accept SoundGenerators
 	if (lower === "children" && module.type !== "SoundGenerator") {
-		return `${module.id} is a ${module.type}, not a SoundGenerator. Only sound generators can be added as children.`;
+		return `${module.id} is a ${module.type}, not a SoundGenerator.`;
 	}
-
-	// Modulation chains (gain, pitch, etc.) only accept Modulators
 	if (lower !== "midi" && lower !== "fx" && lower !== "children" && module.type !== "Modulator") {
-		return `${module.id} is a ${module.type}, not a Modulator. Only modulators can be added to modulation chains.`;
+		return `${module.id} is a ${module.type}, not a Modulator.`;
 	}
 
-	// If parent is specified and matches a module type, do constrainer validation
-	if (parentName) {
-		const parentModule = findModuleByName(parentName, moduleList);
-		if (parentModule) {
-			const constrainerStr = resolveChainConstrainer(parentModule, chainName);
-			if (constrainerStr) {
-				const cp = new ConstrainerParser(constrainerStr);
-				const result = cp.check({ id: module.id, subtype: module.subtype });
-				if (!result.ok) {
-					return `${module.id} cannot be added to ${parentName}.${chainName}: ${result.error}`;
-				}
+	if (parentModule) {
+		const constrainerStr = resolveChainConstrainer(parentModule, chainName);
+		if (constrainerStr) {
+			const cp = new ConstrainerParser(constrainerStr);
+			const result = cp.check({ id: module.id, subtype: module.subtype });
+			if (!result.ok) {
+				return `${module.id} cannot be added to ${parentModule.id}.${chainName}: ${result.error}`;
 			}
 		}
 	}

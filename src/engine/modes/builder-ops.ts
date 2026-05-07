@@ -3,9 +3,29 @@
 import type { TreeNode } from "../result.js";
 import type { ModuleList } from "../data.js";
 import type { CompletionItem } from "./mode.js";
-import type { BuilderCommand } from "./builder-parser.js";
+import type {
+	AddCommand,
+	AddChainCommand,
+	BuilderCommand,
+	CloneCommand,
+	RemoveCommand,
+	RenameCommand,
+	SetClause,
+} from "./builder-parser.js";
 import { resolveModuleTypeId } from "./builder-validate.js";
 import { findNodeById, resolveNodeByPath } from "../tree-utils.js";
+import { resolvePath } from "../grammar/path-resolver.js";
+import {
+	pathRefSegments,
+	pathRefToString,
+	type PathRef,
+} from "../grammar/path-parser.js";
+import {
+	coerceBoolean,
+	coerceFloat,
+	coerceString,
+} from "../grammar/coercion.js";
+import type { Value } from "../grammar/value-parser.js";
 import { fgHex, RESET as ANSI_RESET } from "../ansi.js";
 
 // ── Operation types ───────────────────────────────────────────────
@@ -16,16 +36,18 @@ export interface BuilderOp {
 }
 
 export interface ModuleInstance {
-	id: string;    // processorId (instance name, e.g. "Osc 1")
-	type: string;  // module type ID (e.g. "SineSynth")
+	id: string;
+	type: string;
 }
+
+const ROUTING_PRESETS = new Set(["stereo", "stereo_2", "stereo_3", "all", "all_to_stereo"]);
+const READONLY_ROUTING_SUBFIELDS = new Set(["resizable", "routable", "numdestinationchannels"]);
 
 // ── Chain index resolution ────────────────────────────────────────
 
 /**
  * Resolve a chain name to the integer index expected by the HISE API.
  * -1 = direct children, 0 = midi, 1+ = modulation chains, 3 = fx (for top-level).
- * Named modulation chains are resolved from the parent's tree node.
  */
 export function resolveChainIndex(
 	chainName: string | undefined,
@@ -34,12 +56,9 @@ export function resolveChainIndex(
 	moduleList: ModuleList | null,
 ): number {
 	if (!chainName) {
-		// No chain specified: auto-resolve by module type
 		if (!moduleType || !moduleList) return -1;
 		const mod = moduleList.modules.find((m) => m.id === moduleType);
 		if (!mod) return -1;
-		// SoundGenerators go to children, Effects to fx, MidiProcessors to midi,
-		// Modulators need explicit chain
 		switch (mod.type) {
 			case "Effect": return 3;
 			case "MidiProcessor": return 0;
@@ -52,9 +71,6 @@ export function resolveChainIndex(
 	if (lower === "midi" || lower === "midiprocessorchain") return 0;
 	if (lower === "fx" || lower === "fxchain") return 3;
 
-	// Look up modulation chains from the parent module's definition.
-	// Source of truth: ModuleDefinition.modulation[] carries the real chainIndex,
-	// which is non-sequential for parents like WaveSynth (Mix=4, Osc2 Pitch=5).
 	const parentDef = parentNode?.type && moduleList
 		? moduleList.modules.find((m) => m.id === parentNode.type)
 		: null;
@@ -67,26 +83,34 @@ export function resolveChainIndex(
 		}
 	}
 
-	// Last resort: try parsing as a number
 	const num = parseInt(chainName, 10);
 	if (!isNaN(num)) return num;
 
-	// Default to direct children
 	return -1;
 }
 
-// ── Parent/tree helpers ───────────────────────────────────────────
+// ── Path resolution helpers ───────────────────────────────────────
 
-/**
- * Resolve the parent node for a path — the second-to-last node.
- * For path ["SineSynth", "FX Chain"], returns the SineSynth node.
- */
-function resolveParentByPath(tree: TreeNode | null, path: string[]): TreeNode | null {
-	if (!tree || path.length <= 1) return tree;
-	return resolveNodeByPath(tree, path.slice(0, -1));
+/** Resolve a PathRef to an instance id (the leaf node's id) plus the
+ *  node when available. With no tree (offline), falls back to the
+ *  literal segment image so command echo still works. */
+function resolveRefToTarget(
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+	ref: PathRef,
+	mode: "lookup" | "cd",
+): { id: string; node: TreeNode | null } | { error: string } {
+	if (!treeRoot) {
+		const segs = pathRefSegments(ref);
+		if (segs.length === 0) return { error: "cannot resolve `..` without tree" };
+		return { id: segs[segs.length - 1].id, node: null };
+	}
+	const r = resolvePath(treeRoot, currentPath, ref, mode);
+	if (!r.ok) return { error: r.message };
+	const id = r.node.id ?? r.fullPath[r.fullPath.length - 1];
+	return { id, node: r.node };
 }
 
-/** Find the parent tree node of a node by its id (case-insensitive). */
 function findParentNode(tree: TreeNode | null, childId: string): TreeNode | null {
 	if (!tree) return null;
 	const lower = childId.toLowerCase();
@@ -100,11 +124,58 @@ function findParentNode(tree: TreeNode | null, childId: string): TreeNode | null
 	return null;
 }
 
+/** Resolve add's parent + chain. Handles bare cwd, explicit `to`, and
+ *  the case where `to` lands on a chain (split into parent + chainName). */
+function resolveAddParent(
+	cmd: AddCommand | { parent?: PathRef },
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+	moduleList: ModuleList | null,
+	moduleTypeId: string,
+): { parent: string; chainName: string | undefined } | { error: string } {
+	let parent: string;
+	let chainName: string | undefined;
+
+	if (cmd.parent) {
+		const r = resolveRefToTarget(treeRoot, currentPath, cmd.parent, "lookup");
+		if ("error" in r) return { error: r.error };
+		if (r.node?.nodeKind === "chain") {
+			chainName = r.node.label;
+			const actual = findParentNode(treeRoot, r.id);
+			parent = actual?.id ?? treeRoot?.id ?? "Master Chain";
+		} else {
+			parent = r.id;
+		}
+	} else if (currentPath.length > 0) {
+		const contextNode = resolveNodeByPath(treeRoot, currentPath);
+		if (contextNode?.nodeKind === "chain") {
+			const ownerNode = currentPath.length > 1
+				? resolveNodeByPath(treeRoot, currentPath.slice(0, -1))
+				: treeRoot;
+			parent = ownerNode?.id ?? treeRoot?.id ?? "Master Chain";
+			chainName = contextNode.label;
+		} else {
+			parent = contextNode?.id ?? currentPath[currentPath.length - 1];
+		}
+	} else {
+		parent = treeRoot?.id ?? "Master Chain";
+	}
+
+	const _resolvedParentNode = findNodeById(treeRoot, parent);
+	void _resolvedParentNode;
+	void moduleList;
+	void moduleTypeId;
+	return { parent, chainName };
+}
+
 // ── Command → ops conversion ──────────────────────────────────────
 
 /**
  * Convert a parsed BuilderCommand into HISE API operation(s).
- * Returns an array of ops (most commands produce exactly one).
+ *
+ * Most commands map to /api/builder/apply ops (`op: "add"`, `"remove"`, …).
+ * The `network` set-clause maps to /api/dsp/init via the synthetic
+ * `init_network` op which the dispatcher routes separately.
  */
 export function commandToOps(
 	cmd: BuilderCommand,
@@ -113,80 +184,253 @@ export function commandToOps(
 	currentPath: string[],
 ): { ops: BuilderOp[] } | { error: string } {
 	switch (cmd.type) {
-		case "add": {
-			let parent: string;
-			let explicitChain = cmd.chain;
-
-			if (cmd.parent) {
-				// Explicit parent given — use it directly
-				parent = cmd.parent;
-			} else if (currentPath.length > 0) {
-				// Resolve from current path context using path-aware lookup
-				const contextNode = resolveNodeByPath(treeRoot, currentPath);
-				if (contextNode?.nodeKind === "chain") {
-					// cd'd into a chain — parent is the module owning this chain
-					const ownerNode = resolveParentByPath(treeRoot, currentPath);
-					parent = ownerNode?.id ?? treeRoot?.id ?? "Master Chain";
-					explicitChain = explicitChain ?? contextNode.label;
-				} else {
-					// cd'd into a module — use it as parent
-					parent = contextNode?.id ?? currentPath[currentPath.length - 1];
-				}
-			} else {
-				parent = treeRoot?.id ?? "Master Chain";
-			}
-
-			// If explicit parent (from `add X to Y.chain`) resolves to a chain, fix it up
-			if (cmd.parent) {
-				const parentNode = findNodeById(treeRoot, parent);
-				if (parentNode?.nodeKind === "chain") {
-					const actualParent = findParentNode(treeRoot, parent);
-					if (actualParent) {
-						explicitChain = explicitChain ?? parentNode.label;
-						parent = actualParent.id ?? actualParent.label;
-					}
-				}
-			}
-
-			const resolvedParentNode = findNodeById(treeRoot, parent);
-			// Resolve pretty name → type ID for the API, keep pretty name for default instance name
-			const typeId = resolveModuleTypeId(cmd.moduleType, moduleList) ?? cmd.moduleType;
-			const chainIndex = resolveChainIndex(explicitChain, typeId, resolvedParentNode, moduleList);
-			const op: BuilderOp = {
-				op: "add",
-				type: typeId,
-				parent,
-				chain: chainIndex,
-				name: cmd.alias ?? cmd.moduleType,
-			};
-			return { ops: [op] };
-		}
+		case "add":
+			return translateAdd(cmd, treeRoot, moduleList, currentPath);
+		case "addChain":
+			return translateAddChain(cmd, treeRoot, moduleList, currentPath);
 		case "remove":
-			return { ops: [{ op: "remove", target: cmd.target }] };
-		case "clone":
-			return { ops: [{ op: "clone", source: cmd.source, count: cmd.count }] };
-		case "set":
-			return { ops: [{ op: "set_attributes", target: cmd.target, attributes: { [cmd.param]: cmd.value } }] };
+			return translateRemove(cmd, treeRoot, currentPath);
 		case "rename":
-			return { ops: [{ op: "set_id", target: cmd.target, name: cmd.name }] };
-		case "bypass":
-			return { ops: [{ op: "set_bypassed", target: cmd.target, bypassed: true }] };
-		case "enable":
-			return { ops: [{ op: "set_bypassed", target: cmd.target, bypassed: false }] };
-		case "load":
-			return { ops: [{ op: "set_effect", target: cmd.target, effect: cmd.source }] };
-		case "move":
-			return { error: "move is not yet supported by the HISE C++ API" };
+			return translateRename(cmd, treeRoot, currentPath);
+		case "clone":
+			return translateClone(cmd, treeRoot, currentPath);
+		case "set":
+			return translateSet(cmd.clauses, treeRoot, currentPath);
 		case "get":
-			return { error: "get commands are handled locally" };
 		case "show":
-			return { error: "show commands are handled locally" };
+		case "list":
+		case "cd":
+		case "ls":
+		case "pwd":
+		case "reset":
+			return { error: "handled locally" };
 	}
+}
+
+function translateAdd(
+	cmd: AddCommand,
+	treeRoot: TreeNode | null,
+	moduleList: ModuleList | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const typeId = resolveModuleTypeId(cmd.moduleType, moduleList) ?? cmd.moduleType;
+	const r = resolveAddParent(cmd, treeRoot, currentPath, moduleList, typeId);
+	if ("error" in r) return { error: r.error };
+	const parentNode = findNodeById(treeRoot, r.parent);
+	const chainIndex = resolveChainIndex(r.chainName, typeId, parentNode, moduleList);
+	return {
+		ops: [{
+			op: "add",
+			type: typeId,
+			parent: r.parent,
+			chain: chainIndex,
+			name: cmd.alias,
+		}],
+	};
+}
+
+function translateAddChain(
+	cmd: AddChainCommand,
+	treeRoot: TreeNode | null,
+	moduleList: ModuleList | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const ops: BuilderOp[] = [];
+	for (const cl of cmd.clauses) {
+		const typeId = resolveModuleTypeId(cl.moduleType, moduleList) ?? cl.moduleType;
+		const r = resolveAddParent({ parent: undefined }, treeRoot, currentPath, moduleList, typeId);
+		if ("error" in r) return { error: r.error };
+		const parentNode = findNodeById(treeRoot, r.parent);
+		const chainIndex = resolveChainIndex(r.chainName, typeId, parentNode, moduleList);
+		ops.push({
+			op: "add",
+			type: typeId,
+			parent: r.parent,
+			chain: chainIndex,
+			name: cl.alias,
+		});
+	}
+	return { ops };
+}
+
+function translateRemove(
+	cmd: RemoveCommand,
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const ops: BuilderOp[] = [];
+	for (const ref of cmd.targets) {
+		const r = resolveRefToTarget(treeRoot, currentPath, ref, "lookup");
+		if ("error" in r) return { error: r.error };
+		ops.push({ op: "remove", target: r.id });
+	}
+	return { ops };
+}
+
+function translateRename(
+	cmd: RenameCommand,
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const r = resolveRefToTarget(treeRoot, currentPath, cmd.target, "lookup");
+	if ("error" in r) return { error: r.error };
+	return { ops: [{ op: "set_id", target: r.id, name: cmd.name }] };
+}
+
+function translateClone(
+	cmd: CloneCommand,
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const r = resolveRefToTarget(treeRoot, currentPath, cmd.target, "lookup");
+	if ("error" in r) return { error: r.error };
+	return { ops: [{ op: "clone", source: r.id, count: cmd.count }] };
+}
+
+// ── Set clause translation ────────────────────────────────────────
+
+function translateSet(
+	clauses: SetClause[],
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const ops: BuilderOp[] = [];
+	for (const clause of clauses) {
+		const r = translateSetClause(clause, treeRoot, currentPath);
+		if ("error" in r) return r;
+		ops.push(...r.ops);
+	}
+	return { ops };
+}
+
+function translateSetClause(
+	clause: SetClause,
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: BuilderOp[] } | { error: string } {
+	const segs = pathRefSegments(clause.path);
+	if (segs.length < 2) {
+		return { error: "set: path must have at least 2 segments" };
+	}
+
+	const tail = segs[segs.length - 1].id.toLowerCase();
+	const prevTail = segs.length >= 3 ? segs[segs.length - 2].id.toLowerCase() : null;
+
+	// routing.<sub> — sub-field. Detect before stripping tail.
+	if (prevTail === "routing") {
+		if (tail === "send") {
+			const targetRef = makeRefFromSegments(clause.path, segs.length - 2);
+			const r = resolveRefToTarget(treeRoot, currentPath, targetRef, "lookup");
+			if ("error" in r) return r;
+			const arr = expectIntArray(clause.value);
+			if ("error" in arr) return arr;
+			return { ops: [{ op: "set_routing", target: r.id, send: arr.values }] };
+		}
+		if (READONLY_ROUTING_SUBFIELDS.has(tail)) {
+			return { error: `routing.${tail} is read-only` };
+		}
+		return { error: `unknown routing sub-field: routing.${tail}` };
+	}
+
+	// All other writes: path[0..n-1] is the target, path[n-1] is the field.
+	const targetRef = makeRefFromSegments(clause.path, segs.length - 1);
+	const target = resolveRefToTarget(treeRoot, currentPath, targetRef, "lookup");
+	if ("error" in target) return target;
+	const fieldName = segs[segs.length - 1].id;
+
+	switch (tail) {
+		case "bypassed": {
+			const b = coerceBoolean(clause.value);
+			if (!b.ok) return { error: b.error };
+			return { ops: [{ op: "set_bypassed", target: target.id, bypassed: b.out }] };
+		}
+		case "parent":
+		case "index":
+			return { error: `set ${target.id}.${tail} is not yet supported by the HISE C++ API` };
+		case "samplemap": {
+			const s = coerceString(clause.value);
+			if (!s.ok) return { error: s.error };
+			return { ops: [{ op: "set_attributes", target: target.id, attributes: { samplemap: s.out } }] };
+		}
+		case "effect": {
+			const s = coerceString(clause.value);
+			if (!s.ok) return { error: s.error };
+			return { ops: [{ op: "set_effect", target: target.id, effect: s.out }] };
+		}
+		case "network": {
+			const s = coerceString(clause.value);
+			if (!s.ok) return { error: s.error };
+			const raw = s.out;
+			let mode: "create" | "load";
+			let name: string;
+			if (raw.toLowerCase().endsWith(".xml")) {
+				mode = "load";
+				name = raw.slice(0, -".xml".length);
+			} else {
+				mode = "create";
+				name = raw;
+			}
+			return { ops: [{ op: "init_network", moduleId: target.id, name, mode }] };
+		}
+		case "routing": {
+			if (clause.value.kind === "string") {
+				const preset = clause.value.s;
+				if (!ROUTING_PRESETS.has(preset.toLowerCase())) {
+					return { error: `unknown routing preset "${preset}"; expected one of ${[...ROUTING_PRESETS].join(", ")}` };
+				}
+				return { ops: [{ op: "set_routing", target: target.id, preset }] };
+			}
+			const arr = expectIntArray(clause.value);
+			if ("error" in arr) return arr;
+			return { ops: [{ op: "set_routing", target: target.id, matrix: arr.values }] };
+		}
+		default: {
+			const f = coerceFloat(clause.value);
+			if (!f.ok) {
+				const s = coerceString(clause.value);
+				if (s.ok) {
+					return { ops: [{ op: "set_attributes", target: target.id, attributes: { [fieldName]: s.out } }] };
+				}
+				return { error: f.error };
+			}
+			return { ops: [{ op: "set_attributes", target: target.id, attributes: { [fieldName]: f.out } }] };
+		}
+	}
+}
+
+function makeRefFromSegments(original: PathRef, count: number): PathRef {
+	const segs = pathRefSegments(original);
+	if (count <= 0) {
+		return { kind: "parent" };
+	}
+	if (count === 1) {
+		return { kind: "bare", segment: segs[0] };
+	}
+	return { kind: "dotted", segments: segs.slice(0, count) };
+}
+
+function expectIntArray(value: Value): { values: number[] } | { error: string } {
+	if (value.kind !== "array2" && value.kind !== "array4" && value.kind !== "arrayN") {
+		return { error: `expected numeric array; got ${value.kind}` };
+	}
+	const nums = value.n as readonly number[];
+	const out: number[] = [];
+	for (const n of nums) {
+		if (!Number.isInteger(n)) {
+			return { error: `routing array values must be integers (got ${n})` };
+		}
+		out.push(n);
+	}
+	return { values: out };
+}
+
+// Helper exported for echo/display logic in builder.ts.
+export function pathRefDisplay(ref: PathRef): string {
+	return pathRefToString(ref);
 }
 
 // ── Tree collection utilities ─────────────────────────────────────
 
-/** Walk a TreeNode tree and collect all module instances with their types. */
 export function collectModuleIds(tree: TreeNode | null): ModuleInstance[] {
 	if (!tree) return [];
 	const result: ModuleInstance[] = [];
@@ -205,7 +449,6 @@ function walkModules(node: TreeNode, out: ModuleInstance[]): void {
 	}
 }
 
-/** Build CompletionItems from module instances. Auto-quotes IDs with spaces. */
 export function moduleIdCompletionItems(modules: ModuleInstance[]): CompletionItem[] {
 	return modules.map((m) => ({
 		label: m.id,
@@ -214,7 +457,6 @@ export function moduleIdCompletionItems(modules: ModuleInstance[]): CompletionIt
 	}));
 }
 
-/** Resolve an instance name to its module type using the tree. */
 export function resolveInstanceType(
 	instanceName: string,
 	modules: ModuleInstance[],
@@ -224,16 +466,10 @@ export function resolveInstanceType(
 
 // ── Tree display utilities ────────────────────────────────────────
 
-/**
- * Strip chain nodes from the tree, promoting their module children up.
- * Chains that are part of the currentPath are preserved so the sidebar
- * can still show where the user has navigated.
- */
 export function compactTree(node: TreeNode, remainingPath: string[]): TreeNode {
 	if (!node.children) return node;
 
 	const newChildren: TreeNode[] = [];
-	// The next segment of the path that needs to be matched at this level
 	const nextSeg = remainingPath.length > 0 ? remainingPath[0].toLowerCase() : null;
 
 	for (const child of node.children) {
@@ -241,14 +477,12 @@ export function compactTree(node: TreeNode, remainingPath: string[]): TreeNode {
 		const isOnPath = nextSeg !== null && childId === nextSeg;
 
 		if (child.nodeKind === "chain" && !isOnPath) {
-			// Not on the active path — promote chain's module children up
 			if (child.children) {
 				for (const grandchild of child.children) {
 					newChildren.push(compactTree(grandchild, []));
 				}
 			}
 		} else {
-			// Keep the node: either a module, or the specific chain on the active path
 			const childPath = isOnPath ? remainingPath.slice(1) : [];
 			newChildren.push(compactTree(child, childPath));
 		}
@@ -257,13 +491,6 @@ export function compactTree(node: TreeNode, remainingPath: string[]): TreeNode {
 	return { ...node, children: newChildren.length > 0 ? newChildren : undefined };
 }
 
-/**
- * Format a single TreeNode label for the box-drawing tree renderer.
- *
- * - Chain: bare label (e.g. "GainModulation").
- * - Module with distinct type + label: `Type "Label"` (e.g. `SynthChain "Master Chain"`).
- * - Otherwise: type or label, whichever is set.
- */
 function formatTreeNodeLabel(node: TreeNode, compact: boolean): string {
 	if (node.nodeKind === "chain") {
 		return node.label;
@@ -281,25 +508,18 @@ const DEFAULT_SIGNAL_HEX = "#90FFB1";
 const DEFAULT_MUTED_HEX = "#888888";
 
 const DIFF_CHARS = {
-	added: { char: "+", hex: "#4E8E35" },     // green
-	removed: { char: "-", hex: "#BB3434" },   // red
-	modified: { char: "*", hex: "#E0A93B" },  // amber
+	added: { char: "+", hex: "#4E8E35" },
+	removed: { char: "-", hex: "#BB3434" },
+	modified: { char: "*", hex: "#E0A93B" },
 } as const;
 
 const fgAnsi = fgHex;
 
 export interface RenderTreeBoxOptions {
-	/** Node to highlight as PWD. Compared by reference identity, so callers
-	 *  must pass a node from the same tree object that's being rendered. */
 	pwdNode?: TreeNode | null;
-	/** Hex colour for the PWD node label. Default: brand signal. */
 	signalColor?: string;
-	/** Hex colour for dimmed nodes (and bypassed/invisible labels). Default: muted grey. */
 	mutedColor?: string;
-	/** Cap on recursion depth. Root is depth 0. When set, descendants
-	 *  beyond `maxDepth` are not rendered. */
 	maxDepth?: number;
-	/** Compact label format: drop the `Type "Label"` form, render just label. */
 	compact?: boolean;
 }
 
@@ -311,16 +531,6 @@ interface RenderCtx {
 	compact: boolean;
 }
 
-/**
- * Render a TreeNode as a Unicode box-drawing tree with ANSI colour annotations.
- * Used by `show tree` commands across builder/ui/dsp modes.
- *
- * Honours TreeNode flags from the data pipeline:
- * - `colour` + `filledDot` → coloured `●` / `○` prefix.
- * - `dimmed` → label rendered in muted colour.
- * - `badge` → suffix (e.g. `★` for saveInPreset) in badge colour.
- * - PWD match (via `pwdId`) overrides label colour with signal colour.
- */
 export function renderTreeBox(node: TreeNode, options: RenderTreeBoxOptions = {}): string {
 	const ctx: RenderCtx = {
 		pwdNode: options.pwdNode,
@@ -340,7 +550,6 @@ export function renderTreeBox(node: TreeNode, options: RenderTreeBoxOptions = {}
 }
 
 function formatTreeRow(node: TreeNode, prefix: string, connector: string, ctx: RenderCtx): string {
-	// Diff indicator (added/removed/modified) — leftmost column, before connector.
 	let diffPrefix = "";
 	if (node.diff && DIFF_CHARS[node.diff]) {
 		const d = DIFF_CHARS[node.diff];

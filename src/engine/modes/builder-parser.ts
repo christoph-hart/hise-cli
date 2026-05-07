@@ -1,116 +1,131 @@
 // ── Builder Chevrotain CST parser + command types ────────────────────
+//
+// Grammar surface per docs/CLI_GRAMMAR.md §128-202 / §330-408.
+// Comma chaining is native (Chevrotain MANY_SEP); no string pre-processor.
 
 import { CstParser, type CstNode, type IToken } from "chevrotain";
 import {
 	Add,
 	As,
-	Bypass,
+	Cd,
 	Clone,
-	Enable,
+	Comma,
+	Dot,
+	DoubleDot,
 	Get,
-	Into,
-	Load,
-	Move,
+	HexLiteral,
+	Identifier,
+	LBracket,
+	List,
+	Ls,
+	NumberLiteral,
+	PercentLiteral,
+	Pwd,
+	QuotedString,
+	RBracket,
 	Remove,
 	Rename,
-	builderLexer,
-	Dot,
-	Identifier,
-	NumberLiteral,
-	QuotedString,
+	Reset,
 	Set,
 	Show,
+	BooleanLiteral,
 	To,
 	Tree,
 	Types,
-	XCount,
+	builderLexer,
 	BUILDER_TOKENS,
-	VERB_KEYWORDS,
 } from "./tokens.js";
-import { stripQuotes, splitByComma, findLastUnquotedComma } from "../string-utils.js";
+import {
+	parseBooleanLiteral,
+	parseHexLiteral,
+	parseNumberLiteral,
+	parseNumericArray,
+	parsePercentLiteral,
+	parseQuotedString,
+	type Value,
+	type ValueResult,
+} from "../grammar/value-parser.js";
+import {
+	buildPathFromSegments,
+	type PathRef,
+} from "../grammar/path-parser.js";
 
 // ── Parsed command types ──────────────────────────────────────────
 
 export interface AddCommand {
 	type: "add";
 	moduleType: string;
-	alias?: string;
-	parent?: string;
-	chain?: string;
+	alias: string;
+	parent?: PathRef;
 }
 
-export interface CloneCommand {
-	type: "clone";
-	source: string;
-	count: number;
+export interface AddChainCommand {
+	type: "addChain";
+	clauses: { moduleType: string; alias: string }[];
 }
 
 export interface RemoveCommand {
 	type: "remove";
-	target: string;
-}
-
-export interface MoveCommand {
-	type: "move";
-	target: string;
-	parent: string;
-	chain?: string;
+	targets: PathRef[];
 }
 
 export interface RenameCommand {
 	type: "rename";
-	target: string;
+	target: PathRef;
 	name: string;
+}
+
+export interface CloneCommand {
+	type: "clone";
+	target: PathRef;
+	count: number;
+}
+
+export interface SetClause {
+	path: PathRef;
+	value: Value;
 }
 
 export interface SetCommand {
 	type: "set";
-	target: string;
-	param: string;
-	value: string | number;
-}
-
-export interface LoadCommand {
-	type: "load";
-	source: string;
-	target: string;
-}
-
-export interface BypassCommand {
-	type: "bypass";
-	target: string;
-}
-
-export interface EnableCommand {
-	type: "enable";
-	target: string;
+	clauses: SetClause[];
 }
 
 export interface GetCommand {
 	type: "get";
-	target: string;
-	param: string;
+	paths: PathRef[];
 }
 
 export interface ShowCommand {
 	type: "show";
-	what: "tree" | "types" | "target";
-	target?: string;
+	target: PathRef;
+}
+
+export interface ListCommand {
+	type: "list";
+	noun: "types" | "tree";
 	filter?: string;
 }
 
+export interface CdCommand { type: "cd"; target: PathRef }
+export interface LsCommand { type: "ls" }
+export interface PwdCommand { type: "pwd" }
+export interface ResetCommand { type: "reset" }
+
 export type BuilderCommand =
 	| AddCommand
-	| CloneCommand
+	| AddChainCommand
 	| RemoveCommand
-	| MoveCommand
 	| RenameCommand
+	| CloneCommand
 	| SetCommand
 	| GetCommand
-	| LoadCommand
-	| BypassCommand
-	| EnableCommand
-	| ShowCommand;
+	| ShowCommand
+	| ListCommand
+	| CdCommand
+	| LsCommand
+	| PwdCommand
+	| ResetCommand;
 
 // ── Chevrotain CST Parser ─────────────────────────────────────────
 
@@ -120,165 +135,179 @@ class BuilderParser extends CstParser {
 		this.performSelfAnalysis();
 	}
 
-	// Reusable: multi-word target (greedy Identifier+ or QuotedString)
-	public targetRef = this.RULE("targetRef", () => {
+	// PathExpr := DoubleDot | pathSegment ('.' pathSegment)*
+	public pathExpr = this.RULE("pathExpr", () => {
 		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quoted" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "words" })) },
+			{ ALT: () => this.CONSUME(DoubleDot) },
+			{ ALT: () => {
+				this.SUBRULE(this.pathSegment, { LABEL: "first" });
+				this.MANY(() => {
+					this.CONSUME(Dot);
+					this.SUBRULE2(this.pathSegment, { LABEL: "rest" });
+				});
+			}},
 		]);
 	});
 
-	// add <type> [as "<name>"] [to <target>[.<chain>]]
-	// `as` and `to` clauses are order-independent — both orderings parse the same.
-	// Type can be multi-word (e.g., "Noise Generator") — greedy Identifier+ or QuotedString.
+	public pathSegment = this.RULE("pathSegment", () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(QuotedString) },
+		]);
+	});
+
+	// TypeRef := Identifier | QuotedString
+	public typeRef = this.RULE("typeRef", () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(QuotedString) },
+		]);
+	});
+
+	// Array := '[' Number (',' Number)* ']'
+	public arrayValue = this.RULE("arrayValue", () => {
+		this.CONSUME(LBracket);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.CONSUME(NumberLiteral),
+		});
+		this.CONSUME(RBracket);
+	});
+
+	// Value := QuotedString | Number | Percent | Boolean | HexLiteral | Array | PathExpr
+	public value = this.RULE("value", () => {
+		this.OR([
+			{ ALT: () => this.SUBRULE(this.arrayValue) },
+			{ ALT: () => this.CONSUME(HexLiteral) },
+			{ ALT: () => this.CONSUME(PercentLiteral) },
+			{ ALT: () => this.CONSUME(NumberLiteral) },
+			{ ALT: () => this.CONSUME(BooleanLiteral) },
+			{ ALT: () => this.SUBRULE(this.pathExpr) },
+		]);
+	});
+
+	// AddClause := TypeRef 'as' QuotedString ['to' PathExpr]
+	public addClause = this.RULE("addClause", () => {
+		this.SUBRULE(this.typeRef, { LABEL: "moduleType" });
+		this.CONSUME(As);
+		this.CONSUME(QuotedString, { LABEL: "alias" });
+		this.OPTION(() => {
+			this.CONSUME(To);
+			this.SUBRULE(this.pathExpr, { LABEL: "parent" });
+		});
+	});
+
+	// AddStmt := 'add' AddClause (',' AddClause)*
 	public addCommand = this.RULE("addCommand", () => {
 		this.CONSUME(Add);
-		this.OR2([
-			{ ALT: () => this.CONSUME3(QuotedString, { LABEL: "quotedType" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME2(Identifier, { LABEL: "moduleType" })) },
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.addClause),
+		});
+	});
+
+	// RemoveStmt := 'remove' PathExpr (',' PathExpr)*
+	public removeCommand = this.RULE("removeCommand", () => {
+		this.CONSUME(Remove);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }),
+		});
+	});
+
+	// RenameStmt := 'rename' PathExpr 'as' QuotedString
+	public renameCommand = this.RULE("renameCommand", () => {
+		this.CONSUME(Rename);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+		this.CONSUME(As);
+		this.CONSUME(QuotedString, { LABEL: "name" });
+	});
+
+	// CloneStmt := 'clone' PathExpr Number
+	public cloneCommand = this.RULE("cloneCommand", () => {
+		this.CONSUME(Clone);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+		this.CONSUME(NumberLiteral, { LABEL: "count" });
+	});
+
+	// SetClause := PathExpr Value (PathExpr must have ≥2 segments — validated post-parse)
+	public setClause = this.RULE("setClause", () => {
+		this.SUBRULE(this.pathExpr, { LABEL: "path" });
+		this.SUBRULE(this.value, { LABEL: "value" });
+	});
+
+	// SetStmt := 'set' SetClause (',' SetClause)*
+	public setCommand = this.RULE("setCommand", () => {
+		this.CONSUME(Set);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.setClause),
+		});
+	});
+
+	// GetStmt := 'get' DottedPath (',' DottedPath)*
+	public getCommand = this.RULE("getCommand", () => {
+		this.CONSUME(Get);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.pathExpr, { LABEL: "path" }),
+		});
+	});
+
+	// ShowStmt := 'show' PathExpr
+	public showCommand = this.RULE("showCommand", () => {
+		this.CONSUME(Show);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
+	});
+
+	// ListStmt := 'list' ListNoun [Filter]
+	public listCommand = this.RULE("listCommand", () => {
+		this.CONSUME(List);
+		this.OR([
+			{ ALT: () => this.CONSUME(Types, { LABEL: "noun_types" }) },
+			{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
 		]);
-		this.MANY(() => {
-			this.OR3([
-				{ ALT: () => {
-					this.CONSUME(As);
-					this.OR4([
-						{ ALT: () => this.CONSUME(QuotedString, { LABEL: "alias" }) },
-						{ ALT: () => this.AT_LEAST_ONE2(() => this.CONSUME4(Identifier, { LABEL: "aliasWords" })) },
-					]);
-				}},
-				{ ALT: () => {
-					this.CONSUME(To);
-					this.SUBRULE(this.targetRef, { LABEL: "parent" });
-					this.OPTION(() => {
-						this.CONSUME(Dot);
-						this.CONSUME3(Identifier, { LABEL: "chain" });
-					});
-				}},
+		this.OPTION(() => {
+			this.OR2([
+				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
+				{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
 			]);
 		});
 	});
 
-	// clone <target> [x<count>]
-	public cloneCommand = this.RULE("cloneCommand", () => {
-		this.CONSUME(Clone);
-		this.SUBRULE(this.targetRef, { LABEL: "source" });
-		this.OPTION(() => {
-			this.CONSUME(XCount, { LABEL: "count" });
-		});
+	// CdStmt := 'cd' PathExpr
+	public cdCommand = this.RULE("cdCommand", () => {
+		this.CONSUME(Cd);
+		this.SUBRULE(this.pathExpr, { LABEL: "target" });
 	});
 
-	// remove <target>
-	public removeCommand = this.RULE("removeCommand", () => {
-		this.CONSUME(Remove);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
+	public lsCommand = this.RULE("lsCommand", () => {
+		this.CONSUME(Ls);
 	});
 
-	// move <target> to <parent>[.<chain>]
-	public moveCommand = this.RULE("moveCommand", () => {
-		this.CONSUME(Move);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
-		this.CONSUME(To);
-		this.SUBRULE2(this.targetRef, { LABEL: "parent" });
-		this.OPTION(() => {
-			this.CONSUME(Dot);
-			this.CONSUME(Identifier, { LABEL: "chain" });
-		});
+	public pwdCommand = this.RULE("pwdCommand", () => {
+		this.CONSUME(Pwd);
 	});
 
-	// rename <target> to "<name>" | rename <target> to <name...>
-	public renameCommand = this.RULE("renameCommand", () => {
-		this.CONSUME(Rename);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
-		this.CONSUME(To);
-		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedName" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "nameWords" })) },
-		]);
-	});
-
-	// set <target>.<param> [to] <value>
-	// Target may be quoted ("My Module") or multi-word (My Module)
-	public setCommand = this.RULE("setCommand", () => {
-		this.CONSUME(Set);
-		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedTarget" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "targetWords" })) },
-		]);
-		this.CONSUME(Dot);
-		this.CONSUME2(Identifier, { LABEL: "param" });
-		this.OPTION(() => {
-			this.CONSUME(To);
-		});
-		this.OR2([
-			{ ALT: () => this.CONSUME(NumberLiteral, { LABEL: "numValue" }) },
-			{ ALT: () => this.CONSUME2(QuotedString, { LABEL: "strValue" }) },
-			{ ALT: () => this.CONSUME3(Identifier, { LABEL: "idValue" }) },
-		]);
-	});
-
-	// load "<source>" into <target> | load <source> into <target>
-	public loadCommand = this.RULE("loadCommand", () => {
-		this.CONSUME(Load);
-		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedSource" }) },
-			{ ALT: () => this.CONSUME(Identifier, { LABEL: "sourceWord" }) },
-		]);
-		this.CONSUME(Into);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
-	});
-
-	// bypass <target>
-	public bypassCommand = this.RULE("bypassCommand", () => {
-		this.CONSUME(Bypass);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
-	});
-
-	// enable <target>
-	public enableCommand = this.RULE("enableCommand", () => {
-		this.CONSUME(Enable);
-		this.SUBRULE(this.targetRef, { LABEL: "target" });
-	});
-
-	// show tree | show types [filter] | show <target>
-	public showCommand = this.RULE("showCommand", () => {
-		this.CONSUME(Show);
-		this.OR([
-			{ ALT: () => this.CONSUME(Tree, { LABEL: "tree" }) },
-			{ ALT: () => {
-				this.CONSUME(Types, { LABEL: "types" });
-				this.OPTION(() => {
-					this.CONSUME(Identifier, { LABEL: "filter" });
-				});
-			}},
-			{ ALT: () => this.SUBRULE(this.targetRef, { LABEL: "target" }) },
-		]);
-	});
-
-	// get <target>.<param>
-	public getCommand = this.RULE("getCommand", () => {
-		this.CONSUME(Get);
-		this.OR([
-			{ ALT: () => this.CONSUME(QuotedString, { LABEL: "quotedTarget" }) },
-			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier, { LABEL: "targetWords" })) },
-		]);
-		this.CONSUME(Dot);
-		this.CONSUME2(Identifier, { LABEL: "param" });
+	public resetCommand = this.RULE("resetCommand", () => {
+		this.CONSUME(Reset);
 	});
 
 	// Top-level entry: dispatches to sub-rules
 	public command = this.RULE("command", () => {
 		this.OR([
 			{ ALT: () => this.SUBRULE(this.addCommand) },
-			{ ALT: () => this.SUBRULE(this.cloneCommand) },
 			{ ALT: () => this.SUBRULE(this.removeCommand) },
-			{ ALT: () => this.SUBRULE(this.moveCommand) },
 			{ ALT: () => this.SUBRULE(this.renameCommand) },
+			{ ALT: () => this.SUBRULE(this.cloneCommand) },
 			{ ALT: () => this.SUBRULE(this.setCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
-			{ ALT: () => this.SUBRULE(this.loadCommand) },
-			{ ALT: () => this.SUBRULE(this.bypassCommand) },
-			{ ALT: () => this.SUBRULE(this.enableCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
+			{ ALT: () => this.SUBRULE(this.listCommand) },
+			{ ALT: () => this.SUBRULE(this.cdCommand) },
+			{ ALT: () => this.SUBRULE(this.lsCommand) },
+			{ ALT: () => this.SUBRULE(this.pwdCommand) },
+			{ ALT: () => this.SUBRULE(this.resetCommand) },
 		]);
 	});
 }
@@ -287,181 +316,228 @@ const parser = new BuilderParser();
 
 // ── CST extractors ────────────────────────────────────────────────
 
-/** Narrow a CstElement to CstNode (sub-rules always produce CstNode, not IToken). */
-const asNode = (el: import("chevrotain").CstElement) => el as CstNode;
+const asNode = (el: import("chevrotain").CstElement): CstNode => el as CstNode;
+const asToken = (el: import("chevrotain").CstElement): IToken => el as IToken;
 
-function extractCommand(
-	cst: CstNode,
-): { command: BuilderCommand } | { error: string } {
-	const c = cst.children;
-	if (c.addCommand) return extractAddCommand(c.addCommand[0] as CstNode);
-	if (c.cloneCommand) return extractCloneCommand(c.cloneCommand[0] as CstNode);
-	if (c.removeCommand) return extractTargetCommand(c.removeCommand[0] as CstNode, "remove");
-	if (c.moveCommand) return extractMoveCommand(c.moveCommand[0] as CstNode);
-	if (c.renameCommand) return extractRenameCommand(c.renameCommand[0] as CstNode);
-	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
-	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
-	if (c.loadCommand) return extractLoadCommand(c.loadCommand[0] as CstNode);
-	if (c.bypassCommand) return extractTargetCommand(c.bypassCommand[0] as CstNode, "bypass");
-	if (c.enableCommand) return extractTargetCommand(c.enableCommand[0] as CstNode, "enable");
-	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
-	return { error: "Unknown command structure" };
+function extractPathSegmentImage(node: CstNode): string {
+	const c = node.children;
+	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
+	throw new Error("pathSegment: no Identifier or QuotedString");
 }
 
-/** Extract a multi-word target from a targetRef subrule CST node. */
-function extractTargetRef(node: CstNode): string {
-	if (node.children.quoted) {
-		return stripQuotes((node.children.quoted[0] as IToken).image);
+function extractPathExpr(node: CstNode): { ref: PathRef } | { error: string } {
+	const c = node.children;
+	if (c.DoubleDot) return { ref: { kind: "parent" } };
+	const segments: string[] = [];
+	if (c.first) segments.push(extractPathSegmentImage(c.first[0] as CstNode));
+	if (c.rest) {
+		for (const seg of c.rest as import("chevrotain").CstElement[]) {
+			segments.push(extractPathSegmentImage(seg as CstNode));
+		}
 	}
-	// Multi-word: join all Identifier tokens with spaces
-	const words = (node.children.words as IToken[]).map((t) => t.image);
-	return words.join(" ");
+	const r = buildPathFromSegments(segments);
+	if (!r.ok) return { error: r.error };
+	return { ref: r.ref };
 }
 
-function extractAddCommand(
-	node: CstNode,
-): { command: AddCommand } | { error: string } {
-	let moduleType: string;
-	if (node.children.quotedType) {
-		moduleType = stripQuotes((node.children.quotedType[0] as IToken).image);
-	} else {
-		const words = (node.children.moduleType as IToken[]).map((t) => t.image);
-		moduleType = words.join(" ");
-	}
-	const alias = node.children.alias
-		? stripQuotes((node.children.alias[0] as IToken).image)
-		: node.children.aliasWords
-			? (node.children.aliasWords as IToken[]).map((t) => t.image).join(" ")
-			: undefined;
-	const parent = node.children.parent
-		? extractTargetRef(asNode(node.children.parent[0]))
-		: undefined;
-	const chain = node.children.chain
-		? (node.children.chain[0] as IToken).image
-		: undefined;
+function pathRefSegmentCount(ref: PathRef): number {
+	if (ref.kind === "parent") return 0;
+	if (ref.kind === "bare") return 1;
+	return ref.segments.length;
+}
 
+function extractTypeRef(node: CstNode): string {
+	const c = node.children;
+	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.QuotedString) {
+		const r = parseQuotedString((c.QuotedString[0] as IToken).image);
+		if (r.ok && r.value.kind === "string") return r.value.s;
+	}
+	throw new Error("typeRef: no Identifier or QuotedString");
+}
+
+function extractArrayValue(node: CstNode): ValueResult {
+	const tokens = (node.children.NumberLiteral ?? []) as IToken[];
+	const elements: Value[] = [];
+	for (const t of tokens) {
+		const r = parseNumberLiteral(t.image);
+		if (!r.ok) return r;
+		elements.push(r.value);
+	}
+	return parseNumericArray(elements, "N");
+}
+
+function extractValue(node: CstNode): ValueResult {
+	const c = node.children;
+	if (c.arrayValue) return extractArrayValue(c.arrayValue[0] as CstNode);
+	if (c.HexLiteral) return parseHexLiteral((c.HexLiteral[0] as IToken).image);
+	if (c.PercentLiteral) return parsePercentLiteral((c.PercentLiteral[0] as IToken).image);
+	if (c.NumberLiteral) return parseNumberLiteral((c.NumberLiteral[0] as IToken).image);
+	if (c.BooleanLiteral) return parseBooleanLiteral((c.BooleanLiteral[0] as IToken).image);
+	if (c.pathExpr) {
+		const r = extractPathExpr(c.pathExpr[0] as CstNode);
+		if ("error" in r) return { ok: false, error: r.error };
+		// A solo quoted segment is a string value, not a path.
+		if (r.ref.kind === "bare" && r.ref.segment.quoted) {
+			return { ok: true, value: { kind: "string", s: r.ref.segment.id } };
+		}
+		return { ok: true, value: { kind: "path", ref: r.ref } };
+	}
+	return { ok: false, error: "value: no alternative matched" };
+}
+
+function extractAddCommand(node: CstNode): { command: BuilderCommand } | { error: string } {
+	const clauseNodes = (node.children.addClause ?? []) as CstNode[];
+	if (clauseNodes.length === 0) return { error: "add: no clauses" };
+	const clauses: { moduleType: string; alias: string; parent?: PathRef }[] = [];
+	for (const clNode of clauseNodes) {
+		const cl = clNode.children;
+		const moduleType = extractTypeRef(cl.moduleType![0] as CstNode);
+		const aliasResult = parseQuotedString((cl.alias![0] as IToken).image);
+		if (!aliasResult.ok || aliasResult.value.kind !== "string") {
+			return { error: "add: invalid alias" };
+		}
+		const alias = aliasResult.value.s;
+		let parent: PathRef | undefined;
+		if (cl.parent) {
+			const p = extractPathExpr(cl.parent[0] as CstNode);
+			if ("error" in p) return { error: p.error };
+			parent = p.ref;
+		}
+		clauses.push({ moduleType, alias, parent });
+	}
+
+	if (clauses.length === 1) {
+		const c = clauses[0];
+		return { command: { type: "add", moduleType: c.moduleType, alias: c.alias, parent: c.parent } };
+	}
+	for (const c of clauses) {
+		if (c.parent) {
+			return { error: "`to` clause is forbidden in chained `add` — chained adds use cwd only" };
+		}
+	}
 	return {
-		command: { type: "add", moduleType, alias, parent, chain },
+		command: {
+			type: "addChain",
+			clauses: clauses.map((c) => ({ moduleType: c.moduleType, alias: c.alias })),
+		},
 	};
 }
 
-function extractCloneCommand(
-	node: CstNode,
-): { command: CloneCommand } | { error: string } {
-	const source = extractTargetRef(asNode(node.children.source[0]));
-	const countToken = node.children.count
-		? (node.children.count[0] as IToken).image
-		: undefined;
-	const count = countToken ? parseInt(countToken.slice(1), 10) : 1;
-	return { command: { type: "clone", source, count } };
-}
-
-/** Generic extractor for commands with just a target (remove, bypass, enable). */
-function extractTargetCommand(
-	node: CstNode,
-	type: "remove" | "bypass" | "enable",
-): { command: RemoveCommand | BypassCommand | EnableCommand } | { error: string } {
-	const target = extractTargetRef(asNode(node.children.target[0]));
-	return { command: { type, target } };
-}
-
-function extractMoveCommand(
-	node: CstNode,
-): { command: MoveCommand } | { error: string } {
-	const target = extractTargetRef(asNode(node.children.target[0]));
-	const parent = extractTargetRef(asNode(node.children.parent[0]));
-	const chain = node.children.chain
-		? (node.children.chain[0] as IToken).image
-		: undefined;
-	return { command: { type: "move", target, parent, chain } };
-}
-
-function extractRenameCommand(
-	node: CstNode,
-): { command: RenameCommand } | { error: string } {
-	const target = extractTargetRef(asNode(node.children.target[0]));
-	const name = node.children.quotedName
-		? stripQuotes((node.children.quotedName[0] as IToken).image)
-		: (node.children.nameWords as IToken[]).map((t) => t.image).join(" ");
-	return { command: { type: "rename", target, name } };
-}
-
-function extractSetCommand(
-	node: CstNode,
-): { command: SetCommand } | { error: string } {
-	// Target: quoted or multi-word identifiers before the dot
-	let target: string;
-	if (node.children.quotedTarget) {
-		target = stripQuotes((node.children.quotedTarget[0] as IToken).image);
-	} else {
-		const words = (node.children.targetWords as IToken[]).map((t) => t.image);
-		target = words.join(" ");
+function extractRemoveCommand(node: CstNode): { command: RemoveCommand } | { error: string } {
+	const targets: PathRef[] = [];
+	for (const t of (node.children.target ?? []) as import("chevrotain").CstElement[]) {
+		const r = extractPathExpr(t as CstNode);
+		if ("error" in r) return { error: r.error };
+		targets.push(r.ref);
 	}
-
-	const param = (node.children.param[0] as IToken).image;
-
-	let value: string | number;
-	if (node.children.numValue) {
-		value = parseFloat((node.children.numValue[0] as IToken).image);
-	} else if (node.children.strValue) {
-		value = stripQuotes((node.children.strValue[0] as IToken).image);
-	} else if (node.children.idValue) {
-		value = (node.children.idValue[0] as IToken).image;
-	} else {
-		return { error: "Missing value in set command" };
-	}
-
-	return { command: { type: "set", target, param, value } };
+	if (targets.length === 0) return { error: "remove: no targets" };
+	return { command: { type: "remove", targets } };
 }
 
-function extractGetCommand(
-	node: CstNode,
-): { command: GetCommand } | { error: string } {
-	let target: string;
-	if (node.children.quotedTarget) {
-		target = stripQuotes((node.children.quotedTarget[0] as IToken).image);
-	} else {
-		const words = (node.children.targetWords as IToken[]).map((t) => t.image);
-		target = words.join(" ");
+function extractRenameCommand(node: CstNode): { command: RenameCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	const nameResult = parseQuotedString((node.children.name![0] as IToken).image);
+	if (!nameResult.ok || nameResult.value.kind !== "string") {
+		return { error: "rename: invalid name" };
 	}
-	const param = (node.children.param[0] as IToken).image;
-	return { command: { type: "get", target, param } };
+	return { command: { type: "rename", target: target.ref, name: nameResult.value.s } };
 }
 
-function extractLoadCommand(
-	node: CstNode,
-): { command: LoadCommand } | { error: string } {
-	const source = node.children.quotedSource
-		? stripQuotes((node.children.quotedSource[0] as IToken).image)
-		: (node.children.sourceWord[0] as IToken).image;
-	const target = extractTargetRef(asNode(node.children.target[0]));
-	return { command: { type: "load", source, target } };
+function extractCloneCommand(node: CstNode): { command: CloneCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	const countResult = parseNumberLiteral((node.children.count![0] as IToken).image);
+	if (!countResult.ok) return { error: countResult.error };
+	const count = (countResult.value as { kind: "number"; n: number }).n;
+	if (!Number.isInteger(count) || count < 1) {
+		return { error: `clone count must be a positive integer (got ${count})` };
+	}
+	return { command: { type: "clone", target: target.ref, count } };
 }
 
-function extractShowCommand(
-	node: CstNode,
-): { command: ShowCommand } | { error: string } {
-	if (node.children.tree) {
-		return { command: { type: "show", what: "tree" } };
+function extractSetCommand(node: CstNode): { command: SetCommand } | { error: string } {
+	const clauseNodes = (node.children.setClause ?? []) as CstNode[];
+	if (clauseNodes.length === 0) return { error: "set: no clauses" };
+	const clauses: SetClause[] = [];
+	for (const clNode of clauseNodes) {
+		const c = clNode.children;
+		const path = extractPathExpr(c.path![0] as CstNode);
+		if ("error" in path) return { error: path.error };
+		if (pathRefSegmentCount(path.ref) < 2) {
+			return { error: "set: path must have at least 2 segments (use `set <target>.<field> <value>`)" };
+		}
+		const value = extractValue(c.value![0] as CstNode);
+		if (!value.ok) return { error: value.error };
+		clauses.push({ path: path.ref, value: value.value });
 	}
-	if (node.children.types) {
-		const filter = node.children.filter
-			? (node.children.filter[0] as IToken).image
-			: undefined;
-		return { command: { type: "show", what: "types", filter } };
+	return { command: { type: "set", clauses } };
+}
+
+function extractGetCommand(node: CstNode): { command: GetCommand } | { error: string } {
+	const paths: PathRef[] = [];
+	for (const p of (node.children.path ?? []) as import("chevrotain").CstElement[]) {
+		const r = extractPathExpr(p as CstNode);
+		if ("error" in r) return { error: r.error };
+		if (pathRefSegmentCount(r.ref) < 2) {
+			return { error: "get: path must have at least 2 segments (use `get <target>.<field>`)" };
+		}
+		paths.push(r.ref);
 	}
-	if (node.children.target) {
-		const target = extractTargetRef(asNode(node.children.target[0]));
-		return { command: { type: "show", what: "target", target } };
+	if (paths.length === 0) return { error: "get: no paths" };
+	return { command: { type: "get", paths } };
+}
+
+function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "show", target: target.ref } };
+}
+
+function extractListCommand(node: CstNode): { command: ListCommand } | { error: string } {
+	const c = node.children;
+	const noun: "types" | "tree" = c.noun_types ? "types" : "tree";
+	let filter: string | undefined;
+	if (c.filterQuoted) {
+		const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
+		if (!r.ok || r.value.kind !== "string") return { error: "list: invalid filter" };
+		filter = r.value.s;
+	} else if (c.filterBare) {
+		filter = (c.filterBare[0] as IToken).image;
 	}
-	return { error: "Invalid show command" };
+	return { command: { type: "list", noun, filter } };
+}
+
+function extractCdCommand(node: CstNode): { command: CdCommand } | { error: string } {
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "cd", target: target.ref } };
+}
+
+function extractCommand(cst: CstNode): { command: BuilderCommand } | { error: string } {
+	const c = cst.children;
+	if (c.addCommand) return extractAddCommand(c.addCommand[0] as CstNode);
+	if (c.removeCommand) return extractRemoveCommand(c.removeCommand[0] as CstNode);
+	if (c.renameCommand) return extractRenameCommand(c.renameCommand[0] as CstNode);
+	if (c.cloneCommand) return extractCloneCommand(c.cloneCommand[0] as CstNode);
+	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
+	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
+	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
+	if (c.listCommand) return extractListCommand(c.listCommand[0] as CstNode);
+	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
+	if (c.lsCommand) return { command: { type: "ls" } };
+	if (c.pwdCommand) return { command: { type: "pwd" } };
+	if (c.resetCommand) return { command: { type: "reset" } };
+	return { error: "Unknown command structure" };
 }
 
 // ── Parse functions ───────────────────────────────────────────────
 
 /**
  * Parse a single command string through the Chevrotain parser.
- * Does not handle comma chaining — use parseBuilderInput for that.
+ * Comma chaining is handled inside individual statement rules.
  */
 export function parseSingleCommand(
 	input: string,
@@ -482,59 +558,33 @@ export function parseSingleCommand(
 }
 
 /**
- * Parse builder input with comma chaining support.
- * Returns an array of commands. Supports verb inheritance and
- * set target inheritance across comma-separated segments.
+ * Parse builder input and split chainable statements into individual
+ * commands so the dispatcher can execute and report each one.
+ *
+ * Today only `set`, `get`, `add`, `remove` are chainable (per CLI_GRAMMAR
+ * §299-313). Their parser rules already capture the clause list; this
+ * function fans the clauses out into separate command records so the
+ * existing dispatch loop in builder.ts works clause-by-clause.
  */
 export function parseBuilderInput(
 	input: string,
 ): { commands: BuilderCommand[] } | { error: string } {
-	const segments = splitByComma(input);
-	let lastVerb: string | null = null;
-	let lastSetTarget: string | null = null;
-	const commands: BuilderCommand[] = [];
+	const result = parseSingleCommand(input);
+	if ("error" in result) return result;
 
-	for (let i = 0; i < segments.length; i++) {
-		const trimmed = segments[i].trim();
-		if (!trimmed) continue;
-
-		const firstToken = trimmed.split(/\s/)[0].toLowerCase();
-		const isKeyword = VERB_KEYWORDS.has(firstToken);
-
-		let toParse: string;
-		if (isKeyword) {
-			toParse = trimmed;
-			lastVerb = firstToken;
-		} else if ((lastVerb === "set" || lastVerb === "get") && !trimmed.includes(".")) {
-			// Set/get continuation without dot — inherit target
-			if (!lastSetTarget) {
-				return { error: `No target to inherit in segment: ${trimmed}` };
-			}
-			toParse = `${lastVerb} ${lastSetTarget}.${trimmed}`;
-		} else if (lastVerb) {
-			toParse = `${lastVerb} ${trimmed}`;
-		} else {
-			return { error: `No verb for segment: ${trimmed}` };
-		}
-
-		const result = parseSingleCommand(toParse);
-		if ("error" in result) {
-			return { error: `${result.error} (in: ${trimmed})` };
-		}
-		commands.push(result.command);
-
-		// Track last set/get target for inheritance
-		if (result.command.type === "set") {
-			lastSetTarget = result.command.target;
-		} else if (result.command.type === "get") {
-			lastSetTarget = result.command.target;
-		}
+	const cmd = result.command;
+	if (cmd.type === "set") {
+		return { commands: cmd.clauses.map((cl): BuilderCommand => ({ type: "set", clauses: [cl] })) };
 	}
-
-	if (commands.length === 0) {
-		return { error: "Empty command" };
+	if (cmd.type === "get") {
+		return { commands: cmd.paths.map((p): BuilderCommand => ({ type: "get", paths: [p] })) };
 	}
-	return { commands };
+	if (cmd.type === "remove") {
+		return { commands: cmd.targets.map((t): BuilderCommand => ({ type: "remove", targets: [t] })) };
+	}
+	return { commands: [cmd] };
 }
 
-export { findLastUnquotedComma };
+// ── Helper re-exports (kept for external callers like UI/DSP completion) ──
+
+export { findLastUnquotedComma } from "../string-utils.js";
