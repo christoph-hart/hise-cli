@@ -15,6 +15,61 @@ import { generateHelp } from "./help.js";
 import type { WizardAnswers } from "../wizard/types.js";
 import { isEnvelopeResponse, isErrorResponse } from "../hise.js";
 import { ScriptMode } from "../modes/script.js";
+import { stripQuotes } from "../string-utils.js";
+
+/**
+ * Split mode args of the form `[.context] [command]` into the two parts.
+ * Honors double-quoted segments so contexts with spaces (e.g. "Script FX")
+ * stay intact.
+ *
+ * Without a leading dot, a single bareword starting with an uppercase
+ * letter or a single quoted string is also treated as a context token,
+ * so `/dsp "Script FX"` and `/dsp ScriptFX1` both enter mode with the
+ * named host pre-selected. Verbs are lowercase by convention, so they
+ * remain unambiguous as one-shot commands.
+ */
+function splitModeArgs(args: string): { context?: string; commandInput?: string } {
+	if (args.startsWith(".")) {
+		const rest = args.slice(1);
+		let endIdx: number;
+		if (rest.startsWith('"')) {
+			const close = rest.indexOf('"', 1);
+			endIdx = close === -1 ? rest.length : close + 1;
+		} else {
+			const sp = rest.indexOf(" ");
+			endIdx = sp === -1 ? rest.length : sp;
+		}
+		const context = stripQuotes(rest.slice(0, endIdx));
+		const tail = rest.slice(endIdx).trim();
+		return { context, commandInput: tail || undefined };
+	}
+	if (args) {
+		const ctx = detectBareContextToken(args);
+		if (ctx !== null) return { context: ctx };
+		return { commandInput: args };
+	}
+	return {};
+}
+
+/**
+ * Returns the unquoted context if `args` is a single token that should
+ * be interpreted as a setContext target (single quoted string, or a
+ * single PascalCase bareword). Returns null otherwise.
+ */
+function detectBareContextToken(args: string): string | null {
+	if (args.startsWith('"')) {
+		const close = args.indexOf('"', 1);
+		if (close === -1) return null;
+		const tail = args.slice(close + 1).trim();
+		if (tail.length > 0) return null;
+		return args.slice(1, close);
+	}
+	// PascalCase identifier — no spaces, dots, parens, or operators.
+	// Verbs are lowercase by convention; expressions like
+	// `Console.print(234)` contain dots/parens and stay one-shot.
+	if (/^[A-Z][A-Za-z0-9_]*$/.test(args)) return args;
+	return null;
+}
 
 // ── Handler implementations ─────────────────────────────────────────
 
@@ -76,28 +131,11 @@ function createModeHandler(modeId: ModeId): CommandHandler {
 		// Parse args: [.context] [command]
 		// - /builder → enter mode
 		// - /builder.SineGenerator → enter mode with context
+		// - /builder."Master Chain" → quoted context with spaces
 		// - /builder add SimpleGain → one-shot execution
 		// - /builder.SineGenerator add LFO → one-shot with context
-		
-		let context: string | undefined;
-		let commandInput: string | undefined;
-		
-		if (args.startsWith(".")) {
-			// Dot-notation: extract context path
-			const spaceIndex = args.indexOf(" ");
-			if (spaceIndex === -1) {
-				// Just context, no command: /builder.SineGenerator
-				context = args.slice(1);
-			} else {
-				// Context + command: /builder.SineGenerator add LFO
-				context = args.slice(1, spaceIndex);
-				commandInput = args.slice(spaceIndex + 1).trim();
-			}
-		} else if (args) {
-			// No dot prefix → one-shot command
-			commandInput = args;
-		}
-		
+		const { context, commandInput } = splitModeArgs(args);
+
 		// Determine execution mode
 		if (commandInput) {
 			// One-shot execution

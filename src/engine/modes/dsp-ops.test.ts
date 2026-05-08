@@ -204,7 +204,7 @@ describe("dsp-ops — connect / disconnect", () => {
 
 	it("disconnect target-only", () => {
 		const ops = opsOk("disconnect g.Gain");
-		expect(ops[0]).toMatchObject({ op: "disconnect", nodeId: "g", parameterId: "Gain" });
+		expect(ops[0]).toMatchObject({ op: "disconnect", target: "g", parameter: "Gain" });
 	});
 });
 

@@ -161,8 +161,8 @@ Module tree editor — add, configure, and inspect the HISE module tree.
 | \`set <target>.bypassed <bool>\` | Toggle bypass via property write |
 | \`set <target>.routing <value>\` | Routing matrix (array, send subfield, or preset) |
 | \`set <target>.network "<name>[.xml]"\` | Init DSP network on the module |
-| \`set <target>.parent <path>\` | Reparent (stub — pending HISE C++) |
-| \`set <target>.index <n>\` | Reorder (stub — pending HISE C++) |
+| \`set <target>.parent <path>\` | Reparent (move op) |
+| \`set <target>.index <n>\` | Reorder within current parent (move op) |
 | \`get <target>.<param> [, ...]\` | Read a parameter value |
 | \`show <target>\` | Show a module instance with live values |
 | \`list types [<filter>]\` | List module types (substring filter on id/type/subtype) |
@@ -257,8 +257,13 @@ network. Each host has at most one active network.
 
 ## Entering
 
-- \`/dsp <moduleId>\` — enter with a host pre-selected (\`/dsp "Script FX1"\`)
+- \`/dsp.<moduleId>\` — dot-context (e.g. \`/dsp.ScriptFX1\`)
+- \`/dsp <ModuleId>\` — space form, PascalCase host id (e.g. \`/dsp ScriptFX1\`)
+- \`/dsp "Script FX"\` — quote the host name when it contains spaces
 - \`/dsp\` — enter without a host. Selecting a host happens from builder.
+
+Verbs are lowercase, so \`/dsp save\` runs the \`save\` one-shot rather
+than entering a host called \`save\`.
 
 ## Network lifecycle
 

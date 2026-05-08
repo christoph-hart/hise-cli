@@ -365,8 +365,8 @@ function translateDisconnect(cmd: DisconnectCommand): { ops: DspOp[] } | { error
 		}
 		ops.push({
 			op: "disconnect",
-			nodeId: segs[0].id,
-			parameterId: segs[1].id,
+			target: segs[0].id,
+			parameter: segs[1].id,
 		});
 	}
 	return { ops };

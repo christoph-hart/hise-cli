@@ -98,13 +98,32 @@ describe("builder-ops — set bypassed", () => {
 	});
 });
 
-describe("builder-ops — parent / index stubs", () => {
-	it("returns error for set X.parent", () => {
-		expect(opsErr("set Lead.parent Compressor")).toMatch(/not yet supported/);
+describe("builder-ops — set parent (move)", () => {
+	it("emits move op with target + parent", () => {
+		const ops = opsOk("set Lead.parent Compressor");
+		expect(ops[0]).toMatchObject({ op: "move", target: "Lead", parent: "Compressor" });
 	});
 
-	it("returns error for set X.index", () => {
-		expect(opsErr("set Lead.index 2")).toMatch(/not yet supported/);
+	it("accepts quoted-string parent value", () => {
+		const ops = opsOk('set Lead.parent "Master Chain"');
+		expect(ops[0]).toMatchObject({ op: "move", target: "Lead", parent: "Master Chain" });
+	});
+
+	it("accepts dotted parent path", () => {
+		const ops = opsOk("set Lead.parent Master.fx");
+		expect(ops[0]!.op).toBe("move");
+		expect(ops[0]!.target).toBe("Lead");
+	});
+});
+
+describe("builder-ops — set index (move)", () => {
+	it("emits move op with target + index", () => {
+		const ops = opsOk("set Lead.index 2");
+		expect(ops[0]).toMatchObject({ op: "move", target: "Lead", index: 2 });
+	});
+
+	it("rejects non-integer index", () => {
+		expect(opsErr("set Lead.index 1.5")).toMatch(/expected integer/);
 	});
 });
 

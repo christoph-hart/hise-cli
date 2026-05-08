@@ -145,12 +145,29 @@ describe("BuilderMode — with mock connection", () => {
 		expect(ops[0]!.matrix).toEqual([0, 1, -1, -1]);
 	});
 
-	it("set parent stub returns error", async () => {
+	it("set parent emits move op", async () => {
 		const tree = makeTree();
-		const { session } = makeMock(tree);
+		const { session, mock } = makeMock(tree);
 		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
-		const r = await mode.parse("set Lead.parent Master", session);
-		expect(r.type).toBe("error");
+		await mode.parse("set Lead.parent Master", session);
+		const applyCall = mock.calls.find((c) => c.endpoint === "/api/builder/apply");
+		const ops = (applyCall!.body as { operations: { op: string; target: string; parent: string }[] }).operations;
+		expect(ops[0]!.op).toBe("move");
+		expect(ops[0]!.target).toBe("Lead");
+		expect(ops[0]!.parent).toBe("Master");
+	});
+
+	it("set index emits move op with index only", async () => {
+		const tree = makeTree();
+		const { session, mock } = makeMock(tree);
+		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
+		await mode.parse("set Lead.index 2", session);
+		const applyCall = mock.calls.find((c) => c.endpoint === "/api/builder/apply");
+		const ops = (applyCall!.body as { operations: { op: string; target: string; index: number; parent?: string }[] }).operations;
+		expect(ops[0]!.op).toBe("move");
+		expect(ops[0]!.target).toBe("Lead");
+		expect(ops[0]!.index).toBe(2);
+		expect(ops[0]!.parent).toBeUndefined();
 	});
 
 	it("cd updates currentPath and pwd reports it", async () => {

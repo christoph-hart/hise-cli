@@ -154,11 +154,13 @@ COMMANDS
     accidentally overwriting it.
 
   set <target>.parent <path>
-    Reparent a module. Currently parses but the HISE C++ /api/builder/apply
-    op is not yet shipped — returns "not yet supported by HISE C++ API".
+    Reparent a module — emits {op:"move", target, parent, chain?} on
+    /api/builder/apply. <path> is a module ID, dotted path (Master.fx),
+    or quoted string. Chain index is auto-resolved from the path tail.
 
   set <target>.index <n>
-    Reorder within the current parent. Same stub as set parent.
+    Reorder within the current parent — emits {op:"move", target, index}.
+    HISE keeps the existing parent/chain when only index is specified.
 
   set <target>.<assetField> "<value>"
     samplemap, effect — string asset references applied via set_attributes.
@@ -188,7 +190,7 @@ COMMANDS
 PROPERTY WRITES vs PARAMETER WRITES
   Both use "set <path> <value>". The translator dispatches by path tail:
     *.bypassed         → set_bypassed (boolean)
-    *.parent / *.index → reparent / reorder (stub — see above)
+    *.parent / *.index → move (reparent / reorder)
     *.samplemap        → set_attributes { samplemap }
     *.effect           → set_effect
     *.network          → POST /api/dsp/init (different endpoint)
@@ -268,8 +270,19 @@ SYNTAX
 MODULE CONTEXT
   Every DSP command is scoped to a "moduleId" — the script processor that
   hosts the DspNetwork. Each host carries at most one active network.
-  Pass the host via --target: or prefix the slash command with the module
-  name: "/dsp \"Script FX1\"".
+
+  TUI entry forms:
+    /dsp.ScriptFX1             (dot-context, bare moduleId)
+    /dsp."Script FX"           (dot-context, quoted)
+    /dsp ScriptFX1             (space form, PascalCase host id)
+    /dsp "Script FX"           (space form, quoted)
+    /dsp                       (enter without host, select via builder)
+
+  Verbs are lowercase by convention, so /dsp save runs the save one-shot
+  rather than entering a host called "save".
+
+  CLI: pass the host via --target:
+    hise-cli -dsp --target:"Script FX" "<command>"
 
 NETWORK PROVISIONING (now from builder mode)
   Networks are created or loaded from builder mode:

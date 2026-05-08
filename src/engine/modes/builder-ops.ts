@@ -195,7 +195,7 @@ export function commandToOps(
 		case "clone":
 			return translateClone(cmd, treeRoot, currentPath);
 		case "set":
-			return translateSet(cmd.clauses, treeRoot, currentPath);
+			return translateSet(cmd.clauses, treeRoot, moduleList, currentPath);
 		case "get":
 		case "show":
 		case "list":
@@ -292,11 +292,12 @@ function translateClone(
 function translateSet(
 	clauses: SetClause[],
 	treeRoot: TreeNode | null,
+	moduleList: ModuleList | null,
 	currentPath: string[],
 ): { ops: BuilderOp[] } | { error: string } {
 	const ops: BuilderOp[] = [];
 	for (const clause of clauses) {
-		const r = translateSetClause(clause, treeRoot, currentPath);
+		const r = translateSetClause(clause, treeRoot, moduleList, currentPath);
 		if ("error" in r) return r;
 		ops.push(...r.ops);
 	}
@@ -306,6 +307,7 @@ function translateSet(
 function translateSetClause(
 	clause: SetClause,
 	treeRoot: TreeNode | null,
+	moduleList: ModuleList | null,
 	currentPath: string[],
 ): { ops: BuilderOp[] } | { error: string } {
 	const segs = pathRefSegments(clause.path);
@@ -344,9 +346,31 @@ function translateSetClause(
 			if (!b.ok) return { error: b.error };
 			return { ops: [{ op: "set_bypassed", target: target.id, bypassed: b.out }] };
 		}
-		case "parent":
-		case "index":
-			return { error: `set ${target.id}.${tail} is not yet supported by the HISE C++ API` };
+		case "parent": {
+			let parentRef: PathRef | undefined;
+			if (clause.value.kind === "path") {
+				parentRef = clause.value.ref;
+			} else if (clause.value.kind === "string") {
+				const segs = clause.value.s.split(".").filter((s) => s.length > 0);
+				if (segs.length === 0) return { error: "set parent: empty path" };
+				parentRef = segs.length === 1
+					? { kind: "bare", segment: { id: segs[0]!, quoted: false } }
+					: { kind: "dotted", segments: segs.map((id) => ({ id, quoted: false })) };
+			} else {
+				return { error: "set parent: value must be a path or string" };
+			}
+			const r = resolveAddParent({ parent: parentRef }, treeRoot, currentPath, moduleList, "");
+			if ("error" in r) return { error: r.error };
+			const parentNode = findNodeById(treeRoot, r.parent);
+			const chainIndex = resolveChainIndex(r.chainName, target.node?.type, parentNode, moduleList);
+			return { ops: [{ op: "move", target: target.id, parent: r.parent, chain: chainIndex }] };
+		}
+		case "index": {
+			const n = coerceFloat(clause.value);
+			if (!n.ok) return { error: n.error };
+			if (!Number.isInteger(n.out)) return { error: `set index: expected integer, got ${n.out}` };
+			return { ops: [{ op: "move", target: target.id, index: n.out }] };
+		}
 		case "samplemap": {
 			const s = coerceString(clause.value);
 			if (!s.ok) return { error: s.error };

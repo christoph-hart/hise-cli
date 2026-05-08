@@ -5,16 +5,22 @@ import type { CommandResult } from "../result.js";
 import { textResult } from "../result.js";
 import { MockHiseConnection } from "../hise.js";
 import { ScriptMode } from "../modes/script.js";
+import { BuilderMode } from "../modes/builder.js";
+import { UiMode } from "../modes/ui.js";
+import { DspMode } from "../modes/dsp.js";
 
-function createMockSession(): CommandSession & { modes: string[]; quitRequested: boolean } {
+function createMockSession(): CommandSession & { modes: string[]; quitRequested: boolean; contextLog: { modeId: string; path: string }[]; modeCache: Map<string, import("../modes/mode.js").Mode> } {
 	const modes: string[] = [];
 	let quitRequested = false;
 	let connection: MockHiseConnection | null = null;
 	const modeCache = new Map<string, import("../modes/mode.js").Mode>();
 	const compilerState = new Map<string, { activeCallback: string | null; callbacks: Map<string, string[]> }>();
-	
+	const contextLog: { modeId: string; path: string }[] = [];
+
 	return {
 		modes,
+		contextLog,
+		modeCache,
 		projectName: null as string | null,
 		projectFolder: null as string | null,
 		cwd: null as string | null,
@@ -54,7 +60,6 @@ function createMockSession(): CommandSession & { modes: string[]; quitRequested:
 		getOrCreateMode(modeId: string) {
 			let mode = modeCache.get(modeId);
 			if (!mode) {
-				// Create a stub mode
 				mode = {
 					id: modeId as import("../modes/mode.js").ModeId,
 					name: modeId,
@@ -63,8 +68,8 @@ function createMockSession(): CommandSession & { modes: string[]; quitRequested:
 					async parse() {
 						return textResult(`Parsed in ${modeId}`);
 					},
-					setContext(_path: string) {
-						// Stub
+					setContext(path: string) {
+						contextLog.push({ modeId, path });
 					},
 				};
 				modeCache.set(modeId, mode);
@@ -364,6 +369,62 @@ describe("mode handler one-shot execution", () => {
 
 		await registry.dispatch("/builder", session);
 		expect(session.modes).toContain("builder");
+	});
+
+	it("/dsp.\"Script FX\" enters mode with quoted context preserved", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch('/dsp."Script FX"', session);
+		expect(session.modes).toContain("dsp");
+		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "Script FX" }]);
+	});
+
+	it("/dsp.\"Script FX\" save runs one-shot with quoted context", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch('/dsp."Script FX" save', session);
+		// Stays at root; setContext fired with unquoted path.
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "Script FX" }]);
+	});
+
+	it("/builder.\"Master Chain\" enters builder with quoted context", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch('/builder."Master Chain"', session);
+		expect(session.modes).toContain("builder");
+		expect(session.contextLog).toEqual([{ modeId: "builder", path: "Master Chain" }]);
+	});
+
+	it("/dsp \"Script FX\" (space form) enters mode with quoted context", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch('/dsp "Script FX"', session);
+		expect(session.modes).toContain("dsp");
+		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "Script FX" }]);
+	});
+
+	it("/dsp ScriptFX (space form, PascalCase) enters mode with bare context", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch("/dsp ScriptFX", session);
+		expect(session.modes).toContain("dsp");
+		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "ScriptFX" }]);
+	});
+
+	it("/dsp save (space form, lowercase verb) is treated as one-shot", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		await registry.dispatch("/dsp save", session);
+		// Lowercase first letter → verb → one-shot, no context fired, mode stack stays root.
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([]);
 	});
 
 	describe("/resume", () => {
@@ -715,5 +776,111 @@ describe("/wizard subcommands", () => {
 		await registry.dispatch("/wizard run demo", session);
 		expect(observedDuringRun).toBe("Demo");
 		expect((session as any).activeWizard ?? null).toBeNull();
+	});
+});
+
+// ── Integration: slash dispatcher → real mode classes ───────────────
+//
+// The mock-mode tests above only verify dispatcher routing — stub modes
+// have permissive parse() and setContext() that accept any input. These
+// tests wire real mode instances into the cache so a wrong moduleId or
+// unexpected one-shot dispatch surfaces as a real assertion failure.
+
+describe("slash dispatcher → real modes", () => {
+	it("/dsp \"Script FX\" sets DspMode.moduleId to the unquoted name", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const dsp = new DspMode();
+		session.modeCache.set("dsp", dsp);
+
+		await registry.dispatch('/dsp "Script FX"', session);
+		expect(dsp.contextLabel).toBe("Script FX");
+	});
+
+	it("/dsp.\"Script FX\" sets DspMode.moduleId without quote leakage", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const dsp = new DspMode();
+		session.modeCache.set("dsp", dsp);
+
+		await registry.dispatch('/dsp."Script FX"', session);
+		expect(dsp.contextLabel).toBe("Script FX");
+	});
+
+	it("/dsp ScriptFX1 sets DspMode.moduleId from PascalCase bareword", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const dsp = new DspMode();
+		session.modeCache.set("dsp", dsp);
+
+		await registry.dispatch("/dsp ScriptFX1", session);
+		expect(dsp.contextLabel).toBe("ScriptFX1");
+	});
+
+	it("/dsp save runs as one-shot, leaves moduleId empty", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const dsp = new DspMode();
+		session.modeCache.set("dsp", dsp);
+
+		const result = await registry.dispatch("/dsp save", session);
+		// Real DspMode.handleSave with no moduleId errors locally — no
+		// crash from quote-leakage, no parse error from mishandled args.
+		expect(dsp.contextLabel).toBe("");
+		expect(["error", "text"]).toContain(result.type);
+	});
+
+	it("/builder.\"Master Chain\" sets BuilderMode currentPath to single segment", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const builder = new BuilderMode();
+		session.modeCache.set("builder", builder);
+
+		await registry.dispatch('/builder."Master Chain"', session);
+		// "Master Chain" has a literal space so it must stay one segment,
+		// not split into ["Master", "Chain"].
+		expect(builder.contextLabel).toBe("Master Chain");
+	});
+
+	it("/builder \"Master Chain\" (space form) preserves the quoted segment", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const builder = new BuilderMode();
+		session.modeCache.set("builder", builder);
+
+		await registry.dispatch('/builder "Master Chain"', session);
+		expect(builder.contextLabel).toBe("Master Chain");
+	});
+
+	it("/ui MainPanel sets UiMode currentPath via PascalCase bareword", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const ui = new UiMode();
+		session.modeCache.set("ui", ui);
+
+		await registry.dispatch("/ui MainPanel", session);
+		expect(ui.contextLabel).toBe("MainPanel");
+	});
+
+	it("/script Console.print(234) routes to one-shot, not setContext", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const script = new ScriptMode();
+		session.modeCache.set("script", script);
+
+		// processorId stays at default — the dotted/parenthesized arg is
+		// a script expression, not a context token.
+		await registry.dispatch("/script Console.print(234)", session);
+		expect(script.processorId).toBe("Interface");
+	});
+
+	it("/script MyProcessor sets processorId via PascalCase bareword", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+		const script = new ScriptMode();
+		session.modeCache.set("script", script);
+
+		await registry.dispatch("/script MyProcessor", session);
+		expect(script.processorId).toBe("MyProcessor");
 	});
 });
