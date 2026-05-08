@@ -13,10 +13,10 @@ Sleep 1000ms
 ExpectMode "builder"
 
 # Valid module type
-Type "add AHDSR"
+Type `add AHDSR as "env"`
 Enter
 Sleep 500ms
-Expect "add AHDSR"
+Expect "AHDSR"
 
 # Exit
 Type "/exit"

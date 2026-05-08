@@ -43,7 +43,8 @@ Tab
 Sleep 300ms
 Expect "AHDSR Envelope"
 
-# Submit the completed command
+# Append a quoted alias so the command parses, then submit
+Type ` as "env"`
 Enter
 Sleep 300ms
 

@@ -7,17 +7,20 @@ import type { TokenSpan, TokenType } from "./tokens.js";
 import { tokenizeSlash } from "./slash.js";
 
 const UI_KEYWORDS = new Set([
-	"add", "remove", "move", "rename", "set", "get", "show",
-	"to", "at", "into", "as", "tree",
-	"cd", "ls", "dir", "pwd",
+	"add", "remove", "rename", "set", "get", "show", "list", "reset",
+	"to", "as", "tree",
+	"cd", "ls", "pwd",
 ]);
 
 const ARG_RULES: Array<{ pattern: RegExp; token: TokenType }> = [
 	{ pattern: /^"(?:[^"\\]|\\.)*"/, token: "string" },
 	{ pattern: /^'(?:[^'\\]|\\.)*'/, token: "string" },
-	{ pattern: /^\d+\.\d+(?:[eE][+-]?\d+)?/, token: "float" },
-	{ pattern: /^0x[0-9a-fA-F]+/, token: "integer" },
-	{ pattern: /^\d+/, token: "integer" },
+	{ pattern: /^(?:true|false)\b/i, token: "boolean" },
+	{ pattern: /^-?\d+(?:\.\d+)?%/, token: "percent" },
+	{ pattern: /^-?\d+\.\d+(?:[eE][+-]?\d+)?/, token: "float" },
+	{ pattern: /^0x[0-9a-fA-F]{8}\b/, token: "integer" },
+	{ pattern: /^-?\d+/, token: "integer" },
+	{ pattern: /^[\[\]]/, token: "bracket" },
 	{ pattern: /^,/, token: "punctuation" },
 	{ pattern: /^\./, token: "punctuation" },
 	{ pattern: /^[a-zA-Z_$][a-zA-Z0-9_$]*/, token: "identifier" },

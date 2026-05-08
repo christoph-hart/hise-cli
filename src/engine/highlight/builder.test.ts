@@ -20,10 +20,37 @@ describe("tokenizeBuilder", () => {
 	});
 
 	it("classifies navigation commands as keywords", () => {
-		for (const cmd of ["cd", "ls", "dir", "pwd"]) {
+		for (const cmd of ["cd", "ls", "pwd"]) {
 			const spans = tokenizeBuilder(cmd);
 			expect(spans[0]!.token).toBe("keyword");
 		}
+	});
+
+	// ── New literal types ─────────────────────────────────────────────
+
+	it("tokenizes percent literal as percent", () => {
+		const spans = tokenizeBuilder("set Gain.Volume 50%");
+		const percents = spans.filter((s) => s.token === "percent");
+		expect(percents).toEqual([{ text: "50%", token: "percent" }]);
+	});
+
+	it("tokenizes booleans as boolean", () => {
+		const spans = tokenizeBuilder("set X.bypassed true");
+		const bools = spans.filter((s) => s.token === "boolean");
+		expect(bools).toEqual([{ text: "true", token: "boolean" }]);
+	});
+
+	it("tokenizes square brackets as bracket", () => {
+		const spans = tokenizeBuilder("set X.routing [0, 1, -1, -1]");
+		const brackets = spans.filter((s) => s.token === "bracket");
+		expect(brackets.map((s) => s.text)).toEqual(["[", "]"]);
+	});
+
+	it("requires strict 8-digit hex", () => {
+		const ok = tokenizeBuilder("set X.colour 0xFFAA00BB");
+		expect(ok.some((s) => s.token === "integer" && s.text === "0xFFAA00BB")).toBe(true);
+		const short = tokenizeBuilder("set X.colour 0xFFAA00");
+		expect(short.some((s) => s.token === "integer" && s.text === "0xFFAA00")).toBe(false);
 	});
 
 	it("classifies to and as as keywords", () => {

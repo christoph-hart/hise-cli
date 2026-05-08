@@ -153,24 +153,35 @@ Module tree editor — add, configure, and inspect the HISE module tree.
 
 | Command | Description |
 |---------|-------------|
-| \`add <type> [as "<name>"] [to <parent>[.<chain>]]\` | Add a module |
-| \`remove <target>\` | Remove a module |
-| \`clone <target> [x<count>]\` | Duplicate a module |
-| \`rename <target> to "<name>"\` | Rename a module |
-| \`set <target>.<param> [to] <value>\` | Set a parameter value |
-| \`bypass <target>\` / \`enable <target>\` | Toggle bypass state |
-| \`load "<source>" into <target>\` | Load data into a module |
-| \`show tree\` | Display the full module tree |
-| \`show types [<filter>]\` | List module types (filter = substring match on id/type/subtype) |
-| \`show <target>\` | Show a module's parameters with live values |
-| \`reset\` | Wipe module tree and clear undo history |
+| \`add <type> as "<name>" [to <parent>[.<chain>]]\` | Add a module (alias mandatory) |
+| \`remove <target> [, <target>...]\` | Remove modules |
+| \`clone <target> <count>\` | Duplicate a module N times |
+| \`rename <target> as "<name>"\` | Rename a module |
+| \`set <target>.<param> <value>\` | Set a parameter or property |
+| \`set <target>.bypassed <bool>\` | Toggle bypass via property write |
+| \`set <target>.routing <value>\` | Routing matrix (array, send subfield, or preset) |
+| \`set <target>.network "<name>[.xml]"\` | Init DSP network on the module |
+| \`set <target>.parent <path>\` | Reparent (stub — pending HISE C++) |
+| \`set <target>.index <n>\` | Reorder (stub — pending HISE C++) |
+| \`get <target>.<param> [, ...]\` | Read a parameter value |
+| \`show <target>\` | Show a module instance with live values |
+| \`list types [<filter>]\` | List module types (substring filter on id/type/subtype) |
+| \`list tree\` | Display the full module tree |
+| \`reset\` | Wipe the module tree and clear undo history |
 | \`cd <path>\` / \`ls\` / \`pwd\` | Navigate the module tree |
+
+## Values
+
+- **Numbers**: \`-6\`, \`0.5\`, \`50%\` (percent → 0.5), \`0xAARRGGBB\` (strict 8-digit hex)
+- **Booleans**: \`true\` / \`false\`
+- **Arrays**: \`[0, 1, -1, -1]\` for routing matrices
+- **Routing presets**: \`"stereo"\`, \`"stereo_2"\`, \`"stereo_3"\`, \`"all"\`, \`"all_to_stereo"\`
 
 ## Features
 
-- **Comma chaining**: \`add LFO to Master, set LFO.Frequency to 2.0\`
+- **Comma chaining**: \`set Lead.Volume -6, Lead.Pan 10\` (every clause gives its full path)
 - **Chain auto-resolution**: SoundGenerators→children, Effects→fx, Midi→midi
-- **Tab completion**: module types, instance IDs, parameter names
+- **Tab completion**: module types, instance IDs, parameter names, value enums
 - **Tree sidebar**: Ctrl+B to toggle visual module tree`,
 
 	inspect: `# Inspect Mode
@@ -240,27 +251,32 @@ Start a plan with \`plan "My Changes"\`, execute builder commands, then
 
 	dsp: `# DSP Mode
 
-Scriptnode graph editor. Create, connect, and configure nodes inside a
-\`DspNetwork\`. The mode's context is a **moduleId** — the script processor
-hosting the network. Each host can have at most one active network.
+Scriptnode graph editor. Connect and configure nodes inside a \`DspNetwork\`.
+The mode's context is a **moduleId** — the script processor hosting the
+network. Each host has at most one active network.
 
 ## Entering
 
-- \`/dsp\` — enter with no host selected (use \`use <moduleId>\` to pick one)
-- \`/dsp.<moduleId>\` — enter with a host pre-selected
-  (e.g. \`/dsp."Script FX1"\`)
+- \`/dsp <moduleId>\` — enter with a host pre-selected (\`/dsp "Script FX1"\`)
+- \`/dsp\` — enter without a host. Selecting a host happens from builder.
 
 ## Network lifecycle
 
+Networks are now provisioned from **builder mode**:
+
+\`\`\`
+/builder
+set "Script FX1".network "my_dsp"          # mode: create — fails if my_dsp.xml exists
+set "Script FX1".network "my_dsp.xml"      # mode: load   — fails if missing
+\`\`\`
+
+Once a network is loaded on a host, enter DSP mode against that host:
+
 | Command | Description |
 |---------|-------------|
-| \`show networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
-| \`show modules\` | List \`DspNetwork\`-capable script processors |
-| \`show <nodeId>\` | Header, properties, parameters (with range/default), and modulation edges for one node |
-| \`use <moduleId>\` | Switch the host context |
-| \`load <name>\` | Load an existing network. Errors if \`<name>.xml\` is missing. |
-| \`create <name>\` | Create a new network. Errors if \`<name>.xml\` already exists. |
-| \`init <name>\` | Load-or-create catch-all. Output says which path was taken. |
+| \`list networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
+| \`list modules\` | List \`DspNetwork\`-capable script processors |
+| \`show <nodeId>\` | Header, properties, parameters (with range/default), modulation edges |
 | \`save\` | Save the loaded network to its \`.xml\` file |
 | \`reset\` | Empty the loaded network (no nodes, no connections) |
 
@@ -268,41 +284,49 @@ hosting the network. Each host can have at most one active network.
 
 | Command | Description |
 |---------|-------------|
-| \`add <factory.node> [as <id>] [to <parent>]\` | Add a node (defaults to CWD) |
-| \`remove <nodeId>\` | Remove a node |
-| \`move <nodeId> to <parent> [at <index>]\` | Move a node |
-| \`connect <src>[.<output>] to <target>[.<param>]\` | Connect modulation (omit \`.param\` for routing shorthand) |
-| \`disconnect <src> from <target>.<param>\` | Disconnect modulation |
-| \`set <node>.<param> [to] <value>\` | Set a parameter |
-| \`bypass <nodeId>\` / \`enable <nodeId>\` | Toggle bypass |
-| \`create_parameter <container>.<name> [min max] [default N] [step N]\` | Dynamic parameter |
-| \`screenshot [at <scale>] [to <path>]\` | Render the DspNetwork graph to a PNG |
+| \`add <factory>.<node> as "<id>" [to <parent>]\` | Add a node (alias required, defaults to CWD) |
+| \`remove <nodeId> [, ...]\` | Remove nodes |
+| \`rename <target> as "<name>"\` | Rename a node |
+| \`connect <src>[.<output>] to <target>.<param> [matched]\` | Connect modulation |
+| \`disconnect <node>.<param> [, ...]\` | Disconnect modulation (target-only) |
+| \`set <node>.<param> <value>\` | Set a parameter |
+| \`set <node>.<param>.<field> <number>\` | Range sub-field write (stepSize, middlePosition, skewFactor, default) |
+| \`set <node>.bypassed <bool>\` | Toggle bypass via property write |
+| \`set <node>.parent <path>\` / \`set <node>.index <n>\` | Reparent / reorder (move op) |
+| \`set <root>.<NetworkProp> <value>\` | Network-level property write (root only) |
+| \`create_parameter <container>.<name> [<min>, <max>] [default N] [stepSize N] [middlePosition N | skewFactor N]\` | Dynamic parameter on a container |
+| \`screenshot scale <s> file "<path>"\` | Render the DspNetwork graph to a PNG |
+
+## Property IDs
+
+Long-form HISE property IDs are canonical:
+
+- **stepSize** (range step), **middlePosition** (skew anchor), **skewFactor**
+- **default** (default value), **matched** (post-connect range copy on \`connect\`)
+- Network-root: \`AllowCompilation\`, \`AllowPolyphonic\`, \`HasTail\`,
+  \`SuspendOnSilence\`, \`CompileChannelAmount\`, \`ModulationBlockSize\`
 
 ## Screenshot
 
-Captures the current host's \`DspNetwork\` graph. \`outputPath\` is resolved
-relative to the project's \`Images/\` folder (or absolute) and must end in
-\`.png\`. Scale accepts percentages (\`50%\`) or decimals (\`0.5\`); only
-\`0.5\`, \`1.0\`, and \`2.0\` are valid. Defaults to \`screenshot.png\` at
-scale \`1.0\`. Requires the HISE IDE UI to be open (returns 503 otherwise).
+\`screenshot scale 50% file "patch.png"\`. Path resolves relative to the
+project's \`Images/\` folder (or absolute) and must end in \`.png\`. Scale
+accepts percentage (\`50%\`) or decimal (\`0.5\`); valid values are \`0.5\`,
+\`1.0\`, \`2.0\`. Requires the HISE IDE UI to be open (returns 503 otherwise).
 
 ## Local queries
-
-\`get\` commands resolve from the cached tree without an API round-trip —
-they power \`/expect\` assertion checks:
 
 | Command | Returns |
 |---------|---------|
 | \`get <nodeId>\` | Factory path of the node |
 | \`get <node>.<param>\` | Current parameter value |
-| \`get source of <node>.<param>\` | Connected source id, or \`(not connected)\` |
-| \`get parent of <node>.<param>\` | Id of the parent container |
+| \`get <node>.<param>.source\` | Connected source id, or \`(not connected)\` |
+| \`get <node>.<param>.parent\` | Id of the parent container |
 
 ## Navigation
 
-Use \`cd <container>\` to step into a container, \`cd ..\` / \`cd /\` to step
-out. \`ls\` lists the children at the current path. \`add\` defaults its
-parent to the current path so repeat-adds work without \`to ...\`.
+\`cd <container>\` to step into a container, \`cd ..\` / \`cd /\` to step out.
+\`ls\` lists children at the current path. \`add\` defaults its parent to the
+current path.
 
 ## Grammar notes
 
@@ -310,7 +334,7 @@ parent to the current path so repeat-adds work without \`to ...\`.
   \`filters.svf\`).
 - \`sourceOutput\` can be defaulted (\`connect lfo1 to F.Freq\`) or explicit
   (\`connect env1.Value to F.Cutoff\`).
-- Comma chaining with verb inheritance: \`set A.Freq 440, B.Freq 880\`.`,
+- Comma chaining: every clause provides full args. \`set A.Freq 440, B.Freq 880\`.`,
 
 	sampler: `# Sampler Mode
 
@@ -368,18 +392,27 @@ Build targets and export settings.
 
 	ui: `# UI Mode
 
-UI component editor — add, remove, configure, and reparent interface components.
+UI component editor — add, remove, configure, reparent, and reorder
+interface components.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| \`add <type> ["name"] [at x y w h]\` | Add a component |
-| \`remove <target>\` | Remove a component |
-| \`set <target>.<prop> [to] <value>\` | Set a property |
-| \`move <target> to <parent> [at <index>]\` | Reparent a component |
-| \`rename <target> to "<name>"\` | Rename a component |
+| \`add <type> as "<name>" [to <parent>]\` | Add a component (alias mandatory) |
+| \`remove <target> [, ...]\` | Remove components |
+| \`set <target>.<prop> <value>\` | Set a property |
+| \`set <target>.bounds [x, y, w, h]\` | Position + size as Array4 |
+| \`set <target>.position [x, y]\` / \`set <target>.size [w, h]\` | Array2 forms |
+| \`set <target>.value <v>\` | Component value (\`/api/set_component_value\`) |
+| \`set <target>.parent <path>\` | Reparent (real \`move\` op) |
+| \`set <target>.index <n>\` | Reorder within current parent |
+| \`set <target>.bypassed <bool>\` / \`set <target>.visible <bool>\` | Property toggles |
+| \`get <target>.<prop> [, ...]\` | Read a property value |
+| \`rename <target> as "<name>"\` | Rename a component |
 | \`show <target>\` | Show all properties with current values |
+| \`list tree\` | Display the full component tree |
+| \`reset\` | Reset the component tree |
 | \`cd <path>\` / \`ls\` / \`pwd\` | Navigate the component tree |
 
 ## Component Types
@@ -391,8 +424,8 @@ ScriptMultipageDialog, ScriptWebView
 
 ## Features
 
-- **Comma chaining**: \`add ScriptButton "A", ScriptSlider "B"\`
-- **Set chaining**: \`set Knob.x 100, y 200, width 128\`
+- **Comma chaining**: \`add ScriptButton as "A", add ScriptSlider as "B"\`
+  (full clause per comma — verb inheritance is gone)
 - **Tab completion**: component types, IDs, property names
 - **Tree sidebar**: shows component hierarchy, dims invisible components, ★ for saveInPreset`,
 

@@ -12,7 +12,7 @@ Sleep 500ms
 ExpectMode "builder"
 
 # Add a module — should show result in output
-Type "add AHDSR Envelope"
+Type `add "AHDSR Envelope" as "env"`
 Enter
 Sleep 500ms
 Expect "AHDSR" output

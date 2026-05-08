@@ -645,14 +645,12 @@ export class CompletionEngine {
 			{ label: "add", detail: "Add a module to the tree" },
 			{ label: "clone", detail: "Duplicate a module" },
 			{ label: "remove", detail: "Remove a module" },
-			{ label: "move", detail: "Move a module (stub)" },
 			{ label: "rename", detail: "Rename a module" },
-			{ label: "set", detail: "Set a module parameter" },
+			{ label: "set", detail: "Set a module parameter or property" },
 			{ label: "get", detail: "Get a parameter value" },
-			{ label: "load", detail: "Load DSP network into module" },
-			{ label: "bypass", detail: "Bypass a module" },
-			{ label: "enable", detail: "Enable a bypassed module" },
-			{ label: "show", detail: "Show tree, types, or module" },
+			{ label: "show", detail: "Show a module instance" },
+			{ label: "list", detail: "List types or tree" },
+			{ label: "reset", detail: "Wipe the module tree" },
 			{ label: "cd", detail: "Navigate to a processor (cd .., cd /)" },
 			{ label: "ls", detail: "List children at current path" },
 			{ label: "pwd", detail: "Print current path" },
@@ -661,14 +659,35 @@ export class CompletionEngine {
 	}
 
 	/**
-	 * Complete "show" subcommands in builder mode.
+	 * Complete "list" nouns in builder mode.
 	 */
-	completeBuilderShow(prefix: string): CompletionItem[] {
+	completeBuilderList(prefix: string): CompletionItem[] {
 		const items: CompletionItem[] = [
-			{ label: "tree", detail: "Show module tree" },
 			{ label: "types", detail: "List available module types" },
+			{ label: "tree", detail: "Show module tree" },
 		];
 		return fuzzyFilter(prefix, items);
+	}
+
+	/**
+	 * Complete value tokens for known set-fields. Returns null when the
+	 * field has no fixed value vocabulary (numeric / freeform string).
+	 */
+	completeBuilderValue(field: string, prefix: string): CompletionItem[] | null {
+		const lower = field.toLowerCase();
+		if (lower === "bypassed") {
+			return fuzzyFilter(prefix, [{ label: "true" }, { label: "false" }]);
+		}
+		if (lower === "routing") {
+			return fuzzyFilter(prefix, [
+				{ label: '"stereo"' },
+				{ label: '"stereo_2"' },
+				{ label: '"stereo_3"' },
+				{ label: '"all"' },
+				{ label: '"all_to_stereo"' },
+			]);
+		}
+		return null;
 	}
 
 	/**

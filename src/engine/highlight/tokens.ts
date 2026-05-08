@@ -12,6 +12,8 @@ export type TokenType =
 	| "scopedStatement"
 	| "integer"
 	| "float"
+	| "percent"
+	| "boolean"
 	| "string"
 	| "comment"
 	| "operator"
@@ -43,6 +45,8 @@ export const TOKEN_COLORS: Record<TokenType, string> = {
 	scopedStatement: "#88bec5",
 	integer: "#DDAADD",
 	float: "#EEAA00",
+	percent: "#FFCC66",
+	boolean: "#88DD88",
 	string: "#DDAAAA",
 	// Bumped from #666666 → on 256-color terminals chalk maps both #272822
 	// (code-block bg) and #666666 to the cube cell (95,95,95). #909090 has

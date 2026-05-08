@@ -675,9 +675,12 @@ describe("CompletionEngine", () => {
 	// ── Builder keyword completion ──────────────────────────────
 
 	describe("completeBuilderKeyword", () => {
-		it("returns all keywords for empty prefix", () => {
+		it("returns the canonical builder verb set for empty prefix", () => {
 			const items = engine.completeBuilderKeyword("");
-			expect(items).toHaveLength(14); // add, show, set, get, cd, ls, pwd, clone, remove, move, rename, load, bypass, enable
+			expect(items.map((i) => i.label).sort()).toEqual([
+				"add", "cd", "clone", "get", "list", "ls", "pwd",
+				"remove", "rename", "reset", "set", "show",
+			]);
 		});
 
 		it("filters by prefix", () => {
@@ -685,18 +688,45 @@ describe("CompletionEngine", () => {
 			expect(items.length).toBeGreaterThan(0);
 			expect(items[0].label).toBe("add");
 		});
+
+		it("does not surface removed verbs", () => {
+			const items = engine.completeBuilderKeyword("");
+			const labels = items.map((i) => i.label);
+			for (const removed of ["move", "load", "bypass", "enable"]) {
+				expect(labels).not.toContain(removed);
+			}
+		});
 	});
 
-	describe("completeBuilderShow", () => {
+	describe("completeBuilderList", () => {
 		it("returns tree and types", () => {
-			const items = engine.completeBuilderShow("");
-			expect(items).toHaveLength(2);
+			const items = engine.completeBuilderList("");
+			expect(items.map((i) => i.label).sort()).toEqual(["tree", "types"]);
 		});
 
 		it("filters by prefix", () => {
-			const items = engine.completeBuilderShow("tr");
+			const items = engine.completeBuilderList("tr");
 			expect(items).toHaveLength(1);
 			expect(items[0].label).toBe("tree");
+		});
+	});
+
+	describe("completeBuilderValue", () => {
+		it("offers true/false for bypassed", () => {
+			const items = engine.completeBuilderValue("bypassed", "");
+			expect(items).not.toBeNull();
+			expect(items!.map((i) => i.label).sort()).toEqual(["false", "true"]);
+		});
+
+		it("offers preset strings for routing", () => {
+			const items = engine.completeBuilderValue("routing", "");
+			expect(items).not.toBeNull();
+			expect(items!.map((i) => i.label)).toContain('"stereo"');
+			expect(items!.map((i) => i.label)).toContain('"all_to_stereo"');
+		});
+
+		it("returns null for unknown fields", () => {
+			expect(engine.completeBuilderValue("Volume", "")).toBeNull();
 		});
 	});
 });

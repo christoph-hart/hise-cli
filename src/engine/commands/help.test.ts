@@ -63,7 +63,7 @@ describe("generateHelp", () => {
 		const help = generateHelp("dsp", mockCommands);
 		expect(help.content).toContain("DSP Mode");
 		expect(help.content).toContain("moduleId");
-		expect(help.content).toContain("init");
+		expect(help.content).toContain("connect");
 		expect(help.content).toContain("create_parameter");
 	});
 

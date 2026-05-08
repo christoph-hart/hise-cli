@@ -14,14 +14,18 @@ reset
 
 # 3. Create UI components — two buttons (top bar) and two panels (content area)
 /ui
-add ScriptButton "Page1Btn" at 0 0 300 40
-add ScriptButton "Page2Btn" at 300 0 300 40
+add ScriptButton as "Page1Btn"
+add ScriptButton as "Page2Btn"
+set Page1Btn.bounds [0, 0, 300, 40]
+set Page2Btn.bounds [300, 0, 300, 40]
 # saveInPreset false: without this, preset restoration after /compile
 # resets setValue(1) from onInit back to 0, breaking initial state.
-set Page1Btn.radioGroup 1, saveInPreset false
-set Page2Btn.radioGroup 1, saveInPreset false
-add ScriptPanel "Page1" at 0 40 600 460
-add ScriptPanel "Page2" at 0 40 600 460
+set Page1Btn.radioGroup 1, Page1Btn.saveInPreset false
+set Page2Btn.radioGroup 1, Page2Btn.saveInPreset false
+add ScriptPanel as "Page1"
+add ScriptPanel as "Page2"
+set Page1.bounds [0, 40, 600, 460]
+set Page2.bounds [0, 40, 600, 460]
 /exit
 
 # 4. Set up radio group and page switching logic

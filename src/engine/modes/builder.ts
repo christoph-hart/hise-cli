@@ -305,18 +305,23 @@ export class BuilderMode implements Mode {
 		}
 
 		if (verb === "list") {
-			const nouns: CompletionItem[] = [
-				{ label: "types", detail: "module type catalog" },
-				{ label: "tree", detail: "module tree" },
-			];
 			if (tokens.length === 1 && trailingSpace) {
-				return { items: nouns, from: offset + segment.length, to: inputLength, label: "List nouns" };
+				return {
+					items: engine.completeBuilderList(""),
+					from: offset + segment.length,
+					to: inputLength,
+					label: "List nouns",
+				};
 			}
 			if (tokens.length === 2 && !trailingSpace) {
-				const prefix = tokens[1].image.toLowerCase();
-				const items = nouns.filter((i) => i.label.startsWith(prefix));
+				const prefix = tokens[1].image;
 				const from = offset + (tokens[1].startOffset ?? 0) + leadingSpaces;
-				return { items, from, to: inputLength, label: "List nouns" };
+				return {
+					items: engine.completeBuilderList(prefix),
+					from,
+					to: inputLength,
+					label: "List nouns",
+				};
 			}
 			return empty;
 		}
@@ -465,11 +470,28 @@ export class BuilderMode implements Mode {
 			const items = engine.completeModuleParam(moduleType, "");
 			return { items, from: offset + segment.length, to: inputLength, label: `${targetName} parameters` };
 		}
-		if (!trailingSpace) {
+		if (!trailingSpace && tokens.length === paramIndex + 1) {
 			const prefix = tokens[paramIndex].image;
 			const items = engine.completeModuleParam(moduleType, prefix);
 			const from = offset + tokens[paramIndex].startOffset;
 			return { items, from, to: inputLength, label: `${targetName} parameters` };
+		}
+
+		// Value completion for known set fields (set X.bypassed → true/false,
+		// set X.routing → preset enum).
+		const field = tokens[paramIndex].image;
+		if (trailingSpace && tokens.length === paramIndex + 1) {
+			const values = engine.completeBuilderValue(field, "");
+			if (values) {
+				return { items: values, from: offset + segment.length, to: inputLength, label: `${field} values` };
+			}
+		}
+		if (!trailingSpace && tokens.length === paramIndex + 2) {
+			const values = engine.completeBuilderValue(field, tokens[paramIndex + 1].image);
+			if (values) {
+				const from = offset + tokens[paramIndex + 1].startOffset;
+				return { items: values, from, to: inputLength, label: `${field} values` };
+			}
 		}
 
 		return { items: [], from: offset, to: inputLength };

@@ -7,20 +7,21 @@ import type { TokenSpan, TokenType } from "./tokens.js";
 import { tokenizeSlash } from "./slash.js";
 
 const BUILDER_KEYWORDS = new Set([
-	"add", "clone", "remove", "move", "rename", "set", "get", "load", "into",
-	"bypass", "enable", "show",
+	"add", "clone", "remove", "rename", "set", "get", "show", "list", "reset",
 	"to", "as", "tree", "types",
-	"cd", "ls", "dir", "pwd",
+	"cd", "ls", "pwd",
 ]);
 
 const ARG_RULES: Array<{ pattern: RegExp; token: TokenType }> = [
 	{ pattern: /^"(?:[^"\\]|\\.)*"/, token: "string" },
 	{ pattern: /^'(?:[^'\\]|\\.)*'/, token: "string" },
-	{ pattern: /^x\d+/i, token: "integer" },     // XCount: x4, x10
-	{ pattern: /^\d+\.\d+(?:[eE][+-]?\d+)?/, token: "float" },
-	{ pattern: /^0x[0-9a-fA-F]+/, token: "integer" },
-	{ pattern: /^\d+/, token: "integer" },
-	{ pattern: /^,/, token: "punctuation" },      // comma separator
+	{ pattern: /^(?:true|false)\b/i, token: "boolean" },
+	{ pattern: /^-?\d+(?:\.\d+)?%/, token: "percent" },
+	{ pattern: /^-?\d+\.\d+(?:[eE][+-]?\d+)?/, token: "float" },
+	{ pattern: /^0x[0-9a-fA-F]{8}\b/, token: "integer" },
+	{ pattern: /^-?\d+/, token: "integer" },
+	{ pattern: /^[\[\]]/, token: "bracket" },
+	{ pattern: /^,/, token: "punctuation" },
 	{ pattern: /^\./, token: "punctuation" },
 	{ pattern: /^[a-zA-Z_$][a-zA-Z0-9_$]*/, token: "identifier" },
 	{ pattern: /^\s+/, token: "plain" },

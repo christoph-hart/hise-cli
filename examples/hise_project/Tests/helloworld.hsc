@@ -13,7 +13,7 @@ launch # noop if HISE is open
 # 2. Start fresh, then create a simple sine synth
 /builder
 reset
-add SineSynth as HelloSynth
+add SineSynth as "HelloSynth"
 set HelloSynth.Gain 0.5
 /expect get HelloSynth.Gain is 0.5
 /exit

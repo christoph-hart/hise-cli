@@ -2,7 +2,7 @@
 
 /builder
 reset
-add Sine Wave Generator as Sine
+add "Sine Wave Generator" as "Sine"
 set DefaultEnvelope.Release 100
 
 /exit

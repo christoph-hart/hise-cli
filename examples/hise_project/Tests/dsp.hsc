@@ -1,25 +1,23 @@
 /hise launch
 /builder
 reset
-add Script FX
+add ScriptFX as "fx1"
+set fx1.network "myfx"
 /exit
 
-/dsp
-use Script FX
-create myfx
-
-add control.xfader as fader
-add container.multi as channel_splitter
+/dsp fx1
+add control.xfader as "fader"
+add container.multi as "channel_splitter"
 cd channel_splitter
-add core.gain as L
-add core.gain as R
+add core.gain as "L"
+add core.gain as "R"
 cd ..
-create_parameter myfx.Value
+create_parameter myfx.Value [0, 1]
 connect myfx.Value to fader.Value
 connect fader.0 to L.Gain
 connect fader.1 to R.Gain
-#/expect get source of L.Gain is fader.0
-/dsp
+#/expect get L.Gain.source is fader.0
+/exit
 
 /sequence
 create test

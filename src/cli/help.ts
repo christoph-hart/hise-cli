@@ -66,17 +66,16 @@ SYNTAX
   hise-cli -builder --target:<path> "<command>"
 
 QUICK START
-  hise-cli -builder show tree              inspect current modules
-  hise-cli -builder add SimpleGain         add at root (auto-picked chain)
-  hise-cli -builder add LFO to MyGain      add under an existing module
-  hise-cli -builder show types script      filter types by substring
+  hise-cli -builder "list tree"                       inspect current modules
+  hise-cli -builder "add SimpleGain as \"Drive\""        add at root (auto-picked chain)
+  hise-cli -builder "add LFO as \"Shape\" to MyGain"     add under an existing module
+  hise-cli -builder "list types script"               filter types by substring
 
   Notes:
-    - add <type> works without "to <parent>" — root is the default.
+    - "as <name>" is mandatory on add — every module gets an explicit alias.
+    - Without "to", add lands at the current cd context (root by default).
     - Chain (.fx/.gain/...) is auto-resolved from the module's category;
       only Modulators require explicit chain (e.g. "to Master.gain").
-    - On Windows Git Bash, both "show tree" (quoted) and show tree
-      (unquoted) work — the CLI strips matching outer quotes defensively.
 
 MODULE TREE CONCEPTS
   HISE organises audio processing as a tree of modules. Every project has
@@ -91,115 +90,137 @@ MODULE TREE CONCEPTS
 
   Each module type can only be added to a compatible chain. The builder
   validates this locally using constrainer rules from the module database.
-  Use "show types" to discover available types and "show tree" to see
-  the current hierarchy.
 
-  A fresh project typically has: Master Chain (SynthGroup) → children
-  contains one or more sound generators, each with their own fx/midi/gain
-  chains.
+GRAMMAR
+  - Paths: bare ID (looked up project-wide) or dotted "A.B.C".
+  - Quoted segments preserve names with spaces or reserved words:
+    "Master Chain", "Script FX1".
+  - Numeric values: int/float (-6, 0.5), percent (50% → 0.5), strict 8-digit
+    hex (0xAARRGGBB). Shorter hex forms are parse errors.
+  - Booleans: true / false.
+  - Arrays: [0, 1, -1, -1] for routing matrices.
+  - Comma chaining: every clause provides its full path. Verb inheritance
+    is gone. "set Lead.Volume -6, Lead.Pan 10" — note the repeated target.
 
 COMMANDS
-  add <type> [as "<name>"] [to <parent>[.<chain>]]
-    Add a module. <type> is a module type name (tab-completable).
-    Without "to", adds to the current context (cd target or root).
+  add <type> as "<name>" [to <parent>[.<chain>]]
+    Add a module. "as <name>" is mandatory.
     Chain is auto-resolved from the module category:
       SoundGenerator types  → parent.children
       Effect types          → parent.fx
       MidiProcessor types   → parent.midi
       Modulator types       → requires explicit .chain (e.g. .gain, .pitch)
     Modules are appended to the end of the chain. Reordering is not
-    supported — remove and re-add to change position.
+    supported via builder yet (set X.index is a stub — see PROPERTY WRITES).
     Name collisions are auto-suffixed (e.g. "LFO", "LFO2", "LFO3").
-    Without "to" and no cd context, adds to the root container.
-    All add/remove/set/clone operations are undoable (see -undo --help).
+    Chained add disallows "to" — every clause lands at the cwd:
+      "add SineSynth as \"L\", add SineSynth as \"R\""
 
-  remove <target>
-    Remove a module and all its children from the tree.
+  remove <target> [, <target>...]
+    Remove modules and all their children. Chained — every clause is a
+    full path.
 
-  clone <target> [x<count>]
-    Duplicate a module (with all children and parameters).
-    x<count> creates multiple copies: clone LFO x3
+  clone <target> <count>
+    Duplicate a module (with children and parameters) <count> times.
+    Plain integer count (no x-prefix). "clone Lead 3" creates 3 copies.
 
-  rename <target> to "<name>"
-    Change a module's display name.
+  rename <target> as "<name>"
+    Change a module's display name. Note: "as", not "to".
 
-  set <target>.<param> [to] <value>
-    Set a parameter. <target> is the module instance name (unique
-    across the tree — no path needed, just the ID).
-    <param> is the parameter name (both tab-completable).
-    "to" is optional: "set Master.Volume -6" works.
+  set <target>.<param> <value>
+    Set a parameter or property. <target> is the module instance name
+    (resolved project-wide). <param> is the parameter or property tail.
+    No "to" preposition — value follows the path directly.
 
-  bypass <target> / enable <target>
-    Toggle a module's bypass state.
+  set <target>.bypassed <bool>
+    Property write — toggles bypass via /api/builder/apply set_bypassed.
 
-  load "<source>" into <target>
-    Load a preset, sample map, or other data file into a module.
-    <source> is a quoted file path or resource identifier.
+  set <target>.routing <value>
+    Routing matrix surface (/api/builder/apply set_routing). <value> is
+    one of:
+      - integer array: [0, 1, -1, -1] (length must match module's source
+        channel count; each entry is a destination channel index or -1)
+      - preset string: "stereo", "stereo_2", "stereo_3", "all", "all_to_stereo"
 
-  show tree
-    Print the full module tree with types, IDs, and chain structure.
+  set <target>.routing.send <array>
+    Send-channel matrix (set_routing with "send" body field).
 
-  show types [<filter>]
-    List all available module types. Optional filter is a case-insensitive
-    substring match against the Module ID, Type, and Subtype columns
-    (e.g. "show types script" returns ScriptFX, ScriptProcessor, etc.).
-    Returns a one-line "(no module types match ...)" message when no row
-    matches, instead of an empty table.
+  set <target>.network "<name>"
+    Initialize a DspNetwork on a script-network host (ScriptFX, ScriptSynth,
+    ScriptModulator). Maps to POST /api/dsp/init:
+      - bare name      → mode=create — fails if <name>.xml already exists
+      - "<name>.xml"   → mode=load   — fails if <name>.xml is missing
+    Use the .xml form when you want to attach an existing network without
+    accidentally overwriting it.
+
+  set <target>.parent <path>
+    Reparent a module. Currently parses but the HISE C++ /api/builder/apply
+    op is not yet shipped — returns "not yet supported by HISE C++ API".
+
+  set <target>.index <n>
+    Reorder within the current parent. Same stub as set parent.
+
+  set <target>.<assetField> "<value>"
+    samplemap, effect — string asset references applied via set_attributes.
+
+  get <target>.<param> [, ...]
+    Read a parameter or property value. Chainable.
 
   show <target>
-    Show a module's parameters with current values and ranges.
+    Show one module instance with parameters, current values, ranges,
+    bypass state, and routing.
+
+  list types [<filter>]
+    List all available module types. Optional filter is a case-insensitive
+    substring match against the Module ID, Type, and Subtype columns.
+
+  list tree
+    Print the full module tree with types, IDs, and chain structure.
 
   reset
-    Wipe the entire module tree and clear undo history.
-    This is irreversible — use with caution.
+    Wipe the entire module tree and clear undo history. Irreversible.
 
   cd <path> / ls / pwd
     Navigate the tree. "cd Master Chain" sets context so subsequent
-    commands target that module. "ls" lists children. "pwd" shows
-    the current path. Use "/exit" to return to root.
+    commands target that module. "cd .." steps out, "cd /" jumps to root.
+    "ls" lists children. "pwd" shows current path.
 
-COMMA CHAINING
-  Multiple commands in one call, separated by commas:
-    add LFO to Master.gain, set LFO.Frequency to 2.0
-  Target inheritance: "set Master.Volume to -6, Pan to 10" reuses Master.
+PROPERTY WRITES vs PARAMETER WRITES
+  Both use "set <path> <value>". The translator dispatches by path tail:
+    *.bypassed         → set_bypassed (boolean)
+    *.parent / *.index → reparent / reorder (stub — see above)
+    *.samplemap        → set_attributes { samplemap }
+    *.effect           → set_effect
+    *.network          → POST /api/dsp/init (different endpoint)
+    *.routing          → set_routing (matrix array or preset string)
+    *.routing.send     → set_routing (send subfield)
+    anything else      → set_attributes { <param>: <coerced value> }
 
 CONTEXT TARGET
   --target sets an implicit parent without entering the mode:
-    hise-cli -builder --target:Master "add LFO to gain"
-
-NAMING
-  add SimpleGain as "MyGain" to Master Chain
-  Without "as", the module gets the type ID as its instance name.
+    hise-cli -builder --target:Master "add LFO as \"Shape\" to gain"
 
 UNDO
-  All tree mutations (add, remove, set, clone, rename, bypass) are
-  undoable via the undo mode. See: hise-cli -undo --help
-  Plan groups batch multiple operations into a single undo step.
+  All tree mutations (add, remove, set, clone, rename) are undoable via
+  the undo mode. See: hise-cli -undo --help. Plan groups batch multiple
+  operations into a single undo step.
 
 RESPONSE FORMAT
   Successful mutations return a diff summary: { ok: true, result: "+ModuleId" }
   for add, "-ModuleId" for remove, "*ModuleId.Param" for set.
-  Use "show tree" or "show <target>" after mutations to inspect the result.
 
 ERROR HANDLING
   Invalid type names, nonexistent targets, and chain constraint violations
-  return JSON with ok:false and an error message.
-  If HISE is not running, returns a connection error.
+  return JSON with ok:false and an error message. Reserved-word collisions
+  on bare paths surface as parse errors — quote the segment to bypass.
 
 MODULE TYPE IDS
-  The add command uses type IDs as returned by "show types". IDs are
-  single tokens (e.g. SimpleGain, AHDSR, LFO, SineSynth).
-  "show types" returns columns: Module (ID), Type (category), Subtype,
-  Category (tags). The Type column tells you the chain mapping:
-    SoundGenerator → children, Effect → fx, MidiProcessor → midi,
-    Modulator → explicit chain required.
-
-  Common types (partial — run "show types" for the full list):
+  Common types (partial — run "list types" for the full list):
   SoundGenerators: SineSynth, WaveSynth, Noise, StreamingSampler,
     SynthGroup, GlobalModulatorContainer, SilentSynth
   Effects: SimpleGain, SimpleReverb, HardcodedMasterFX, PolyphonicFilter,
     Convolution, StereoFX, Dynamics, Saturator, Delay, ShapeFX,
-    ScriptFX (hosts a DspNetwork — add this before calling -dsp init)
+    ScriptFX (hosts a DspNetwork — pair with set X.network "<name>")
   MidiProcessors: ScriptProcessor, Transposer, Arpeggiator, MidiPlayer
   Modulators: LFO, AHDSR, Velocity, TableEnvelope, Constant, Random,
     SimpleEnvelope, MidiController, KeyNumber
@@ -210,32 +231,32 @@ CHAIN TYPES (exhaustive list)
   midi       MIDI processors
   gain       Gain/volume modulators
   pitch      Pitch modulators
-  These are the only chain types. No custom chains exist.
 
 RECOMMENDED WORKFLOW (complex module trees)
   Use undo plan groups to batch operations into a single undoable unit:
     1. hise-cli -undo 'plan "Add synth layer"'
     2. hise-cli -builder "add SineSynth as \"Lead\" to Master Chain"
-    3. hise-cli -builder "add SimpleGain to Lead"
-    4. hise-cli -builder "add AHDSR to Lead.gain"
-    5. hise-cli -builder "set Lead.Volume to -6"
-    6. hise-cli -builder "show tree"
+    3. hise-cli -builder "add SimpleGain as \"Drive\" to Lead"
+    4. hise-cli -builder "add AHDSR as \"VolEnv\" to Lead.gain"
+    5. hise-cli -builder "set Lead.Volume -6, Lead.bypassed false"
+    6. hise-cli -builder "list tree"
     7. hise-cli -undo "apply"            (or "discard" to rollback all)
 
-  This ensures the entire module group is added or reverted atomically.
-  Always verify with "show tree" before applying.
-
 EXAMPLES
-  hise-cli -builder "show tree"
-  hise-cli -builder "show types"
-  hise-cli -builder "show types Envelope"
-  hise-cli -builder "add SimpleGain as \"MyGain\" to Master Chain"
-  hise-cli -builder "add AHDSR to MyGain.gain"
-  hise-cli -builder "set Master Chain.Volume to -6"
-  hise-cli -builder "clone MyGain x2"
-  hise-cli -builder "remove MyGain"
-  hise-cli -builder "show Master Chain"
-  hise-cli -builder --target:Master "add LFO to gain, set LFO.Frequency to 4.0"
+  hise-cli -builder "list tree"
+  hise-cli -builder "list types"
+  hise-cli -builder "list types Envelope"
+  hise-cli -builder "add SimpleGain as \"Drive\" to Master Chain"
+  hise-cli -builder "add AHDSR as \"VolEnv\" to Drive.gain"
+  hise-cli -builder "set \"Master Chain\".Volume -6"
+  hise-cli -builder "set Drive.bypassed true"
+  hise-cli -builder "set \"Script FX1\".network \"my_dsp\""
+  hise-cli -builder "set Synth1.routing [0, 1, -1, -1]"
+  hise-cli -builder "set Synth1.routing \"stereo\""
+  hise-cli -builder "clone Drive 2"
+  hise-cli -builder "remove Drive2, Drive3"
+  hise-cli -builder "show \"Master Chain\""
+  hise-cli -builder --target:Master "add LFO as \"Shape\" to gain, set Shape.Frequency 4.0"
   hise-cli -builder "reset"`,
 
 	dsp: `hise-cli -dsp — scriptnode graph editor
@@ -247,72 +268,107 @@ SYNTAX
 MODULE CONTEXT
   Every DSP command is scoped to a "moduleId" — the script processor that
   hosts the DspNetwork. Each host carries at most one active network.
+  Pass the host via --target: or prefix the slash command with the module
+  name: "/dsp \"Script FX1\"".
 
-  Pass the host via --target:, or prefix commands with "use <moduleId>"
-  in a multi-statement run.
+NETWORK PROVISIONING (now from builder mode)
+  Networks are created or loaded from builder mode:
+
+    hise-cli -builder "set \"Script FX1\".network \"my_dsp\""
+        # mode=create — fails if my_dsp.xml exists (suggest .xml form)
+
+    hise-cli -builder "set \"Script FX1\".network \"my_dsp.xml\""
+        # mode=load — fails if my_dsp.xml is missing
+
+  Once a network is attached to a host, enter DSP mode against that host
+  to edit nodes / connections.
+
+  If you enter /dsp on a host with no network attached, the mode prints an
+  error pointing back to "set X.network" in builder, then auto-pops back to
+  root mode (does not require an explicit /exit).
 
 NETWORK LIFECYCLE
-  show networks                  List .xml files under DspNetworks/
-  show modules                   List DspNetwork-capable script processors
+  list networks                  List .xml files under DspNetworks/
+  list modules                   List DspNetwork-capable script processors
   show <nodeId>                  Inspect one node: header, properties,
                                  parameter values with range/default, and
                                  incoming/outgoing modulation edges.
-  use <moduleId>                 Switch the host context
-  load <name>                    Load an existing network. Errors if the
-                                 <name>.xml file does not exist.
-  create <name>                  Create a new network. Errors if <name>.xml
-                                 already exists on disk. Prevents silent
-                                 layering onto a stale schema.
-  init <name>                    Load-or-create catch-all. Output states
-                                 "Loaded existing" vs "Created new" so the
-                                 path taken is explicit.
   save                           Persist the loaded network to its .xml
   reset                          Empty the loaded network in memory
 
-GRAPH EDITING
-  add <factory.node> [as <id>] [to <parent>] [at <index>]
-    Add a node. Factory paths use dot notation (core.oscillator,
-    filters.svf, control.pma). Without "to", adds to the current cd path.
-    "at <index>" inserts at a specific position within the parent
-    container (default is append).
-  remove <nodeId>
-  move <nodeId> to <parent> [at <index>]
-  connect <src>[.<output>] to <target>[.<param>] [matched]
-    <output> defaults to the first modulation output when omitted.
-    <param> may be omitted for routing shorthand (e.g. "connect SEND to RCV");
-    HISE resolves the default target server-side.
-    "matched" (alias "normalize") copies the target parameter's range
-    onto the source after wiring (mirrors the IDE normalize button).
-  disconnect <src> from <target>.<param>
-  set <node>.<param> [to] <value>
-    Value-write. Range is pre-validated against scriptnodeList.json.
-  set <node>.<param> range <min> <max> [step <s>] [mid <m>|skew <s>]
-    Full range-write. Overrides the parameter's declared range without
-    changing its value. mid (middlePosition) and skew (skewFactor) are
-    mutually exclusive.
-  set <node>.<param>.<min|max|step|mid|skew> <number>
-    Single-field range-write. Reads existing range from the cached tree,
-    overrides the named field, and emits a full range-write payload.
-  set <root>.<NetworkProp> <value>
-    Network-level property write (only valid when <root> is the network
-    root node). Recognized props: AllowCompilation, AllowPolyphonic,
-    HasTail, SuspendOnSilence (boolean), CompileChannelAmount (int),
-    ModulationBlockSize (power-of-two int or 0).
-  bypass <nodeId> | enable <nodeId>
-  create_parameter <container>.<name> [<min> <max>] [default <d>] [step <s>] [mid <m>|skew <s>]
-    Creates a dynamic parameter on a container node. mid and skew are
-    mutually exclusive.
+GRAMMAR
+  - Paths: bare ID or dotted "node.param.field". Quoted segments allow
+    spaces or reserved words.
+  - Comma chaining: every clause provides full args. Verb inheritance is
+    gone: "set A.Freq 440, set B.Freq 880" — note the repeated verb.
+  - Numeric values: int/float, percent (50% → 0.5), strict 8-digit hex
+    (0xAARRGGBB).
 
-FIELD ALIASES
-  step    accepts step | stepSize | interval
-  mid     accepts mid | middlePosition
-  skew    accepts skew | skewFactor
+GRAPH EDITING
+  add <factory>.<node> as "<id>" [to <parent>]
+    Add a node. Factory paths use dot notation (core.oscillator, filters.svf,
+    control.pma). "as <id>" is mandatory. Without "to", adds to the current
+    cd path. Chained add lands all clauses at the cwd:
+      add core.gain as "L", add core.gain as "R"
+
+  remove <nodeId> [, ...]
+    Remove nodes. Chained — every clause is a full path.
+
+  rename <target> as "<name>"
+    Rename a node (set_id-equivalent op).
+
+  connect <src>[.<output>] to <target>.<param> [matched]
+    <output> defaults to the first modulation output when omitted.
+    "matched" copies the target parameter's range onto the source after
+    wiring (mirrors the IDE normalize button). Chainable across commas.
+
+  disconnect <node>.<param> [, ...]
+    Disconnect a modulation. Target-only payload — HISE resolves source.
+    Path must have ≥2 segments (node.param).
+
+  set <node>.<param> <value>
+    Parameter value-write. Range is pre-validated against scriptnodeList.json.
+
+  set <node>.<param>.<field> <number>
+    Range sub-field write. <field> is one of:
+      stepSize, middlePosition, skewFactor, default
+    Reads the existing range from the cached tree, updates the named field,
+    and emits a full range-write payload.
+
+  set <node>.bypassed <bool>
+    Bypass via property write — emits a "move" / "bypass" op.
+
+  set <node>.parent <path>
+    Reparent a node (real "move" op on /api/dsp/apply).
+
+  set <node>.index <n>
+    Reorder within the current parent. Translator looks up the current
+    parent from rawTree and emits "move" with new index.
+
+  set <root>.<NetworkProp> <value>
+    Network-level property write (root node only). Recognized props:
+      AllowCompilation, AllowPolyphonic, HasTail, SuspendOnSilence (bool),
+      CompileChannelAmount (int), ModulationBlockSize (power-of-two int or 0).
+
+  create_parameter <container>.<name> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m> | skewFactor <s>]
+    Create a dynamic parameter on a container node. Range is a 2-element
+    array. middlePosition and skewFactor are mutually exclusive.
+
+PROPERTY IDS (long-form canonical)
+  stepSize          range step
+  middlePosition    skew anchor (skew center)
+  skewFactor        log/exp skew exponent
+  default           default value
+  matched           post-connect range copy on "connect"
+
+  Short-form aliases (step, mid, skew, interval, normalize) are no longer
+  accepted. Use the long form everywhere.
 
 LOCAL QUERIES (no API round-trip)
   get <nodeId>                   -> factory path
   get <node>.<param>             -> current parameter value
-  get source of <node>.<param>   -> connected source id (or "(not connected)")
-  get parent of <node>.<param>   -> parent container id
+  get <node>.<param>.source      -> connected source id (or "(not connected)")
+  get <node>.<param>.parent      -> parent container id
 
 NAVIGATION
   cd <container>                 Step into a container
@@ -321,26 +377,24 @@ NAVIGATION
   pwd                            Print the current path
 
 SCREENSHOT
-  screenshot [at <scale>] [to <path>]
-    Render the current host's DspNetwork graph to a PNG. Path is resolved
-    relative to the project's Images/ folder (or absolute) and must end in
-    .png. Scale accepts percentage (50%) or decimal (0.5); valid values
-    are 0.5, 1.0, 2.0. Defaults to screenshot.png at scale 1.0. Requires
-    the HISE IDE UI to be open.
-
-COMMA CHAINING
-  set A.Freq 440, B.Freq 880     Verb inheritance across comma segments
+  screenshot scale <s> file "<path>"
+    Render the current host's DspNetwork graph to a PNG. Both clauses are
+    required. Path resolves relative to the project's Images/ folder (or
+    absolute) and must end in .png. Scale accepts percentage (50%) or
+    decimal (0.5); valid values are 0.5, 1.0, 2.0. Requires the HISE IDE
+    UI to be open (returns 503 otherwise).
 
 EXAMPLES
-  hise-cli -dsp --target:"Script FX1" "show tree"
-  hise-cli -dsp --target:"Script FX1" "create MyDSP"      # fresh, fail if exists
-  hise-cli -dsp --target:"Script FX1" "load MyDSP"        # open existing
-  hise-cli -dsp --target:"Script FX1" "init MyDSP"        # load-or-create
-  hise-cli -dsp --target:"Script FX1" "add core.oscillator as Osc1, set Osc1.Frequency 440"
-  hise-cli -dsp --target:"Script FX1" "add filters.svf as F1"
-  hise-cli -dsp --target:"Script FX1" "add control.pma as LFO1, connect LFO1 to F1.Frequency"
-  hise-cli -dsp --target:"Script FX1" "get source of F1.Frequency"
-  hise-cli -dsp --target:"Script FX1" "screenshot to graph.png"
+  hise-cli -dsp --target:"Script FX1" "list networks"
+  hise-cli -dsp --target:"Script FX1" "show root"
+  hise-cli -dsp --target:"Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
+  hise-cli -dsp --target:"Script FX1" "add filters.svf as \"F1\""
+  hise-cli -dsp --target:"Script FX1" "add control.pma as \"LFO1\", connect LFO1 to F1.Frequency matched"
+  hise-cli -dsp --target:"Script FX1" "disconnect F1.Frequency"
+  hise-cli -dsp --target:"Script FX1" "create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3"
+  hise-cli -dsp --target:"Script FX1" "set Osc1.Frequency.stepSize 1"
+  hise-cli -dsp --target:"Script FX1" "get F1.Frequency.source"
+  hise-cli -dsp --target:"Script FX1" "screenshot scale 100% file \"graph.png\""
   hise-cli -dsp --target:"Script FX1" "save"`,
 
 	script: `hise-cli -script — HiseScript REPL
@@ -461,13 +515,36 @@ SYNTAX
   hise-cli -ui "<command>"
   hise-cli -ui --target:<component> "<command>"
 
+GRAMMAR
+  - "as <name>" is mandatory on add (no positional names).
+  - Reparent / reorder via property writes: set X.parent <path>,
+    set X.index <n>. Both are real /api/ui/apply move ops.
+  - Position / size as numeric arrays, not bare numbers:
+      bounds   → Array4: [x, y, w, h]
+      position → Array2: [x, y]
+      size     → Array2: [w, h]
+  - Component value writes go through /api/set_component_value:
+      set Knob.value 0.5
+  - Comma chaining: full clause per comma. Verb inheritance is gone.
+
 COMMANDS
-  add <type> ["name"] [at x y w h]    Add a component
-  remove <target>                      Remove a component
-  set <target>.<prop> [to] <value>     Set a property
-  move <target> to <parent> [at N]      Reparent a component (N = z-order index)
-  rename <target> to "<name>"          Rename a component
-  show <target>                        Show all properties
+  add <type> as "<name>" [to <parent>]         Add a component
+  remove <target> [, ...]                       Remove components
+  rename <target> as "<name>"                   Rename a component
+  set <target>.<prop> <value>                   Set a property
+  set <target>.value <v>                        Component value (set_component_value)
+  set <target>.bounds [x, y, w, h]              Position + size (Array4)
+  set <target>.position [x, y]                  Array2 form
+  set <target>.size [w, h]                      Array2 form
+  set <target>.parent <path>                    Reparent (move op)
+  set <target>.index <n>                        Reorder within current parent
+  set <target>.bypassed <bool>                  Property toggle
+  set <target>.visible <bool>                   Property toggle
+  get <target>.<prop> [, ...]                   Read a property value
+  show <target>                                 Show all properties
+  list tree                                     Component tree view
+  reset                                         Reset the component tree
+  cd <path> / ls / pwd                          Navigate the component tree
 
 COMPONENT TYPES
   ScriptButton, ScriptSlider, ScriptPanel, ScriptComboBox, ScriptLabel,
@@ -475,19 +552,17 @@ COMPONENT TYPES
   ScriptFloatingTile, ScriptDynamicContainer, ScriptedViewport,
   ScriptMultipageDialog, ScriptWebView
 
-COMMA CHAINING
-  Multiple commands in one call, separated by commas.
-  Verb inheritance: add ScriptButton "A", ScriptSlider "B"
-  Set target inheritance: set Knob.x 100, y 200, width 128
-
 EXAMPLES
-  hise-cli -ui "add ScriptButton \\"PlayButton\\" at 100 200 128 32"
+  hise-cli -ui "add ScriptButton as \\"PlayButton\\""
+  hise-cli -ui "set PlayButton.bounds [100, 200, 128, 32]"
   hise-cli -ui "set PlayButton.visible false"
-  hise-cli -ui "move PlayButton to MainPanel"
-  hise-cli -ui "move PlayButton to MainPanel at 0"
-  hise-cli -ui "rename PlayButton to \\"StartButton\\""
-  hise-cli -ui "add ScriptPanel \\"Header\\", add ScriptButton \\"Logo\\" at 10 5 40 40"
-  hise-cli -ui --target:MainPanel "add ScriptSlider \\"VolumeKnob\\" at 20 40 128 48"
+  hise-cli -ui "set PlayButton.parent MainPanel"
+  hise-cli -ui "set PlayButton.index 0"
+  hise-cli -ui "rename PlayButton as \\"StartButton\\""
+  hise-cli -ui "add ScriptPanel as \\"Header\\", add ScriptButton as \\"Logo\\" to Header"
+  hise-cli -ui "set Logo.bounds [10, 5, 40, 40]"
+  hise-cli -ui --target:MainPanel "add ScriptSlider as \\"VolumeKnob\\""
+  hise-cli -ui "set VolumeKnob.value 0.5"
   hise-cli -ui "show PlayButton"`,
 
 	undo: `hise-cli -undo — undo history and plan groups
