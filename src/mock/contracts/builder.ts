@@ -250,6 +250,91 @@ function cleanBuilderModChainForLlm(raw: unknown): unknown {
 	return out;
 }
 
+/** Strip the response from `show <moduleId>` (single-module GET) to the
+ *  minimum useful for LLM context: instance id, module type, bypassed,
+ *  parameter IDs only (no value / range / default — fetch via `get`),
+ *  and a per-mod-chain summary listing chain ids + child module ids and
+ *  their parameter IDs. fx / midi children carry the same shape. Empty
+ *  arrays drop out so the payload stays compact. */
+export function cleanBuilderShowForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.processorId === "string") out.id = n.processorId;
+	if (typeof n.id === "string") out.type = n.id;
+	if (typeof n.prettyName === "string") out.prettyName = n.prettyName;
+	if (typeof n.bypassed === "boolean") out.bypassed = n.bypassed;
+
+	const params = pluckParameterIds(n.parameters);
+	if (params) out.parameters = params;
+
+	const modulation = cleanArrayForLlm(n.modulation, cleanShowModChain);
+	if (modulation) out.modulation = modulation;
+
+	const fx = cleanArrayForLlm(n.fx, cleanBuilderShowForLlm);
+	if (fx) out.fx = fx;
+
+	const midi = cleanArrayForLlm(n.midi, cleanBuilderShowForLlm);
+	if (midi) out.midi = midi;
+
+	if (n.routing && typeof n.routing === "object") {
+		const r = n.routing as Record<string, unknown>;
+		const matrix = Array.isArray(r.matrix) ? r.matrix : undefined;
+		if (matrix) out.routing = { matrix };
+	}
+
+	return out;
+}
+
+function cleanShowModChain(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.id === "string") out.id = n.id;
+	if (typeof n.modulationMode === "string") out.mode = n.modulationMode;
+	if (typeof n.constrainer === "string" && n.constrainer !== "*") out.constrainer = n.constrainer;
+	const children = cleanArrayForLlm(n.children, cleanBuilderShowForLlm);
+	if (children) out.children = children;
+	return out;
+}
+
+/** Strip a single raw parameter object to the minimum useful for LLM
+ *  context: id, range (min/max + optional curve subfields), defaultValue,
+ *  current value + valueAsString, items[] for enums. Drops parameterIndex,
+ *  chainIndex, disabled, valueNormalized. */
+export function cleanBuilderParameterForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const p = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof p.id === "string") out.id = p.id;
+	if (p.range && typeof p.range === "object") {
+		const r = p.range as Record<string, unknown>;
+		const range: Record<string, unknown> = {};
+		if (typeof r.min === "number") range.min = r.min;
+		if (typeof r.max === "number") range.max = r.max;
+		if (typeof r.stepSize === "number" && r.stepSize !== 0) range.stepSize = r.stepSize;
+		if (typeof r.middlePosition === "number") range.middlePosition = r.middlePosition;
+		if (typeof r.skewFactor === "number" && r.skewFactor !== 1) range.skewFactor = r.skewFactor;
+		out.range = range;
+	}
+	if (p.defaultValue !== undefined) out.defaultValue = p.defaultValue;
+	if (typeof p.value === "number") out.value = p.value;
+	if (typeof p.valueAsString === "string") out.valueAsString = p.valueAsString;
+	if (Array.isArray(p.items)) out.items = p.items;
+	return out;
+}
+
+function pluckParameterIds(raw: unknown): string[] | undefined {
+	if (!Array.isArray(raw)) return undefined;
+	const ids: string[] = [];
+	for (const p of raw) {
+		if (p && typeof p === "object" && typeof (p as Record<string, unknown>).id === "string") {
+			ids.push((p as { id: string }).id);
+		}
+	}
+	return ids.length > 0 ? ids : undefined;
+}
+
 function cleanArrayForLlm(
 	value: unknown,
 	mapper: (v: unknown) => unknown,

@@ -43,7 +43,6 @@ export type {
 	UiRenameCommand,
 	UiGetCommand,
 	UiShowCommand,
-	UiListCommand,
 	UiCdCommand,
 	UiLsCommand,
 	UiPwdCommand,
@@ -63,7 +62,6 @@ import type {
 	UiCdCommand,
 	UiCommand,
 	UiGetCommand,
-	UiListCommand,
 	UiSetCommand,
 	UiShowCommand,
 } from "./ui-parser.js";
@@ -153,7 +151,7 @@ export class UiMode implements Mode {
 
 		if (tokens.length === 0 || (tokens.length === 1 && !trailingSpace)) {
 			const prefix = tokens.length > 0 ? tokens[0].image.toLowerCase() : "";
-			const keywords = ["add", "remove", "set", "get", "rename", "show", "list", "cd", "ls", "pwd", "reset"];
+			const keywords = ["add", "remove", "set", "get", "rename", "show", "cd", "ls", "pwd", "reset"];
 			const items: CompletionItem[] = keywords
 				.filter((k) => k.startsWith(prefix))
 				.map((k) => ({ label: k }));
@@ -177,28 +175,15 @@ export class UiMode implements Mode {
 		}
 
 		if (verb === "show") {
+			const nouns: CompletionItem[] = [{ label: "tree", detail: "component tree" }];
 			if (tokens.length === 1 && trailingSpace) {
-				return { items: componentItems, from: offset + segment.length, to: inputLength, label: "Components" };
+				return { items: [...nouns, ...componentItems], from: offset + segment.length, to: inputLength, label: "Show targets" };
 			}
 			if (tokens.length === 2 && !trailingSpace) {
 				const prefix = tokens[1].image;
-				const items = fuzzyFilter(prefix, componentItems);
+				const items = [...fuzzyFilter(prefix, nouns), ...fuzzyFilter(prefix, componentItems)];
 				const from = offset + tokens[1].startOffset;
-				return { items, from, to: inputLength, label: "Components" };
-			}
-			return empty;
-		}
-
-		if (verb === "list") {
-			const nouns: CompletionItem[] = [{ label: "tree", detail: "component tree" }];
-			if (tokens.length === 1 && trailingSpace) {
-				return { items: nouns, from: offset + segment.length, to: inputLength, label: "List nouns" };
-			}
-			if (tokens.length === 2 && !trailingSpace) {
-				const prefix = tokens[1].image.toLowerCase();
-				const items = nouns.filter((i) => i.label.startsWith(prefix));
-				const from = offset + tokens[1].startOffset;
-				return { items, from, to: inputLength, label: "List nouns" };
+				return { items, from, to: inputLength, label: "Show targets" };
 			}
 			return empty;
 		}
@@ -456,8 +441,7 @@ export class UiMode implements Mode {
 		return textResult("/");
 	}
 
-	private async handleList(cmd: UiListCommand): Promise<CommandResult> {
-		if (cmd.noun !== "tree") return errorResult(`unknown list noun: ${cmd.noun}`);
+	private handleShowTree(): CommandResult {
 		if (!this.treeRoot) return textResult("No component tree available (requires HISE connection).");
 		const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(this.treeRoot, this.currentPath) : null;
 		return preformattedResult(renderTreeBox(this.treeRoot, { pwdNode }), undefined, true);
@@ -476,7 +460,6 @@ export class UiMode implements Mode {
 			case "reset": return this.handleReset();
 			case "get": return this.handleGet(cmd, session.connection ?? null);
 			case "show": return this.handleShow(cmd, session);
-			case "list": return this.handleList(cmd);
 			default: break;
 		}
 
@@ -585,6 +568,7 @@ export class UiMode implements Mode {
 	}
 
 	private async handleShow(cmd: UiShowCommand, session: SessionContext): Promise<CommandResult> {
+		if (cmd.kind === "tree") return this.handleShowTree();
 		const connection = session.connection ?? null;
 		const r = this.resolveRefForRead(cmd.target);
 		if ("error" in r) return errorResult(r.error);

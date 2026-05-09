@@ -233,7 +233,7 @@ describe("dsp-ops — reset / local-only commands", () => {
 		expect(ops[0]).toMatchObject({ op: "clear" });
 	});
 
-	for (const input of ["ls", "pwd", "save", "show g1", "list tree", "cd Container", "get g1.Gain", 'screenshot scale 1.0 file "out.png"']) {
+	for (const input of ["ls", "pwd", "save", "show g1", "show tree", "cd Container", "get g1.Gain", 'screenshot scale 1.0 file "out.png"']) {
 		it(`commandToDspOps('${input}') is local-only`, () => {
 			const ops = opsOk(input);
 			expect(ops).toEqual([]);

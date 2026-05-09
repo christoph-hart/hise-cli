@@ -29,15 +29,15 @@ Identifier matching (paths, fields, type names) is **case-insensitive**. Storage
 - `add Synth as "Lead"` stores `Lead`; `get lead.bypassed` retrieves it; output reads `Lead`
 - Ambiguous case-fold (two entities differing only by case) is rare in HISE; parser errors with both candidates listed.
 
-Filters (`list types <filter>`) are case-insensitive substring matches — same as identifier matching.
+Filters (`show types <filter>`) are case-insensitive substring matches — same as identifier matching.
 
 ## Output formats
 
-`show <id>` and `get <path>` return the same content in two formats:
+`show <id>`, `show <id>.<param>`, and `get <path>` return the same content in two formats:
 - **CLI mode** — JSON (machine-parseable, LLM-friendly).
 - **TUI mode** — formatted text (key/value, indented tree).
 
-`list <noun>` returns array (CLI) / table (TUI) of matching entries.
+`show <noun>` returns array (CLI) / table (TUI) of matching entries.
 
 ## Paths and identifier resolution
 
@@ -77,7 +77,11 @@ Per-mode hierarchy and landing on mode entry:
 
 5. **`set`/`get` are symmetric across all paths.** `set X.field V` ↔ `get X.field`. No optional `to` on set. Reparent, bypass, position, resize, reorder all express as `set` writes.
 
-6. **`show` queries instances; `list` queries catalogs.** `show <id>` accepts only existing identifiers. `list <noun>` accepts a fixed set of category words.
+6. **`show` is the universal query verb — progressive disclosure for exploration.** Three forms:
+   - `show <noun>` — catalog (`tree`, `types`, `networks`, `modules`, `connections`; mode-restricted set).
+   - `show <id>` — instance summary (parameter IDs, child mod chains, routing matrix, bypass state). No values.
+   - `show <id>.<param>` — parameter detail (id, range, defaultValue, value, valueAsString, items? for enums).
+   `get` is reserved for single-scalar lookups consumed by `/expect` (`get <id>.<field>` returns one value).
 
 7. **Comma chaining inherits the verb only.** Every clause provides full arguments and full identifier paths. No prefix or target inheritance. The current working directory (`cwd`) applies to every clause in the statement (e.g. `add Filter as "LP", Filter as "HP"` adds both at cwd).
 
@@ -139,7 +143,7 @@ set core1.NodeColour 0xFFAA00      # ERROR: 6 digits, alpha missing
 
 ## Builder mode
 
-Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `list types`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
+Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `show types`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
 
 | Verb | Syntax |
 |------|--------|
@@ -148,9 +152,8 @@ Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `S
 | `remove` | `remove <target>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
 | `rename` | `rename <target> as "<name>"` |
 | `set` | `set <target>.<field>[.<subfield>] <value>` |
-| `get` | `get <target>.<field>[.<subfield>]` (field required; for full inspection use `show`) |
-| `show` | `show <target>` |
-| `list` | `list types [<filter>]` \| `list tree [<filter>]` (filter is greedy: case-insensitive substring matched against any displayed column — id, type, path) |
+| `get` | `get <target>.<field>[.<subfield>]` (single scalar; for structural exploration use `show`) |
+| `show` | `show tree` \| `show types [<filter>]` \| `show <target>` \| `show <target>.<param>` (filter is greedy: case-insensitive substring matched against any displayed column — id, type, path) |
 | `cd` / `ls` / `pwd` | navigation |
 | `reset` | `reset` (clears project to empty Master) |
 
@@ -200,8 +203,10 @@ set Synth1.routing "stereo"
 set Synth1.routing [-1, -1]                        # clear all connections
 get Synth1.routing
 get Synth1.routing.routable
-list types filter
-show Master.Lead
+show types filter
+show tree
+show Master.Lead                                   # module summary
+show Master.Lead.Volume                            # parameter detail
 ```
 
 ## UI mode
@@ -217,8 +222,7 @@ Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScr
 | `set` | `set <target>.<field> <value>` |
 | `get` | `get <target>.<field>` (field required) |
 | `rename` | `rename <target> as "<name>"` |
-| `show` | `show <target>` |
-| `list` | `list tree [<filter>]` (greedy substring on id/type/path) |
+| `show` | `show tree` \| `show <target>` \| `show <target>.<prop>` (greedy substring on id/type/path for `show tree` filter) |
 | `cd` / `ls` / `pwd` | navigation |
 | `reset` | `reset` (returns cwd to `Interface`; component tree is unaffected — use `remove` to delete components) |
 
@@ -263,8 +267,7 @@ Operates on a scriptnode network. Enter via `/dsp <ScriptFX>` (the host module's
 | `save` | `save` (writes current network to disk if file-backed; embeds in project if in-memory) |
 | `reset` | `reset` (clears network to empty `root`) |
 | `screenshot` | `screenshot scale <N> file "<path>"` |
-| `show` | `show <nodeId>` |
-| `list` | `list networks [<filter>]` \| `list modules [<filter>]` \| `list connections [<filter>]` \| `list tree [<filter>]` (greedy: filter is case-insensitive substring matched against any displayed column — id, type, path, source, target, file name) |
+| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show <nodeId>` \| `show <nodeId>.<param>` (greedy: filter is case-insensitive substring matched against any displayed column — id, type, path, source, target, file name) |
 | `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [step <s>] [mid <m>] [skew <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
 | `cd` / `ls` / `pwd` | navigation |
 
@@ -288,8 +291,10 @@ set g1.bypassed 0
 get g1.Gain.source
 get g1.Gain.parent
 get g1.Gain.max
-list networks
-list connections
+show networks
+show connections
+show g1                                           # node summary
+show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"
 create_parameter root.Cutoff [20, 20000] default 1000 skew 0.3
 ```
@@ -323,7 +328,9 @@ remove A, B, C
 
 Verbs and role keywords are reserved across all modes. Using any of them as an identifier requires quoting.
 
-Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `list`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `create_parameter`.
+Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `create_parameter`.
+
+Catalog nouns following `show` (mode-restricted): `tree`, `types`, `networks`, `modules`, `connections`. These are reserved as direct arguments to `show` only — they may still appear inside dotted paths after a quoted segment escape.
 
 Role keywords: `as`, `to`, `file`, `scale`, `matched`, `default`, `step`, `mid`, `skew`.
 
@@ -340,7 +347,7 @@ Each verb has its own production with verb-specific comma continuation. Verbs th
 
 ```
 Statement            := AddStmt | RemoveStmt | RenameStmt | CloneStmt
-                     |  SetStmt | GetStmt | ShowStmt | ListStmt
+                     |  SetStmt | GetStmt | ShowStmt
                      |  CdStmt | LsStmt | PwdStmt
                      |  ResetStmt | SaveStmt
                      |  ConnectStmt | DisconnectStmt
@@ -360,8 +367,8 @@ SetClause            := DottedPath Value                     ; ≥2 segments —
 
 GetStmt              := 'get' DottedPath (',' DottedPath)*
 
-ShowStmt             := 'show' PathExpr
-ListStmt             := 'list' ListNoun [Filter]
+ShowStmt             := 'show' (ShowNoun [Filter] | PathExpr)    ; PathExpr ≥2 segs = parameter detail
+ShowNoun             := BuilderShowNoun | UiShowNoun | DspShowNoun  ; mode-restricted
 
 CdStmt               := 'cd' PathExpr
 LsStmt               := 'ls'
@@ -381,10 +388,9 @@ CreateParameterStmt  := 'create_parameter' DottedPath Array2
                         ['mid' Number] ['skew' Number]
 
 TypeRef              := Identifier ['.' Identifier]          ; 2-segment for DSP factory.node
-ListNoun             := BuilderNoun | UiNoun | DspNoun       ; mode-restricted
-BuilderNoun          := 'types' | 'tree'
-UiNoun               := 'tree'
-DspNoun              := 'networks' | 'modules' | 'connections' | 'tree'
+BuilderShowNoun      := 'types' | 'tree'
+UiShowNoun           := 'tree'
+DspShowNoun          := 'networks' | 'modules' | 'connections' | 'tree'
 Filter               := QuotedString | BareWord
 
 PathExpr             := DottedPath | BarePath | '..'

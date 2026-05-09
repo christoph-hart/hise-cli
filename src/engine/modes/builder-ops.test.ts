@@ -211,7 +211,7 @@ describe("builder-ops — routing", () => {
 });
 
 describe("builder-ops — local-only commands return error sentinel", () => {
-	for (const input of ["get Lead.Volume", "show Lead", "list types", "cd Lead", "ls", "pwd", "reset"]) {
+	for (const input of ["get Lead.Volume", "show Lead", "show types", "cd Lead", "ls", "pwd", "reset"]) {
 		it(`commandToOps('${input}') is local-only`, () => {
 			expect(opsErr(input)).toBe("handled locally");
 		});

@@ -4,7 +4,7 @@ import type { TokenSpan, TokenType } from "./tokens.js";
 import { tokenizeSlash } from "./slash.js";
 
 const DSP_KEYWORDS = new Set([
-	"show", "list", "networks", "modules", "connections", "tree",
+	"show", "networks", "modules", "connections", "tree",
 	"save", "reset",
 	"add", "remove", "rename", "connect", "disconnect",
 	"set", "get",

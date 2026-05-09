@@ -122,12 +122,6 @@ export const Types = createToken({
 	longer_alt: Identifier,
 });
 
-export const List = createToken({
-	name: "List",
-	pattern: /list/i,
-	longer_alt: Identifier,
-});
-
 // Navigation verbs (builder, UI, DSP all gain cd/ls/pwd).
 export const Cd = createToken({
 	name: "Cd",
@@ -240,7 +234,6 @@ export const BUILDER_TOKENS = [
 	Show,
 	Set,
 	Get,
-	List,
 	Cd,
 	Ls,
 	Pwd,
@@ -282,7 +275,6 @@ export const UI_TOKENS = [
 	Show,
 	Set,
 	Get,
-	List,
 	Cd,
 	Ls,
 	Pwd,
@@ -380,7 +372,6 @@ export const DSP_TOKENS = [
 	Show,
 	Set,
 	Get,
-	List,
 	Cd,
 	Ls,
 	Pwd,

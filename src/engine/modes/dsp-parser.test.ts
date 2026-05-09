@@ -10,7 +10,6 @@ import {
 	type DisconnectCommand,
 	type DspCommand,
 	type GetCommand,
-	type ListCommand,
 	type RemoveCommand,
 	type RenameCommand,
 	type ScreenshotCommand,
@@ -264,40 +263,46 @@ describe("dsp parser — screenshot", () => {
 	});
 });
 
-// ── show / list ───────────────────────────────────────────────────
+// ── show ──────────────────────────────────────────────────────────
 
 describe("dsp parser — show", () => {
-	it("takes a single path target (no more `show tree`)", () => {
+	it("takes a bare path target", () => {
 		const cmd = parseOk<ShowCommand>("show g1");
-		expect(cmd.target.kind).toBe("bare");
+		expect(cmd.kind).toBe("target");
+		if (cmd.kind === "target") expect(cmd.target.kind).toBe("bare");
 	});
 
-	it("rejects show tree (use list tree)", () => {
-		expect(parseErr("show tree")).toMatch(/Parse error/);
-	});
-});
-
-describe("dsp parser — list", () => {
-	it("parses list networks", () => {
-		const cmd = parseOk<ListCommand>("list networks");
-		expect(cmd.noun).toBe("networks");
+	it("takes a dotted path target (parameter detail)", () => {
+		const cmd = parseOk<ShowCommand>("show g1.Gain");
+		expect(cmd.kind).toBe("target");
+		if (cmd.kind === "target") expect(cmd.target.kind).toBe("dotted");
 	});
 
-	it("parses list modules", () => {
-		expect(parseOk<ListCommand>("list modules").noun).toBe("modules");
+	it("parses show tree", () => {
+		expect(parseOk<ShowCommand>("show tree").kind).toBe("tree");
 	});
 
-	it("parses list connections", () => {
-		expect(parseOk<ListCommand>("list connections").noun).toBe("connections");
+	it("parses show networks", () => {
+		expect(parseOk<ShowCommand>("show networks").kind).toBe("networks");
 	});
 
-	it("parses list tree", () => {
-		expect(parseOk<ListCommand>("list tree").noun).toBe("tree");
+	it("parses show modules", () => {
+		expect(parseOk<ShowCommand>("show modules").kind).toBe("modules");
 	});
 
-	it("parses list <noun> <filter>", () => {
-		const cmd = parseOk<ListCommand>("list networks foo");
-		expect(cmd.filter).toBe("foo");
+	it("parses show connections", () => {
+		expect(parseOk<ShowCommand>("show connections").kind).toBe("connections");
+	});
+
+	it("parses show <noun> <filter>", () => {
+		const cmd = parseOk<ShowCommand>("show networks foo");
+		if (cmd.kind === "networks") expect(cmd.filter).toBe("foo");
+		else throw new Error("expected networks kind");
+	});
+
+	it("rejects `list` verb (folded into show)", () => {
+		expect(parseErr("list networks")).toMatch(/Parse error/);
+		expect(parseErr("list tree")).toMatch(/Parse error/);
 	});
 });
 

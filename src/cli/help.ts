@@ -66,10 +66,10 @@ SYNTAX
   hise-cli -builder --target:<path> "<command>"
 
 QUICK START
-  hise-cli -builder "list tree"                       inspect current modules
+  hise-cli -builder "show tree"                       inspect current modules
   hise-cli -builder "add SimpleGain as \"Drive\""        add at root (auto-picked chain)
   hise-cli -builder "add LFO as \"Shape\" to MyGain"     add under an existing module
-  hise-cli -builder "list types script"               filter types by substring
+  hise-cli -builder "show types script"               filter types by substring
 
   Notes:
     - "as <name>" is mandatory on add — every module gets an explicit alias.
@@ -169,14 +169,22 @@ COMMANDS
     Read a parameter or property value. Chainable.
 
   show <target>
-    Show one module instance with parameters, current values, ranges,
-    bypass state, and routing.
+    Show one module instance with parameter IDs and modulation chains.
+    For LLM (CLI/JSON), returns a compact summary — parameter values are
+    NOT included; use 'show <target>.<param>' or 'get <target>.<param>'
+    for those.
 
-  list types [<filter>]
+  show <target>.<param>
+    Parameter detail: { id, range, defaultValue, value, valueAsString,
+    items? }. Drill-down for LLM exploration when range/default needed
+    before a 'set' call. Sub-fields ('.range', '.min', etc.) belong to
+    'set' — 'show' only goes one level deep.
+
+  show types [<filter>]
     List all available module types. Optional filter is a case-insensitive
     substring match against the Module ID, Type, and Subtype columns.
 
-  list tree
+  show tree
     Print the full module tree with types, IDs, and chain structure.
 
   reset
@@ -217,7 +225,7 @@ ERROR HANDLING
   on bare paths surface as parse errors — quote the segment to bypass.
 
 MODULE TYPE IDS
-  Common types (partial — run "list types" for the full list):
+  Common types (partial — run "show types" for the full list):
   SoundGenerators: SineSynth, WaveSynth, Noise, StreamingSampler,
     SynthGroup, GlobalModulatorContainer, SilentSynth
   Effects: SimpleGain, SimpleReverb, HardcodedMasterFX, PolyphonicFilter,
@@ -241,13 +249,14 @@ RECOMMENDED WORKFLOW (complex module trees)
     3. hise-cli -builder "add SimpleGain as \"Drive\" to Lead"
     4. hise-cli -builder "add AHDSR as \"VolEnv\" to Lead.gain"
     5. hise-cli -builder "set Lead.Volume -6, Lead.bypassed false"
-    6. hise-cli -builder "list tree"
+    6. hise-cli -builder "show tree"
     7. hise-cli -undo "apply"            (or "discard" to rollback all)
 
 EXAMPLES
-  hise-cli -builder "list tree"
-  hise-cli -builder "list types"
-  hise-cli -builder "list types Envelope"
+  hise-cli -builder "show tree"
+  hise-cli -builder "show types"
+  hise-cli -builder "show types Envelope"
+  hise-cli -builder "show \"Master Chain\".Volume"      # parameter detail
   hise-cli -builder "add SimpleGain as \"Drive\" to Master Chain"
   hise-cli -builder "add AHDSR as \"VolEnv\" to Drive.gain"
   hise-cli -builder "set \"Master Chain\".Volume -6"
@@ -301,8 +310,11 @@ NETWORK PROVISIONING (now from builder mode)
   root mode (does not require an explicit /exit).
 
 NETWORK LIFECYCLE
-  list networks                  List .xml files under DspNetworks/
-  list modules                   List DspNetwork-capable script processors
+  show networks                  List .xml files under DspNetworks/
+  show modules                   List DspNetwork-capable script processors
+  show connections               List modulation edges in the network
+  show tree                      Network hierarchy
+  show <nodeId>.<param>          Parameter detail (range, default, value)
   show <nodeId>                  Inspect one node: header, properties,
                                  parameter values with range/default, and
                                  incoming/outgoing modulation edges.
@@ -398,7 +410,7 @@ SCREENSHOT
     UI to be open (returns 503 otherwise).
 
 EXAMPLES
-  hise-cli -dsp --target:"Script FX1" "list networks"
+  hise-cli -dsp --target:"Script FX1" "show networks"
   hise-cli -dsp --target:"Script FX1" "show root"
   hise-cli -dsp --target:"Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
   hise-cli -dsp --target:"Script FX1" "add filters.svf as \"F1\""
@@ -555,7 +567,7 @@ COMMANDS
   set <target>.visible <bool>                   Property toggle
   get <target>.<prop> [, ...]                   Read a property value
   show <target>                                 Show all properties
-  list tree                                     Component tree view
+  show tree                                     Component tree view
   reset                                         Reset the component tree
   cd <path> / ls / pwd                          Navigate the component tree
 

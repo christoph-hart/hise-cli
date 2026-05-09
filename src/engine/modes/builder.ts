@@ -27,8 +27,19 @@ import {
 	normalizeBuilderTreeResponse,
 	normalizeBuilderApplyResult,
 	applyDiffToTree,
+	cleanBuilderShowForLlm,
+	cleanBuilderParameterForLlm,
 	cleanBuilderTreeForLlm,
 } from "../../mock/contracts/builder.js";
+
+interface RawParameter {
+	id: string;
+	value: number;
+	valueAsString: string;
+	range: { min: number; max: number; stepSize?: number; middlePosition?: number; skewFactor?: number };
+	defaultValue: number;
+	items?: string[];
+}
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
 import { builderLexer } from "./tokens.js";
@@ -51,7 +62,6 @@ export type {
 	SetClause,
 	GetCommand,
 	ShowCommand,
-	ListCommand,
 	CdCommand,
 	LsCommand,
 	PwdCommand,
@@ -81,7 +91,6 @@ import type {
 	BuilderCommand,
 	CdCommand,
 	GetCommand,
-	ListCommand,
 	SetCommand,
 	ShowCommand,
 } from "./builder-parser.js";
@@ -292,36 +301,41 @@ export class BuilderMode implements Mode {
 		}
 
 		if (verb === "show") {
+			// Catalog nouns (tree/types) + module instances at position 1.
+			const nouns = engine.completeBuilderShowNouns("");
 			if (tokens.length === 1 && trailingSpace) {
-				return { items: moduleItems, from: offset + segment.length, to: inputLength, label: "Show targets" };
+				return {
+					items: [...nouns, ...moduleItems],
+					from: offset + segment.length,
+					to: inputLength,
+					label: "Show targets",
+				};
 			}
 			if (tokens.length === 2 && !trailingSpace) {
 				const prefix = tokens[1].image;
-				const items = fuzzyFilter(prefix, moduleItems);
+				const items = [...fuzzyFilter(prefix, nouns), ...fuzzyFilter(prefix, moduleItems)];
 				const from = offset + (tokens[1].startOffset ?? 0) + leadingSpaces;
 				return { items, from, to: inputLength, label: "Show targets" };
 			}
-			return empty;
-		}
-
-		if (verb === "list") {
-			if (tokens.length === 1 && trailingSpace) {
-				return {
-					items: engine.completeBuilderList(""),
-					from: offset + segment.length,
-					to: inputLength,
-					label: "List nouns",
-				};
-			}
-			if (tokens.length === 2 && !trailingSpace) {
-				const prefix = tokens[1].image;
-				const from = offset + (tokens[1].startOffset ?? 0) + leadingSpaces;
-				return {
-					items: engine.completeBuilderList(prefix),
-					from,
-					to: inputLength,
-					label: "List nouns",
-				};
+			// Parameter detail: `show <Module>.<param>`. Reuse module-param completion.
+			if (tokens.length >= 3) {
+				const dotIndex = tokens.findIndex((t) => t.image === ".");
+				if (dotIndex >= 2) {
+					const targetTokens = tokens.slice(1, dotIndex);
+					const targetName = targetTokens.map((t) => t.image).join(" ");
+					const moduleType = resolveInstanceType(targetName, modules) ?? targetName;
+					const paramIndex = dotIndex + 1;
+					if (paramIndex >= tokens.length) {
+						const items = engine.completeModuleParam(moduleType, "");
+						return { items, from: offset + segment.length, to: inputLength, label: `${targetName} parameters` };
+					}
+					if (!trailingSpace && tokens.length === paramIndex + 1) {
+						const prefix = tokens[paramIndex].image;
+						const items = engine.completeModuleParam(moduleType, prefix);
+						const from = offset + tokens[paramIndex].startOffset;
+						return { items, from, to: inputLength, label: `${targetName} parameters` };
+					}
+				}
 			}
 			return empty;
 		}
@@ -676,7 +690,6 @@ export class BuilderMode implements Mode {
 			case "reset": return this.handleReset(session);
 			case "get": return this.handleGet(cmd, session.connection ?? null);
 			case "show": return this.handleShow(cmd, session);
-			case "list": return this.handleList(cmd);
 			default:
 				break;
 		}
@@ -868,34 +881,40 @@ export class BuilderMode implements Mode {
 		}
 	}
 
-	private async handleList(cmd: ListCommand): Promise<CommandResult> {
-		if (cmd.noun === "types") {
-			if (!this.moduleList) {
-				return errorResult("Module data not loaded");
-			}
-			let modules = this.moduleList.modules;
-			if (cmd.filter) {
-				const f = cmd.filter.toLowerCase();
-				modules = modules.filter((m) =>
-					m.id.toLowerCase().includes(f)
-					|| m.type.toLowerCase().includes(f)
-					|| m.subtype.toLowerCase().includes(f),
-				);
-			}
-			if (modules.length === 0) {
-				return textResult(
-					cmd.filter
-						? `(no module types match "${cmd.filter}" — try \`list types\` without a filter)`
-						: "(no module types available)",
-				);
-			}
-			return tableResult(
-				["Module", "Type", "Subtype", "Category"],
-				modules.map((m) => [m.id, m.type, m.subtype, m.category.join(", ")]),
+	private async handleShow(
+		cmd: ShowCommand,
+		session: SessionContext,
+	): Promise<CommandResult> {
+		if (cmd.kind === "types") return this.handleShowTypes(cmd.filter);
+		if (cmd.kind === "tree") return this.handleShowTree();
+		return this.handleShowTarget(cmd.target, session);
+	}
+
+	private handleShowTypes(filter: string | undefined): CommandResult {
+		if (!this.moduleList) return errorResult("Module data not loaded");
+		let modules = this.moduleList.modules;
+		if (filter) {
+			const f = filter.toLowerCase();
+			modules = modules.filter((m) =>
+				m.id.toLowerCase().includes(f)
+				|| m.type.toLowerCase().includes(f)
+				|| m.subtype.toLowerCase().includes(f),
 			);
 		}
+		if (modules.length === 0) {
+			return textResult(
+				filter
+					? `(no module types match "${filter}" — try \`show types\` without a filter)`
+					: "(no module types available)",
+			);
+		}
+		return tableResult(
+			["Module", "Type", "Subtype", "Category"],
+			modules.map((m) => [m.id, m.type, m.subtype, m.category.join(", ")]),
+		);
+	}
 
-		// list tree
+	private handleShowTree(): CommandResult {
 		if (!this.treeRoot) {
 			return textResult("No module tree available (requires HISE connection).");
 		}
@@ -905,13 +924,24 @@ export class BuilderMode implements Mode {
 		return preformattedResult(renderTreeBox(tree, { pwdNode, compact: this.compactView }), undefined, true);
 	}
 
-	private async handleShow(
-		cmd: ShowCommand,
+	private async handleShowTarget(
+		target: PathRef,
 		session: SessionContext,
 	): Promise<CommandResult> {
 		const connection = session.connection ?? null;
-		const r = this.resolveRefForRead(cmd.target);
+		const segs = pathRefSegments(target);
+		// First segment resolves to the module; ≥2 segs = parameter detail.
+		const moduleRef: PathRef = segs.length === 0
+			? target
+			: { kind: "bare", segment: segs[0] };
+		const r = this.resolveRefForRead(moduleRef);
 		if ("error" in r) return errorResult(r.error);
+
+		const wantsParam = segs.length >= 2;
+		const paramName = wantsParam ? segs[1].id : null;
+		if (segs.length > 2) {
+			return errorResult("show: parameter detail does not support sub-fields (use `set` for range subfields)");
+		}
 
 		// Live fetch when connected.
 		if (connection) {
@@ -920,16 +950,25 @@ export class BuilderMode implements Mode {
 			);
 			if (isEnvelopeResponse(response) && response.success) {
 				const raw = response.result as Record<string, unknown>;
-				const params = raw.parameters as Array<{
-					id: string;
-					value: number;
-					valueAsString: string;
-					range: { min: number; max: number };
-					defaultValue: number;
-				}> | undefined;
+				const params = raw.parameters as Array<RawParameter> | undefined;
+
+				if (wantsParam) {
+					const param = params?.find((p) => p.id.toLowerCase() === paramName!.toLowerCase());
+					if (!param) return errorResult(`Parameter "${paramName}" not found on "${r.id}"`);
+					if (session.forLlm) return jsonResult(cleanBuilderParameterForLlm(param));
+					return tableResult(
+						["Field", "Value"],
+						[
+							["id", param.id],
+							["value", param.valueAsString ?? String(param.value)],
+							["range", `${param.range.min} – ${param.range.max}`],
+							["default", String(param.defaultValue)],
+						],
+					);
+				}
 
 				if (session.forLlm) {
-					return jsonResult(raw);
+					return jsonResult(cleanBuilderShowForLlm(raw));
 				}
 
 				if (params && params.length > 0) {
@@ -1019,4 +1058,4 @@ export class BuilderMode implements Mode {
 }
 
 // Re-exported for completion engines and tests.
-export { cleanBuilderTreeForLlm };
+export { cleanBuilderShowForLlm, cleanBuilderParameterForLlm, cleanBuilderTreeForLlm };

@@ -678,7 +678,7 @@ describe("CompletionEngine", () => {
 		it("returns the canonical builder verb set for empty prefix", () => {
 			const items = engine.completeBuilderKeyword("");
 			expect(items.map((i) => i.label).sort()).toEqual([
-				"add", "cd", "clone", "get", "list", "ls", "pwd",
+				"add", "cd", "clone", "get", "ls", "pwd",
 				"remove", "rename", "reset", "set", "show",
 			]);
 		});
@@ -698,14 +698,14 @@ describe("CompletionEngine", () => {
 		});
 	});
 
-	describe("completeBuilderList", () => {
+	describe("completeBuilderShowNouns", () => {
 		it("returns tree and types", () => {
-			const items = engine.completeBuilderList("");
+			const items = engine.completeBuilderShowNouns("");
 			expect(items.map((i) => i.label).sort()).toEqual(["tree", "types"]);
 		});
 
 		it("filters by prefix", () => {
-			const items = engine.completeBuilderList("tr");
+			const items = engine.completeBuilderShowNouns("tr");
 			expect(items).toHaveLength(1);
 			expect(items[0].label).toBe("tree");
 		});

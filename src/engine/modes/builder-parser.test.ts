@@ -10,7 +10,6 @@ import {
 	type SetCommand,
 	type GetCommand,
 	type ShowCommand,
-	type ListCommand,
 	type CdCommand,
 } from "./builder-parser.js";
 
@@ -66,6 +65,23 @@ describe("builder parser — add", () => {
 
 	it("requires alias to be quoted", () => {
 		expect(parseErr("add SineSynth as Lead")).toMatch(/Parse error/);
+	});
+
+	it("accepts multi-word pretty name (bare)", () => {
+		const cmd = parseOk<AddCommand>('add Sine Wave Generator as "Sine"');
+		expect(cmd.moduleType).toBe("Sine Wave Generator");
+		expect(cmd.alias).toBe("Sine");
+	});
+
+	it("accepts multi-word pretty name (quoted)", () => {
+		const cmd = parseOk<AddCommand>('add "Sine Wave Generator" as "Sine"');
+		expect(cmd.moduleType).toBe("Sine Wave Generator");
+	});
+
+	it("multi-word + to parent", () => {
+		const cmd = parseOk<AddCommand>('add Sine Wave Generator as "Lead" to Master');
+		expect(cmd.moduleType).toBe("Sine Wave Generator");
+		expect(cmd.parent!.kind).toBe("bare");
 	});
 });
 
@@ -230,52 +246,48 @@ describe("builder parser — get", () => {
 	});
 });
 
-// ── show / list ────────────────────────────────────────────────────
+// ── show ───────────────────────────────────────────────────────────
 
 describe("builder parser — show", () => {
-	it("takes a single path target", () => {
+	it("takes a bare path target", () => {
 		const cmd = parseOk<ShowCommand>("show Lead");
 		expect(cmd.type).toBe("show");
-		expect(cmd.target.kind).toBe("bare");
+		expect(cmd.kind).toBe("target");
+		if (cmd.kind === "target") expect(cmd.target.kind).toBe("bare");
 	});
 
-	it("takes a dotted path target", () => {
+	it("takes a dotted path target (parameter detail)", () => {
 		const cmd = parseOk<ShowCommand>("show Master.Lead");
-		expect(cmd.target.kind).toBe("dotted");
+		expect(cmd.kind).toBe("target");
+		if (cmd.kind === "target") expect(cmd.target.kind).toBe("dotted");
 	});
 
-	it("does not accept `tree` (use `list tree`)", () => {
-		// `tree` is a token; the show rule consumes pathExpr starting with
-		// pathSegment → Identifier|QuotedString. Tree token ≠ Identifier.
-		expect(parseErr("show tree")).toMatch(/Parse error/);
-	});
-});
-
-describe("builder parser — list", () => {
-	it("parses `list types` without filter", () => {
-		const cmd = parseOk<ListCommand>("list types");
-		expect(cmd.noun).toBe("types");
-		expect(cmd.filter).toBeUndefined();
+	it("parses `show tree`", () => {
+		const cmd = parseOk<ShowCommand>("show tree");
+		expect(cmd.kind).toBe("tree");
 	});
 
-	it("parses `list types <filter>` (bare)", () => {
-		const cmd = parseOk<ListCommand>("list types synth");
-		expect(cmd.noun).toBe("types");
-		expect(cmd.filter).toBe("synth");
+	it("parses `show types` without filter", () => {
+		const cmd = parseOk<ShowCommand>("show types");
+		expect(cmd.kind).toBe("types");
+		if (cmd.kind === "types") expect(cmd.filter).toBeUndefined();
 	});
 
-	it("parses `list types <filter>` (quoted)", () => {
-		const cmd = parseOk<ListCommand>('list types "Master Effects"');
-		expect(cmd.filter).toBe("Master Effects");
+	it("parses `show types <filter>` (bare)", () => {
+		const cmd = parseOk<ShowCommand>("show types synth");
+		if (cmd.kind === "types") expect(cmd.filter).toBe("synth");
+		else throw new Error("expected types kind");
 	});
 
-	it("parses `list tree`", () => {
-		const cmd = parseOk<ListCommand>("list tree");
-		expect(cmd.noun).toBe("tree");
+	it("parses `show types <filter>` (quoted)", () => {
+		const cmd = parseOk<ShowCommand>('show types "Master Effects"');
+		if (cmd.kind === "types") expect(cmd.filter).toBe("Master Effects");
+		else throw new Error("expected types kind");
 	});
 
-	it("rejects unknown noun", () => {
-		expect(parseErr("list modules")).toMatch(/Parse error/);
+	it("rejects `list` verb (folded into show)", () => {
+		expect(parseErr("list types")).toMatch(/Parse error/);
+		expect(parseErr("list tree")).toMatch(/Parse error/);
 	});
 });
 

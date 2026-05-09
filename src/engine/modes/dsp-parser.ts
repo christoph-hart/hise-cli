@@ -22,7 +22,6 @@ import {
 	HexLiteral,
 	Identifier,
 	LBracket,
-	List,
 	Ls,
 	Modules,
 	Networks,
@@ -133,16 +132,9 @@ export interface ScreenshotCommand {
 	file: string;
 }
 
-export interface ShowCommand {
-	type: "show";
-	target: PathRef;
-}
-
-export interface ListCommand {
-	type: "list";
-	noun: "networks" | "modules" | "connections" | "tree";
-	filter?: string;
-}
+export type ShowCommand =
+	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree"; filter?: string }
+	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface CdCommand { type: "cd"; target: PathRef }
 export interface LsCommand { type: "ls" }
@@ -162,7 +154,6 @@ export type DspCommand =
 	| CreateParameterCommand
 	| ScreenshotCommand
 	| ShowCommand
-	| ListCommand
 	| CdCommand
 	| LsCommand
 	| PwdCommand
@@ -338,23 +329,25 @@ class DspParser extends CstParser {
 
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
-		this.SUBRULE(this.pathExpr, { LABEL: "target" });
-	});
-
-	public listCommand = this.RULE("listCommand", () => {
-		this.CONSUME(List);
 		this.OR([
-			{ ALT: () => this.CONSUME(Networks, { LABEL: "noun_networks" }) },
-			{ ALT: () => this.CONSUME(Modules, { LABEL: "noun_modules" }) },
-			{ ALT: () => this.CONSUME(Connections, { LABEL: "noun_connections" }) },
-			{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
+			{
+				ALT: () => {
+					this.OR2([
+						{ ALT: () => this.CONSUME(Networks, { LABEL: "noun_networks" }) },
+						{ ALT: () => this.CONSUME(Modules, { LABEL: "noun_modules" }) },
+						{ ALT: () => this.CONSUME(Connections, { LABEL: "noun_connections" }) },
+						{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
+					]);
+					this.OPTION(() => {
+						this.OR3([
+							{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
+							{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
+						]);
+					});
+				},
+			},
+			{ ALT: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }) },
 		]);
-		this.OPTION(() => {
-			this.OR2([
-				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
-				{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
-			]);
-		});
 	});
 
 	public cdCommand = this.RULE("cdCommand", () => {
@@ -379,7 +372,6 @@ class DspParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.createParameterCommand) },
 			{ ALT: () => this.SUBRULE(this.screenshotCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
-			{ ALT: () => this.SUBRULE(this.listCommand) },
 			{ ALT: () => this.SUBRULE(this.cdCommand) },
 			{ ALT: () => this.SUBRULE(this.lsCommand) },
 			{ ALT: () => this.SUBRULE(this.pwdCommand) },
@@ -669,29 +661,30 @@ function extractScreenshotCommand(node: CstNode): { command: ScreenshotCommand }
 }
 
 function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: string } {
-	const target = extractPathExpr(node.children.target![0] as CstNode);
-	if ("error" in target) return { error: target.error };
-	return { command: { type: "show", target: target.ref } };
-}
-
-function extractListCommand(node: CstNode): { command: ListCommand } | { error: string } {
 	const c = node.children;
-	const noun: ListCommand["noun"] = c.noun_networks
-		? "networks"
+	const kind = c.noun_networks
+		? "networks" as const
 		: c.noun_modules
-			? "modules"
+			? "modules" as const
 			: c.noun_connections
-				? "connections"
-				: "tree";
-	let filter: string | undefined;
-	if (c.filterQuoted) {
-		const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
-		if (!r.ok || r.value.kind !== "string") return { error: "list: invalid filter" };
-		filter = r.value.s;
-	} else if (c.filterBare) {
-		filter = (c.filterBare[0] as IToken).image;
+				? "connections" as const
+				: c.noun_tree
+					? "tree" as const
+					: null;
+	if (kind !== null) {
+		let filter: string | undefined;
+		if (c.filterQuoted) {
+			const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
+			if (!r.ok || r.value.kind !== "string") return { error: "show: invalid filter" };
+			filter = r.value.s;
+		} else if (c.filterBare) {
+			filter = (c.filterBare[0] as IToken).image;
+		}
+		return { command: { type: "show", kind, filter } };
 	}
-	return { command: { type: "list", noun, filter } };
+	const target = extractPathExpr(c.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "show", kind: "target", target: target.ref } };
 }
 
 function extractCdCommand(node: CstNode): { command: CdCommand } | { error: string } {
@@ -712,7 +705,6 @@ function extractCommand(cst: CstNode): { command: DspCommand } | { error: string
 	if (c.createParameterCommand) return extractCreateParameterCommand(c.createParameterCommand[0] as CstNode);
 	if (c.screenshotCommand) return extractScreenshotCommand(c.screenshotCommand[0] as CstNode);
 	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
-	if (c.listCommand) return extractListCommand(c.listCommand[0] as CstNode);
 	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
 	if (c.lsCommand) return { command: { type: "ls" } };
 	if (c.pwdCommand) return { command: { type: "pwd" } };

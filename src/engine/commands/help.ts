@@ -163,10 +163,11 @@ Module tree editor — add, configure, and inspect the HISE module tree.
 | \`set <target>.network "<name>[.xml]"\` | Init DSP network on the module |
 | \`set <target>.parent <path>\` | Reparent (move op) |
 | \`set <target>.index <n>\` | Reorder within current parent (move op) |
-| \`get <target>.<param> [, ...]\` | Read a parameter value |
-| \`show <target>\` | Show a module instance with live values |
-| \`list types [<filter>]\` | List module types (substring filter on id/type/subtype) |
-| \`list tree\` | Display the full module tree |
+| \`get <target>.<param> [, ...]\` | Read a parameter value (single scalar) |
+| \`show tree\` | Display the full module tree |
+| \`show types [<filter>]\` | List module types (substring filter on id/type/subtype) |
+| \`show <target>\` | Module instance summary (parameter IDs, mod chains) |
+| \`show <target>.<param>\` | Parameter detail (range, default, value) |
 | \`reset\` | Wipe the module tree and clear undo history |
 | \`cd <path>\` / \`ls\` / \`pwd\` | Navigate the module tree |
 
@@ -279,9 +280,12 @@ Once a network is loaded on a host, enter DSP mode against that host:
 
 | Command | Description |
 |---------|-------------|
-| \`list networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
-| \`list modules\` | List \`DspNetwork\`-capable script processors |
-| \`show <nodeId>\` | Header, properties, parameters (with range/default), modulation edges |
+| \`show tree\` | Network hierarchy |
+| \`show networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
+| \`show modules\` | List \`DspNetwork\`-capable script processors |
+| \`show connections\` | Modulation edges in the network |
+| \`show <nodeId>\` | Header, properties, parameters, modulation edges |
+| \`show <nodeId>.<param>\` | Parameter detail (range, default, value) |
 | \`save\` | Save the loaded network to its \`.xml\` file |
 | \`reset\` | Empty the loaded network (no nodes, no connections) |
 
@@ -415,8 +419,8 @@ interface components.
 | \`set <target>.bypassed <bool>\` / \`set <target>.visible <bool>\` | Property toggles |
 | \`get <target>.<prop> [, ...]\` | Read a property value |
 | \`rename <target> as "<name>"\` | Rename a component |
+| \`show tree\` | Display the full component tree |
 | \`show <target>\` | Show all properties with current values |
-| \`list tree\` | Display the full component tree |
 | \`reset\` | Reset the component tree |
 | \`cd <path>\` / \`ls\` / \`pwd\` | Navigate the component tree |
 

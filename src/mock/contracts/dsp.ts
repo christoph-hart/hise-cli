@@ -247,6 +247,25 @@ export function normalizeDspTreeResponse(value: unknown): { raw: RawDspNode; tre
 	return { raw, tree: normalizeDspTree(raw) };
 }
 
+/** Strip a raw DSP parameter to the minimum useful for LLM context:
+ *  parameterId, range (min/max + optional curve subfields), defaultValue,
+ *  current value. Drops nothing else (DSP params are flat already). */
+export function cleanDspParameterForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const p = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof p.parameterId === "string") out.id = p.parameterId;
+	const range: Record<string, unknown> = {};
+	if (typeof p.min === "number") range.min = p.min;
+	if (typeof p.max === "number") range.max = p.max;
+	if (typeof p.stepSize === "number" && p.stepSize !== 0) range.stepSize = p.stepSize;
+	if (typeof p.middlePosition === "number") range.middlePosition = p.middlePosition;
+	if (Object.keys(range).length > 0) out.range = range;
+	if (p.defaultValue !== undefined) out.defaultValue = p.defaultValue;
+	if (typeof p.value === "number") out.value = p.value;
+	return out;
+}
+
 /** Strip a raw HISE DSP tree to the minimum useful for LLM context:
  *  nodeId, factoryPath, bypassed, recursive children. Parameters, properties,
  *  and connections are dropped. */

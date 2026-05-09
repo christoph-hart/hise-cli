@@ -201,12 +201,81 @@ describe("BuilderMode — with mock connection", () => {
 		expect(r.type).toBe("table");
 	});
 
-	it("list types returns table", async () => {
+	it("show types returns table", async () => {
 		const tree = makeTree();
 		const { session } = makeMock(tree);
 		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
-		const r = await mode.parse("list types", session);
+		const r = await mode.parse("show types", session);
 		expect(r.type).toBe("table");
+	});
+
+	it("show <Module>.<Param> returns parameter detail (forLlm → minimal JSON)", async () => {
+		const tree = makeTree();
+		const mock = new MockHiseConnection();
+		mock.onGet("/api/undo/diff", () => ({
+			success: true, logs: [], errors: [], groupName: "root",
+		}));
+		mock.onGet("/api/builder/tree", () => ({
+			success: true, logs: [], errors: [], result: {
+				id: "SineSynth",
+				processorId: "Lead",
+				prettyName: "Sine Wave Generator",
+				bypassed: false,
+				parameters: [
+					{
+						parameterIndex: 0,
+						id: "Gain",
+						disabled: false,
+						range: { min: 0, max: 1, stepSize: 0 },
+						defaultValue: 0.25,
+						value: 0.25,
+						valueNormalized: 0.25,
+						valueAsString: "25%",
+					},
+				],
+				modulation: [],
+				fx: [],
+				midi: [],
+			},
+		}));
+		const session: SessionContext = {
+			connection: mock,
+			forLlm: true,
+			popMode: () => ({ type: "text", content: "Exited Builder mode." }),
+		};
+		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
+		const r = await mode.parse("show Lead.Gain", session);
+		expect(r.type).toBe("json");
+		if (r.type !== "json") return;
+		expect(r.value).toEqual({
+			id: "Gain",
+			range: { min: 0, max: 1 },
+			defaultValue: 0.25,
+			value: 0.25,
+			valueAsString: "25%",
+		});
+	});
+
+	it("show <Module>.<missing-param> errors", async () => {
+		const tree = makeTree();
+		const mock = new MockHiseConnection();
+		mock.onGet("/api/undo/diff", () => ({
+			success: true, logs: [], errors: [], groupName: "root",
+		}));
+		mock.onGet("/api/builder/tree", () => ({
+			success: true, logs: [], errors: [], result: {
+				id: "SineSynth",
+				processorId: "Lead",
+				parameters: [{ id: "Gain", value: 0.25, valueAsString: "25%", range: { min: 0, max: 1 }, defaultValue: 0.25 }],
+			},
+		}));
+		const session: SessionContext = {
+			connection: mock,
+			popMode: () => ({ type: "text", content: "Exited Builder mode." }),
+		};
+		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
+		const r = await mode.parse("show Lead.NoSuchParam", session);
+		expect(r.type).toBe("error");
 	});
 
 	it("reset succeeds with mock", async () => {

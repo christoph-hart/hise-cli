@@ -136,7 +136,7 @@ describe("ui-ops — read-only fields", () => {
 });
 
 describe("ui-ops — local-only commands", () => {
-	for (const input of ["get Play.x", "show Play", "list tree", "cd Play", "ls", "pwd", "reset"]) {
+	for (const input of ["get Play.x", "show Play", "show tree", "cd Play", "ls", "pwd", "reset"]) {
 		it(`commandToOps('${input}') is local-only`, () => {
 			expect(opsErr(input)).toBe("handled locally");
 		});

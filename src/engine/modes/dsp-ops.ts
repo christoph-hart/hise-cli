@@ -65,7 +65,6 @@ export function commandToDspOps(
 		case "createParameter": return translateCreateParameter(cmd);
 		case "reset": return { ops: [{ op: "clear" }] };
 		case "show":
-		case "list":
 		case "get":
 		case "cd":
 		case "ls":

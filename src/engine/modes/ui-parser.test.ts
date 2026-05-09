@@ -7,7 +7,6 @@ import {
 	type UiCdCommand,
 	type UiCommand,
 	type UiGetCommand,
-	type UiListCommand,
 	type UiRemoveCommand,
 	type UiRenameCommand,
 	type UiSetCommand,
@@ -155,28 +154,28 @@ describe("ui parser — get", () => {
 	});
 });
 
-// ── show / list ───────────────────────────────────────────────────
+// ── show ──────────────────────────────────────────────────────────
 
 describe("ui parser — show", () => {
 	it("takes a single path target", () => {
 		const cmd = parseOk<UiShowCommand>("show Play");
-		expect(cmd.target.kind).toBe("bare");
-	});
-});
-
-describe("ui parser — list", () => {
-	it("parses `list tree`", () => {
-		const cmd = parseOk<UiListCommand>("list tree");
-		expect(cmd.noun).toBe("tree");
+		expect(cmd.kind).toBe("target");
+		if (cmd.kind === "target") expect(cmd.target.kind).toBe("bare");
 	});
 
-	it("parses `list tree <filter>`", () => {
-		const cmd = parseOk<UiListCommand>("list tree button");
-		expect(cmd.filter).toBe("button");
+	it("parses `show tree`", () => {
+		const cmd = parseOk<UiShowCommand>("show tree");
+		expect(cmd.kind).toBe("tree");
 	});
 
-	it("rejects non-tree noun", () => {
-		expect(parseErr("list types")).toMatch(/Parse error/);
+	it("parses `show tree <filter>`", () => {
+		const cmd = parseOk<UiShowCommand>("show tree button");
+		if (cmd.kind === "tree") expect(cmd.filter).toBe("button");
+		else throw new Error("expected tree kind");
+	});
+
+	it("rejects `list` verb (folded into show)", () => {
+		expect(parseErr("list tree")).toMatch(/Parse error/);
 	});
 });
 

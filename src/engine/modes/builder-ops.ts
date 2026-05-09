@@ -198,7 +198,6 @@ export function commandToOps(
 			return translateSet(cmd.clauses, treeRoot, moduleList, currentPath);
 		case "get":
 		case "show":
-		case "list":
 		case "cd":
 		case "ls":
 		case "pwd":

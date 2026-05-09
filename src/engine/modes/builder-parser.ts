@@ -16,7 +16,6 @@ import {
 	HexLiteral,
 	Identifier,
 	LBracket,
-	List,
 	Ls,
 	NumberLiteral,
 	PercentLiteral,
@@ -96,16 +95,10 @@ export interface GetCommand {
 	paths: PathRef[];
 }
 
-export interface ShowCommand {
-	type: "show";
-	target: PathRef;
-}
-
-export interface ListCommand {
-	type: "list";
-	noun: "types" | "tree";
-	filter?: string;
-}
+export type ShowCommand =
+	| { type: "show"; kind: "tree" }
+	| { type: "show"; kind: "types"; filter?: string }
+	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface CdCommand { type: "cd"; target: PathRef }
 export interface LsCommand { type: "ls" }
@@ -121,7 +114,6 @@ export type BuilderCommand =
 	| SetCommand
 	| GetCommand
 	| ShowCommand
-	| ListCommand
 	| CdCommand
 	| LsCommand
 	| PwdCommand
@@ -156,11 +148,13 @@ class BuilderParser extends CstParser {
 		]);
 	});
 
-	// TypeRef := Identifier | QuotedString
+	// TypeRef := QuotedString | Identifier+      ; joined-by-space form supports
+	//                                              HISE pretty names like
+	//                                              `Sine Wave Generator`
 	public typeRef = this.RULE("typeRef", () => {
 		this.OR([
-			{ ALT: () => this.CONSUME(Identifier) },
 			{ ALT: () => this.CONSUME(QuotedString) },
+			{ ALT: () => this.AT_LEAST_ONE(() => this.CONSUME(Identifier)) },
 		]);
 	});
 
@@ -254,25 +248,24 @@ class BuilderParser extends CstParser {
 		});
 	});
 
-	// ShowStmt := 'show' PathExpr
+	// ShowStmt := 'show' (Tree | Types [Filter] | PathExpr)
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
-		this.SUBRULE(this.pathExpr, { LABEL: "target" });
-	});
-
-	// ListStmt := 'list' ListNoun [Filter]
-	public listCommand = this.RULE("listCommand", () => {
-		this.CONSUME(List);
 		this.OR([
-			{ ALT: () => this.CONSUME(Types, { LABEL: "noun_types" }) },
 			{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
+			{
+				ALT: () => {
+					this.CONSUME(Types, { LABEL: "noun_types" });
+					this.OPTION(() => {
+						this.OR2([
+							{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
+							{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
+						]);
+					});
+				},
+			},
+			{ ALT: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }) },
 		]);
-		this.OPTION(() => {
-			this.OR2([
-				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
-				{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
-			]);
-		});
 	});
 
 	// CdStmt := 'cd' PathExpr
@@ -303,7 +296,6 @@ class BuilderParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.setCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
-			{ ALT: () => this.SUBRULE(this.listCommand) },
 			{ ALT: () => this.SUBRULE(this.cdCommand) },
 			{ ALT: () => this.SUBRULE(this.lsCommand) },
 			{ ALT: () => this.SUBRULE(this.pwdCommand) },
@@ -349,7 +341,7 @@ function pathRefSegmentCount(ref: PathRef): number {
 
 function extractTypeRef(node: CstNode): string {
 	const c = node.children;
-	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.Identifier) return (c.Identifier as IToken[]).map((t) => t.image).join(" ");
 	if (c.QuotedString) {
 		const r = parseQuotedString((c.QuotedString[0] as IToken).image);
 		if (r.ok && r.value.kind === "string") return r.value.s;
@@ -491,23 +483,24 @@ function extractGetCommand(node: CstNode): { command: GetCommand } | { error: st
 }
 
 function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: string } {
-	const target = extractPathExpr(node.children.target![0] as CstNode);
-	if ("error" in target) return { error: target.error };
-	return { command: { type: "show", target: target.ref } };
-}
-
-function extractListCommand(node: CstNode): { command: ListCommand } | { error: string } {
 	const c = node.children;
-	const noun: "types" | "tree" = c.noun_types ? "types" : "tree";
-	let filter: string | undefined;
-	if (c.filterQuoted) {
-		const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
-		if (!r.ok || r.value.kind !== "string") return { error: "list: invalid filter" };
-		filter = r.value.s;
-	} else if (c.filterBare) {
-		filter = (c.filterBare[0] as IToken).image;
+	if (c.noun_tree) {
+		return { command: { type: "show", kind: "tree" } };
 	}
-	return { command: { type: "list", noun, filter } };
+	if (c.noun_types) {
+		let filter: string | undefined;
+		if (c.filterQuoted) {
+			const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
+			if (!r.ok || r.value.kind !== "string") return { error: "show: invalid filter" };
+			filter = r.value.s;
+		} else if (c.filterBare) {
+			filter = (c.filterBare[0] as IToken).image;
+		}
+		return { command: { type: "show", kind: "types", filter } };
+	}
+	const target = extractPathExpr(c.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "show", kind: "target", target: target.ref } };
 }
 
 function extractCdCommand(node: CstNode): { command: CdCommand } | { error: string } {
@@ -525,7 +518,6 @@ function extractCommand(cst: CstNode): { command: BuilderCommand } | { error: st
 	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
 	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
 	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
-	if (c.listCommand) return extractListCommand(c.listCommand[0] as CstNode);
 	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
 	if (c.lsCommand) return { command: { type: "ls" } };
 	if (c.pwdCommand) return { command: { type: "pwd" } };

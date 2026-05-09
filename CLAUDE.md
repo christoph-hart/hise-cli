@@ -125,6 +125,14 @@ visual intent, design decisions). Never duplicate into docs:
 When referencing implementation details, point to the source file location:
 `see src/engine/modes/mode.ts for the full interface`.
 
+### Grammar reference
+
+[`docs/CLI_GRAMMAR.md`](docs/CLI_GRAMMAR.md) is the **canonical source of truth**
+for the hise-cli command grammar. Any change to verb shape, keyword
+inventory, value forms, comma-chaining rules, BNF, or per-mode verb tables
+must update CLI_GRAMMAR.md in the same PR. Parser, dispatcher, completion,
+highlighter, and help text follow the spec — never the other way around.
+
 ## Conventions
 
 Full reference: [docs/CODE_STYLE.md](docs/CODE_STYLE.md). Highlights:

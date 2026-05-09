@@ -7,7 +7,7 @@ import type { TokenSpan, TokenType } from "./tokens.js";
 import { tokenizeSlash } from "./slash.js";
 
 const BUILDER_KEYWORDS = new Set([
-	"add", "clone", "remove", "rename", "set", "get", "show", "list", "reset",
+	"add", "clone", "remove", "rename", "set", "get", "show", "reset",
 	"to", "as", "tree", "types",
 	"cd", "ls", "pwd",
 ]);

@@ -142,23 +142,23 @@ describe("DspMode — integration", () => {
 		expect(add.type).toBe("error");
 	});
 
-	it("list networks returns the mock network list", async () => {
+	it("show networks returns the mock network list", async () => {
 		const { mode, ctx } = makeSession();
-		const out = await mode.parse("list networks", ctx);
+		const out = await mode.parse("show networks", ctx);
 		// First parse may surface no-network error; if so, verify popMode
 		// fired and re-run after bootstrap.
 		if (out.type === "error") {
 			await bootstrapNetwork(ctx, "MyDSP");
 			mode.invalidateTree();
 			await mode.onEnter(ctx);
-			const out2 = await mode.parse("list networks", ctx);
+			const out2 = await mode.parse("show networks", ctx);
 			expect(out2.type).toBe("table");
 			return;
 		}
 		expect(out.type).toBe("table");
 	});
 
-	it("list connections lists edges after connect", async () => {
+	it("show connections lists edges after connect", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");
 		mode.invalidateTree();
@@ -166,7 +166,7 @@ describe("DspMode — integration", () => {
 		await mode.parse('add filters.svf as "Filter1"', ctx);
 		await mode.parse('add control.pma as "LFO1"', ctx);
 		await mode.parse("connect LFO1 to Filter1.Frequency", ctx);
-		const out = await mode.parse("list connections", ctx);
+		const out = await mode.parse("show connections", ctx);
 		expect(out.type).toBe("table");
 		if (out.type !== "table") return;
 		expect(out.rows).toContainEqual(["LFO1", "0", "Filter1", "Frequency"]);

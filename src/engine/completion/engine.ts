@@ -648,8 +648,7 @@ export class CompletionEngine {
 			{ label: "rename", detail: "Rename a module" },
 			{ label: "set", detail: "Set a module parameter or property" },
 			{ label: "get", detail: "Get a parameter value" },
-			{ label: "show", detail: "Show a module instance" },
-			{ label: "list", detail: "List types or tree" },
+			{ label: "show", detail: "Show tree, types, instance, or parameter detail" },
 			{ label: "reset", detail: "Wipe the module tree" },
 			{ label: "cd", detail: "Navigate to a processor (cd .., cd /)" },
 			{ label: "ls", detail: "List children at current path" },
@@ -659,12 +658,12 @@ export class CompletionEngine {
 	}
 
 	/**
-	 * Complete "list" nouns in builder mode.
+	 * Complete `show` catalog nouns in builder mode.
 	 */
-	completeBuilderList(prefix: string): CompletionItem[] {
+	completeBuilderShowNouns(prefix: string): CompletionItem[] {
 		const items: CompletionItem[] = [
-			{ label: "types", detail: "List available module types" },
 			{ label: "tree", detail: "Show module tree" },
+			{ label: "types", detail: "List available module types" },
 		];
 		return fuzzyFilter(prefix, items);
 	}

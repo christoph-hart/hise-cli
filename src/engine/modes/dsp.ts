@@ -20,6 +20,7 @@ import type { HiseConnection } from "../hise.js";
 import type { RawDspNode } from "../../mock/contracts/dsp.js";
 import {
 	cleanDspTreeForLlm,
+	cleanDspParameterForLlm,
 	findDspConnectionTargeting,
 	findDspNode,
 	findDspParent,
@@ -34,7 +35,6 @@ import type {
 	CdCommand,
 	DspCommand,
 	GetCommand,
-	ListCommand,
 	ScreenshotCommand,
 	ShowCommand,
 } from "./dsp-parser.js";
@@ -74,7 +74,6 @@ export type {
 	CreateParameterCommand,
 	ScreenshotCommand,
 	ShowCommand,
-	ListCommand,
 	CdCommand,
 	LsCommand,
 	PwdCommand,
@@ -275,7 +274,6 @@ export class DspMode implements Mode {
 			case "pwd": return this.handlePwd();
 			case "save": return this.handleSave(session);
 			case "show": return this.handleShow(cmd, session);
-			case "list": return this.handleList(cmd, session);
 			case "get": return this.handleGet(cmd);
 			case "screenshot": return this.handleScreenshot(cmd, session);
 			default:
@@ -391,14 +389,27 @@ export class DspMode implements Mode {
 	// ── Show ────────────────────────────────────────────────────
 
 	private async handleShow(cmd: ShowCommand, session: SessionContext): Promise<CommandResult> {
+		if (cmd.kind !== "target") {
+			return this.handleShowNoun(cmd.kind, cmd.filter, session);
+		}
 		if (!this.moduleId) {
 			return errorResult("show: no module context.");
 		}
 		if (!session.connection) return errorResult("show <node> requires a HISE connection");
 
-		// Resolve target id from PathRef.
-		const r = this.resolveRefForRead(cmd.target);
+		// Resolve target id from PathRef. ≥2 segs = parameter detail.
+		const segs = pathRefSegments(cmd.target);
+		const moduleRef: PathRef = segs.length === 0
+			? cmd.target
+			: { kind: "bare", segment: segs[0] };
+		const r = this.resolveRefForRead(moduleRef);
 		if ("error" in r) return errorResult(r.error);
+
+		const wantsParam = segs.length >= 2;
+		const paramName = wantsParam ? segs[1].id : null;
+		if (segs.length > 2) {
+			return errorResult("show: parameter detail does not support sub-fields (use `set` for range subfields)");
+		}
 
 		const endpoint = `/api/dsp/tree?moduleId=${encodeURIComponent(this.moduleId)}&verbose=true`;
 		const resp = await session.connection.get(endpoint);
@@ -417,6 +428,21 @@ export class DspMode implements Mode {
 		const node = findDspNode(verboseRoot, r.id);
 		if (!node) return errorResult(`Node "${r.id}" not found`);
 
+		if (wantsParam) {
+			const param = node.parameters?.find((p) => p.parameterId.toLowerCase() === paramName!.toLowerCase());
+			if (!param) return errorResult(`Parameter "${paramName}" not found on "${r.id}"`);
+			if (session.forLlm) return jsonResult(cleanDspParameterForLlm(param));
+			return tableResult(
+				["Field", "Value"],
+				[
+					["id", param.parameterId],
+					["value", String(param.value ?? "")],
+					["range", `${param.min ?? "?"} – ${param.max ?? "?"}`],
+					["default", String(param.defaultValue ?? "")],
+				],
+			);
+		}
+
 		if (session.forLlm) {
 			return jsonResult(node);
 		}
@@ -426,11 +452,15 @@ export class DspMode implements Mode {
 		return preformattedResult(renderDspNodeShow(node, parentId, verboseRoot));
 	}
 
-	private async handleList(cmd: ListCommand, session: SessionContext): Promise<CommandResult> {
-		const filter = cmd.filter ? cmd.filter.toLowerCase() : null;
-		const filterFn = (s: string): boolean => !filter || s.toLowerCase().includes(filter);
+	private async handleShowNoun(
+		kind: "tree" | "networks" | "modules" | "connections",
+		filter: string | undefined,
+		session: SessionContext,
+	): Promise<CommandResult> {
+		const filterLower = filter ? filter.toLowerCase() : null;
+		const filterFn = (s: string): boolean => !filterLower || s.toLowerCase().includes(filterLower);
 
-		if (cmd.noun === "tree") {
+		if (kind === "tree") {
 			if (session.forLlm) {
 				if (!this.lastTreeResult) return textResult("(no tree)");
 				return jsonResult(cleanDspTreeForLlm(this.lastTreeResult));
@@ -439,8 +469,8 @@ export class DspMode implements Mode {
 			return preformattedResult(renderTreeBox(this.getTree()!), undefined, true);
 		}
 
-		if (cmd.noun === "networks") {
-			if (!session.connection) return errorResult("list networks requires a HISE connection");
+		if (kind === "networks") {
+			if (!session.connection) return errorResult("show networks requires a HISE connection");
 			const resp = await session.connection.get("/api/dsp/list");
 			if (isErrorResponse(resp)) return errorResult(resp.message);
 			if (!isEnvelopeResponse(resp) || !resp.success) {
@@ -455,8 +485,8 @@ export class DspMode implements Mode {
 			}
 		}
 
-		if (cmd.noun === "modules") {
-			if (!session.connection) return errorResult("list modules requires a HISE connection");
+		if (kind === "modules") {
+			if (!session.connection) return errorResult("show modules requires a HISE connection");
 			const resp = await session.connection.get("/api/status");
 			if (isErrorResponse(resp)) return errorResult(resp.message);
 			if (!isEnvelopeResponse(resp) || !resp.success) return errorResult("Failed to list modules");
@@ -466,16 +496,13 @@ export class DspMode implements Mode {
 			return tableResult(["Module ID"], filtered.map((p) => [p.moduleId]));
 		}
 
-		if (cmd.noun === "connections") {
-			if (!this.rawTree) return textResult("(no tree)");
-			const rows: string[][] = [];
-			collectConnections(this.rawTree, rows);
-			const filtered = filter ? rows.filter((r) => r.some(filterFn)) : rows;
-			if (filtered.length === 0) return textResult("(no modulation connections)");
-			return tableResult(["Source", "Output", "Target", "Parameter"], filtered);
-		}
-
-		return errorResult(`unknown list noun: ${cmd.noun}`);
+		// connections
+		if (!this.rawTree) return textResult("(no tree)");
+		const rows: string[][] = [];
+		collectConnections(this.rawTree, rows);
+		const filtered = filterLower ? rows.filter((r) => r.some(filterFn)) : rows;
+		if (filtered.length === 0) return textResult("(no modulation connections)");
+		return tableResult(["Source", "Output", "Target", "Parameter"], filtered);
 	}
 
 	// ── Get ─────────────────────────────────────────────────────
@@ -606,18 +633,31 @@ export class DspMode implements Mode {
 			return { items, from: offset, to: inputLength, label: "DSP commands" };
 		}
 
-		if (first === "list" && tokens.length === 2) {
-			const prefix = tokens[1]!.toLowerCase();
-			const items = DSP_LIST_NOUNS.filter((k) => k.label.startsWith(prefix));
-			return { items, from: offset + tokens[0]!.length + 1, to: inputLength };
-		}
-
 		if (first === "show" && tokens.length === 2) {
-			const prefix = tokens[1]!.toLowerCase();
+			const prefix = tokens[1]!;
+			const lower = prefix.toLowerCase();
+			// Parameter detail: `show <node>.<param>` — complete params after dot.
+			const dotIdx = prefix.indexOf(".");
+			if (dotIdx !== -1) {
+				const nodeId = prefix.slice(0, dotIdx);
+				const paramPrefix = prefix.slice(dotIdx + 1).toLowerCase();
+				const names = this.scriptnodeList
+					? nodeParametersAndProperties(this.rawTree, this.scriptnodeList, nodeId)
+					: nodeParameters(this.rawTree, nodeId);
+				const items = names
+					.filter((p) => p.toLowerCase().startsWith(paramPrefix))
+					.map((p) => ({ label: p }));
+				return {
+					items,
+					from: offset + tokens[0]!.length + 1 + dotIdx + 1,
+					to: inputLength,
+				};
+			}
+			const nouns = DSP_SHOW_NOUNS.filter((k) => k.label.startsWith(lower));
 			const nodes = collectDspNodeIds(this.rawTree)
-				.filter((n) => n.nodeId.toLowerCase().startsWith(prefix))
+				.filter((n) => n.nodeId.toLowerCase().startsWith(lower))
 				.map((n) => ({ label: n.nodeId, detail: n.factoryPath }));
-			return { items: nodes, from: offset + tokens[0]!.length + 1, to: inputLength };
+			return { items: [...nouns, ...nodes], from: offset + tokens[0]!.length + 1, to: inputLength };
 		}
 
 		if (first === "add" && tokens.length === 2) {
@@ -787,8 +827,7 @@ function renderDspNodeShow(
 // ── Completion keyword tables ───────────────────────────────────
 
 const DSP_KEYWORDS = [
-	{ label: "show", detail: "show <nodeId> — node header + parameters" },
-	{ label: "list", detail: "list networks | modules | connections | tree" },
+	{ label: "show", detail: "show tree | networks | modules | connections | <nodeId> | <nodeId>.<param>" },
 	{ label: "save", detail: "Save the network to its .xml file" },
 	{ label: "reset", detail: "Empty the loaded network" },
 	{ label: "add", detail: "add <factory>.<node> as \"<id>\" [to <parent>]" },
@@ -805,11 +844,11 @@ const DSP_KEYWORDS = [
 	{ label: "pwd", detail: "Print current path" },
 ];
 
-const DSP_LIST_NOUNS = [
+const DSP_SHOW_NOUNS = [
+	{ label: "tree", detail: "Network hierarchy" },
 	{ label: "networks", detail: "Available DspNetwork xml files" },
 	{ label: "modules", detail: "Script processors hosting networks" },
 	{ label: "connections", detail: "Modulation edges in the network" },
-	{ label: "tree", detail: "Network hierarchy" },
 ];
 
 // Stand-in to silence unused-import warnings when the dispatcher path

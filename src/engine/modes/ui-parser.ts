@@ -6,7 +6,7 @@
 import { CstParser, type CstNode, type IToken } from "chevrotain";
 import { closest } from "fastest-levenshtein";
 import {
-	Add, Remove, Rename, Show, Set, Get, List, Cd, Ls, Pwd, Reset,
+	Add, Remove, Rename, Show, Set, Get, Cd, Ls, Pwd, Reset,
 	To, As, Tree, Types, BooleanLiteral,
 	Identifier, QuotedString, NumberLiteral, PercentLiteral, HexLiteral,
 	Dot, DoubleDot, Comma, LBracket, RBracket,
@@ -100,16 +100,9 @@ export interface UiGetCommand {
 	paths: PathRef[];
 }
 
-export interface UiShowCommand {
-	type: "show";
-	target: PathRef;
-}
-
-export interface UiListCommand {
-	type: "list";
-	noun: "tree";
-	filter?: string;
-}
+export type UiShowCommand =
+	| { type: "show"; kind: "tree"; filter?: string }
+	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface UiCdCommand { type: "cd"; target: PathRef }
 export interface UiLsCommand { type: "ls" }
@@ -124,7 +117,6 @@ export type UiCommand =
 	| UiSetCommand
 	| UiGetCommand
 	| UiShowCommand
-	| UiListCommand
 	| UiCdCommand
 	| UiLsCommand
 	| UiPwdCommand
@@ -241,18 +233,20 @@ class UiParser extends CstParser {
 
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
-		this.SUBRULE(this.pathExpr, { LABEL: "target" });
-	});
-
-	public listCommand = this.RULE("listCommand", () => {
-		this.CONSUME(List);
-		this.CONSUME(Tree, { LABEL: "noun_tree" });
-		this.OPTION(() => {
-			this.OR([
-				{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
-				{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
-			]);
-		});
+		this.OR([
+			{
+				ALT: () => {
+					this.CONSUME(Tree, { LABEL: "noun_tree" });
+					this.OPTION(() => {
+						this.OR2([
+							{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
+							{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
+						]);
+					});
+				},
+			},
+			{ ALT: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }) },
+		]);
 	});
 
 	public cdCommand = this.RULE("cdCommand", () => {
@@ -272,7 +266,6 @@ class UiParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.setCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
-			{ ALT: () => this.SUBRULE(this.listCommand) },
 			{ ALT: () => this.SUBRULE(this.cdCommand) },
 			{ ALT: () => this.SUBRULE(this.lsCommand) },
 			{ ALT: () => this.SUBRULE(this.pwdCommand) },
@@ -439,22 +432,21 @@ function extractGetCommand(node: CstNode): { command: UiGetCommand } | { error: 
 }
 
 function extractShowCommand(node: CstNode): { command: UiShowCommand } | { error: string } {
-	const target = extractPathExpr(node.children.target![0] as CstNode);
-	if ("error" in target) return { error: target.error };
-	return { command: { type: "show", target: target.ref } };
-}
-
-function extractListCommand(node: CstNode): { command: UiListCommand } | { error: string } {
 	const c = node.children;
-	let filter: string | undefined;
-	if (c.filterQuoted) {
-		const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
-		if (!r.ok || r.value.kind !== "string") return { error: "list: invalid filter" };
-		filter = r.value.s;
-	} else if (c.filterBare) {
-		filter = (c.filterBare[0] as IToken).image;
+	if (c.noun_tree) {
+		let filter: string | undefined;
+		if (c.filterQuoted) {
+			const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
+			if (!r.ok || r.value.kind !== "string") return { error: "show: invalid filter" };
+			filter = r.value.s;
+		} else if (c.filterBare) {
+			filter = (c.filterBare[0] as IToken).image;
+		}
+		return { command: { type: "show", kind: "tree", filter } };
 	}
-	return { command: { type: "list", noun: "tree", filter } };
+	const target = extractPathExpr(c.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	return { command: { type: "show", kind: "target", target: target.ref } };
 }
 
 function extractCdCommand(node: CstNode): { command: UiCdCommand } | { error: string } {
@@ -471,7 +463,6 @@ function extractCommand(cst: CstNode): { command: UiCommand } | { error: string 
 	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
 	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
 	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
-	if (c.listCommand) return extractListCommand(c.listCommand[0] as CstNode);
 	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
 	if (c.lsCommand) return { command: { type: "ls" } };
 	if (c.pwdCommand) return { command: { type: "pwd" } };
