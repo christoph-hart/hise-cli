@@ -299,7 +299,7 @@ describe("executeCliCommand", () => {
 		}
 	});
 
-	it("returns structured DSP tree output for agent calls", async () => {
+	it("returns structured DSP tree output for separated multi-word target agent calls", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);
 		conn.onGet("/api/dsp/tree", () => ({
@@ -316,7 +316,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-dsp", "--target:ScriptFX1", "show", "tree", "--agent"],
+			["node", "hise-cli", "-dsp", "--target", "Script FX1", "show", "tree", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -326,6 +326,7 @@ describe("executeCliCommand", () => {
 		if (result.kind === "json") {
 			expect(result.payload).toEqual({ ok: true, value: { nodeId: "root", factoryPath: "container.chain", bypassed: false, children: [{ nodeId: "gain1", factoryPath: "core.gain", bypassed: false }] } });
 		}
+		expect(conn.calls.some((call) => call.endpoint.includes("moduleId=Script%20FX1"))).toBe(true);
 	});
 
 	it("returns null DSP tree output for agent calls without a selected network", async () => {

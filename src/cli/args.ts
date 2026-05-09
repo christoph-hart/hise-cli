@@ -33,7 +33,7 @@ export type ScriptApiCommand =
 	| { action: "set"; moduleId: string; callback?: string; source: { type: "stdin" } | { type: "file"; path: string } | { type: "callbacks-json"; path: string }; compile: boolean }
 	| { action: "compile"; moduleId: string };
 
-const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select"]);
+const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select", "--target"]);
 
 const VALID_VERBOSITIES = new Set(["verbose", "summary", "quiet"]);
 
@@ -110,6 +110,43 @@ function readFlagValue(args: string[], name: string): string | undefined {
 	if (index === -1) return undefined;
 	const value = args[index + 1];
 	return value && !value.startsWith("--") ? value : undefined;
+}
+
+function readTargetFlag(args: string[]): { target: string; flagArgs: Set<number> } | { error: string } {
+	const flagArgs = new Set<number>();
+	let target = "";
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (arg.startsWith("--target:")) {
+			target = arg.slice("--target:".length);
+			flagArgs.add(i);
+			continue;
+		}
+		if (arg.startsWith("--target=")) {
+			target = arg.slice("--target=".length);
+			flagArgs.add(i);
+			continue;
+		}
+		if (arg === "--target") {
+			const value = args[i + 1];
+			if (!value || value.startsWith("--")) return { error: "--target requires a path value" };
+			target = value;
+			flagArgs.add(i);
+			flagArgs.add(i + 1);
+			i++;
+		}
+	}
+
+	return { target, flagArgs };
+}
+
+function formatTargetSuffix(target: string): string {
+	if (!target) return "";
+	if (/\s/.test(target)) {
+		return `."${target.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+	}
+	return `.${target}`;
 }
 
 function parseOutputOptions(args: string[]): { args: string[]; output: CliOutputOptions } | { error: string } {
@@ -330,6 +367,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	for (const arg of args) {
 		if (RESERVED_FLAGS.has(arg)) continue;
 		if (arg.startsWith("--target:")) continue;
+		if (arg.startsWith("--target=")) continue;
 		if (flagToEntry.has(arg)) {
 			commandFlag = arg;
 			entry = flagToEntry.get(arg)!;
@@ -342,14 +380,15 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	}
 
 	const useMock = args.includes("--mock");
-	const targetArg = args.find((arg) => arg.startsWith("--target:"));
-	const target = targetArg ? targetArg.slice("--target:".length) : "";
+	const targetResult = readTargetFlag(args);
+	if ("error" in targetResult) return { kind: "error", message: targetResult.error };
+	const { target, flagArgs: targetArgIndexes } = targetResult;
 
 	if (target && entry.kind !== "mode") {
 		return { kind: "error", message: `${commandFlag} does not support --target` };
 	}
 
-	const rawTailParts = args.filter((arg) => arg !== commandFlag && arg !== targetArg && arg !== "--mock" && arg !== "--pretty");
+	const rawTailParts = args.filter((arg, index) => arg !== commandFlag && !targetArgIndexes.has(index) && arg !== "--mock" && arg !== "--pretty");
 	const stdin = rawTailParts.includes("--stdin") || rawTailParts.includes("-");
 	const tailParts = rawTailParts.filter((arg) => arg !== "--stdin" && arg !== "-");
 
@@ -383,7 +422,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	}
 
 	const mode = entry.kind === "mode" ? entry.name : "root";
-	const targetSuffix = target ? `.${target}` : "";
+	const targetSuffix = formatTargetSuffix(target);
 	const canonicalCommand = `/${entry.name}${targetSuffix}${tail ? ` ${tail}` : ""}`;
 
 	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin, output };

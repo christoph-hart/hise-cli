@@ -26,6 +26,19 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses separated target values for mode commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-dsp", "--target", "Script FX1", "show", "tree"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" show tree');
+		}
+	});
+
+	it("rejects target without a path", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-dsp", "show", "tree", "--target"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--target requires a path value" });
+	});
+
 	it("rejects missing one-shot tail for mode commands", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-script"], getCliCommands());
 		expect(result).toEqual({

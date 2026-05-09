@@ -80,7 +80,7 @@ OPTIONS
   --compact          Compact the final output payload only
   --select <path>    Select a payload field, preserving { ok, value }
   --stdin            Read a one-shot mode command from stdin
-  --target:<path>    Set context path for mode commands`;
+  --target <path>    Set context path for mode commands`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────
 
@@ -90,7 +90,7 @@ const SCOPED_HELP: Record<string, string> = {
 SYNTAX
   hise-cli -builder "<command>"
   hise-cli -builder --stdin < command.txt
-  hise-cli -builder --target:<path> "<command>"
+  hise-cli -builder --target <path> "<command>"
 
 QUICK START
   hise-cli -builder "show tree"                       inspect current modules
@@ -236,7 +236,7 @@ PROPERTY WRITES vs PARAMETER WRITES
 
 CONTEXT TARGET
   --target sets an implicit parent without entering the mode:
-    hise-cli -builder --target:Master "add LFO as \"Shape\" to gain"
+    hise-cli -builder --target Master "add LFO as \"Shape\" to gain"
 
 UNDO
   All tree mutations (add, remove, set, clone, rename) are undoable via
@@ -295,14 +295,14 @@ EXAMPLES
   hise-cli -builder "clone Drive 2"
   hise-cli -builder "remove Drive2, Drive3"
   hise-cli -builder "show \"Master Chain\""
-  hise-cli -builder --target:Master "add LFO as \"Shape\" to gain, set Shape.Frequency 4.0"
+  hise-cli -builder --target Master "add LFO as \"Shape\" to gain, set Shape.Frequency 4.0"
   hise-cli -builder "reset"`,
 
 	dsp: `hise-cli -dsp — scriptnode graph editor
 
 SYNTAX
   hise-cli -dsp "<command>"
-  hise-cli -dsp --target:<moduleId> "<command>"
+  hise-cli -dsp --target <moduleId> "<command>"
 
 MODULE CONTEXT
   Every DSP command is scoped to a "moduleId" — the script processor that
@@ -319,7 +319,7 @@ MODULE CONTEXT
   rather than entering a host called "save".
 
   CLI: pass the host via --target:
-    hise-cli -dsp --target:"Script FX" "<command>"
+    hise-cli -dsp --target "Script FX" "<command>"
 
 NETWORK PROVISIONING (now from builder mode)
   Networks are created or loaded from builder mode:
@@ -438,17 +438,17 @@ SCREENSHOT
     UI to be open (returns 503 otherwise).
 
 EXAMPLES
-  hise-cli -dsp --target:"Script FX1" "show networks"
-  hise-cli -dsp --target:"Script FX1" "show root"
-  hise-cli -dsp --target:"Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
-  hise-cli -dsp --target:"Script FX1" "add filters.svf as \"F1\""
-  hise-cli -dsp --target:"Script FX1" "add control.pma as \"LFO1\", connect LFO1 to F1.Frequency matched"
-  hise-cli -dsp --target:"Script FX1" "disconnect F1.Frequency"
-  hise-cli -dsp --target:"Script FX1" "create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3"
-  hise-cli -dsp --target:"Script FX1" "set Osc1.Frequency.stepSize 1"
-  hise-cli -dsp --target:"Script FX1" "get F1.Frequency.source"
-  hise-cli -dsp --target:"Script FX1" "screenshot scale 100% file \"graph.png\""
-  hise-cli -dsp --target:"Script FX1" "save"`,
+  hise-cli -dsp --target "Script FX1" "show networks"
+  hise-cli -dsp --target "Script FX1" "show root"
+  hise-cli -dsp --target "Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
+  hise-cli -dsp --target "Script FX1" "add filters.svf as \"F1\""
+  hise-cli -dsp --target "Script FX1" "add control.pma as \"LFO1\", connect LFO1 to F1.Frequency matched"
+  hise-cli -dsp --target "Script FX1" "disconnect F1.Frequency"
+  hise-cli -dsp --target "Script FX1" "create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3"
+  hise-cli -dsp --target "Script FX1" "set Osc1.Frequency.stepSize 1"
+  hise-cli -dsp --target "Script FX1" "get F1.Frequency.source"
+  hise-cli -dsp --target "Script FX1" "screenshot scale 100% file \"graph.png\""
+  hise-cli -dsp --target "Script FX1" "save"`,
 
 	script: `hise-cli script — HiseScript REPL and callback editing
 
@@ -593,7 +593,7 @@ EXAMPLES
 
 SYNTAX
   hise-cli -ui "<command>"
-  hise-cli -ui --target:<component> "<command>"
+  hise-cli -ui --target <component> "<command>"
 
 GRAMMAR
   - "as <name>" is mandatory on add (no positional names).
@@ -641,7 +641,7 @@ EXAMPLES
   hise-cli -ui "rename PlayButton as \\"StartButton\\""
   hise-cli -ui "add ScriptPanel as \\"Header\\", add ScriptButton as \\"Logo\\" to Header"
   hise-cli -ui "set Logo.bounds [10, 5, 40, 40]"
-  hise-cli -ui --target:MainPanel "add ScriptSlider as \\"VolumeKnob\\""
+  hise-cli -ui --target MainPanel "add ScriptSlider as \\"VolumeKnob\\""
   hise-cli -ui "set VolumeKnob.value 0.5"
   hise-cli -ui "show PlayButton"`,
 

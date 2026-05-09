@@ -31,13 +31,77 @@ Identifier matching (paths, fields, type names) is **case-insensitive**. Storage
 
 Filters (`show types <filter>`) are case-insensitive substring matches — same as identifier matching.
 
+## CLI invocation layer
+
+Mode commands can be passed as a single quoted string or as unquoted argv tokens after the mode flag. These are equivalent:
+
+```
+hise-cli -builder "show tree"
+hise-cli -builder show tree
+```
+
+Use `--stdin` when a command body is easier or safer to pipe than quote:
+
+```
+echo 'show tree' | hise-cli -builder --stdin --agent
+```
+
+`--target <path>` sets the mode context for one-shot mode commands. The separated form is preferred because it is robust for multi-word targets across shells:
+
+```
+hise-cli -dsp --target "Script FX1" show tree --agent
+hise-cli -ui --target MainPanel add ScriptSlider as "VolumeKnob"
+```
+
+Legacy `--target:<path>` and `--target=<path>` are accepted, but examples should prefer `--target <path>`.
+
+Direct script subcommands avoid quoting callback bodies on the command line:
+
+```
+hise-cli script repl --module-id Interface --stdin --agent
+hise-cli script get --module-id Interface --callback onInit --agent
+hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
+hise-cli script compile --module-id Interface --agent
+```
+
+`--module-id <id>` already uses the safe separated flag form. Do not use colon-style module-id flags.
+
 ## Output formats
 
-`show <id>`, `show <id>.<param>`, and `get <path>` return the same content in two formats:
-- **CLI mode** — JSON (machine-parseable, LLM-friendly).
-- **TUI mode** — formatted text (key/value, indented tree).
+Default one-shot CLI output is pretty text. Use output flags for machine consumers:
 
-`show <noun>` returns array (CLI) / table (TUI) of matching entries.
+- `--json` emits structured JSON.
+- `--compact` removes empty wrapper noise from the final payload only; it does not alter mode semantics.
+- `--select <path>` extracts a field from the final payload while preserving `{ ok, value }`; it implies JSON output.
+- `--agent` implies `--json --compact` and guarantees failure payloads include a stable `code` field.
+
+Agent-safe tree queries must return structured JSON, not terminal-only tree art:
+
+```
+hise-cli -builder show tree --agent
+hise-cli -ui show tree --agent
+hise-cli -dsp --target "Script FX1" show tree --agent
+```
+
+Error payload shape under `--agent`:
+
+```
+{ "ok": false, "code": "hise_api_error", "error": "..." }
+```
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0 | success |
+| 1 | generic execution error |
+| 2 | usage error or `--select` path not found |
+| 3 | HISE unavailable / transport error |
+| 4 | HISE API error |
+| 5 | validation error |
+| 6 | expectation failure |
+
+`show <noun>` returns matching entries in CLI output and table-style displays in the TUI.
 
 ## Paths and identifier resolution
 
