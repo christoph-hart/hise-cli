@@ -6,7 +6,7 @@ import { parseCliArgs } from "./args.js";
 import type { ScriptApiCommand } from "./args.js";
 import { ObserverClient } from "./observer.js";
 import { CapturingHiseConnection } from "./capture.js";
-import { serializeCliOutput, type CliOutputPayload } from "./output.js";
+import { processCliOutputPayload, serializeCliOutput, type CliOutputPayload } from "./output.js";
 import { createSession, loadSessionDatasets } from "../session-bootstrap.js";
 import { createDefaultMockRuntime } from "../mock/runtime.js";
 import type { WizardHandlerRegistry } from "../engine/wizard/handler-registry.js";
@@ -57,7 +57,7 @@ export async function executeCliCommand(
 	commands: CommandEntry[],
 	dataLoader: DataLoader,
 	connectionOrOptions?: HiseConnection | CliCommandOptions,
-): Promise<{ kind: "tui"; args: string[] } | { kind: "help"; scope?: string } | { kind: "error"; message: string } | { kind: "diagnose"; filePath: string } | { kind: "update"; check: boolean } | { kind: "json"; payload: CliOutputPayload }> {
+): Promise<{ kind: "tui"; args: string[] } | { kind: "help"; scope?: string } | { kind: "error"; message: string } | { kind: "diagnose"; filePath: string } | { kind: "update"; check: boolean } | { kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
 	// Backward compat: accept either a connection directly or an options object
 	const opts: CliCommandOptions = connectionOrOptions && "probe" in connectionOrOptions
 		? { connectionOverride: connectionOrOptions }
@@ -68,13 +68,13 @@ export async function executeCliCommand(
 		return executeRunCommand(parsed, dataLoader, opts);
 	}
 	if (parsed.kind === "script-api") {
-		return executeScriptApiCommand(parsed.command, parsed.useMock, opts);
+		return executeScriptApiCommand(parsed.command, parsed.useMock, parsed.output, opts);
 	}
 	if (parsed.kind === "version") {
-		return { kind: "json", payload: { ok: true, value: { version: cliVersion() } } };
+		return finalizeJsonPayload({ ok: true, value: { version: cliVersion() } }, parsed.output);
 	}
 	if (parsed.kind === "status") {
-		return { kind: "json", payload: { ok: true, value: await collectStatus(opts) } };
+		return finalizeJsonPayload({ ok: true, value: await collectStatus(opts) }, parsed.output);
 	}
 	if (parsed.kind !== "execute") return parsed;
 
@@ -158,7 +158,7 @@ export async function executeCliCommand(
 			timestamp: Date.now(),
 		});
 
-		return { kind: "json", payload };
+		return finalizeJsonPayload(payload, parsed.output);
 	} finally {
 		connection.destroy();
 	}
@@ -170,12 +170,12 @@ async function executeRunCommand(
 	parsed: Extract<import("./args.js").CliParseResult, { kind: "run" }>,
 	dataLoader: DataLoader,
 	opts: CliCommandOptions,
-): Promise<{ kind: "json"; payload: CliOutputPayload }> {
+): Promise<{ kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
 	// Watch mode: enter long-running loop (never returns via normal path)
 	if (parsed.watch && parsed.source.type === "file") {
 		await runWatchMode(parsed, dataLoader, opts);
 		// runWatchMode only returns on error
-		return { kind: "json", payload: { ok: true, value: "Watch ended." } };
+		return finalizeJsonPayload({ ok: true, value: "Watch ended." }, parsed.output);
 	}
 
 	// Create session with connection (before reading source, so path resolution works)
@@ -215,14 +215,11 @@ async function executeRunCommand(
 	// Bare-relative paths require a project folder. Abort with an explicit
 	// error rather than silently falling back to CWD.
 	if (parsed.source.type === "file" && needsProjectFolder(parsed.source.path) && !session.projectFolder) {
-		return {
-			kind: "json",
-			payload: {
-				ok: false,
-				error: `Cannot resolve "${parsed.source.path}": HISE is not running and no project is open. ` +
-					`Open a project in HISE, prefix the path with "./" for CWD-relative, or pass an absolute path.`,
-			},
-		};
+		return finalizeJsonPayload({
+			ok: false,
+			error: `Cannot resolve "${parsed.source.path}": HISE is not running and no project is open. ` +
+				`Open a project in HISE, prefix the path with "./" for CWD-relative, or pass an absolute path.`,
+		}, parsed.output);
 	}
 
 	// Read the script source (after project info, so file paths resolve to project folder)
@@ -234,10 +231,7 @@ async function executeRunCommand(
 			source = await readRunSource(parsed.source);
 		}
 	} catch (err) {
-		return {
-			kind: "json",
-			payload: { ok: false, error: `Failed to load script: ${err instanceof Error ? err.message : String(err)}` },
-		};
+		return finalizeJsonPayload({ ok: false, error: `Failed to load script: ${err instanceof Error ? err.message : String(err)}` }, parsed.output);
 	}
 
 	try {
@@ -246,7 +240,7 @@ async function executeRunCommand(
 		const script = parseScript(source);
 
 		if (script.lines.length === 0) {
-			return { kind: "json", payload: { ok: true, value: "Script is empty (no executable lines)." } };
+			return finalizeJsonPayload({ ok: true, value: "Script is empty (no executable lines)." }, parsed.output);
 		}
 
 		// Validate
@@ -256,20 +250,17 @@ async function executeRunCommand(
 		if (parsed.dryRun) {
 			// Phase 1 failed — return static errors immediately
 			if (!validation.ok) {
-				return { kind: "json", payload: { ok: true, value: { lines: script.lines.length, errors: validation.errors } } };
+				return finalizeJsonPayload({ ok: true, value: { lines: script.lines.length, errors: validation.errors } }, parsed.output);
 			}
 			// Phase 2: live dry-run (undo-group-wrapped execution against HISE)
 			const { dryRunScript } = await import("../engine/run/executor.js");
 			const liveResult = await dryRunScript(script, session);
-			return { kind: "json", payload: { ok: true, value: { lines: script.lines.length, errors: liveResult.errors } } };
+			return finalizeJsonPayload({ ok: true, value: { lines: script.lines.length, errors: liveResult.errors } }, parsed.output);
 		}
 
 		if (!validation.ok) {
 			const { formatValidationReport } = await import("../engine/run/validator.js");
-			return {
-				kind: "json",
-				payload: { ok: false, error: formatValidationReport(validation) },
-			};
+			return finalizeJsonPayload({ ok: false, error: formatValidationReport(validation) }, parsed.output);
 		}
 
 		// Execute
@@ -277,7 +268,7 @@ async function executeRunCommand(
 		const { runReportResult } = await import("../engine/result.js");
 		const { serializeCliOutput } = await import("./output.js");
 		const result = await executeScript(script, session);
-		return { kind: "json", payload: serializeCliOutput("run", runReportResult(source, result, parsed.verbosity)) };
+		return finalizeJsonPayload(serializeCliOutput("run", runReportResult(source, result, parsed.verbosity)), parsed.output);
 	} finally {
 		connection.destroy();
 	}
@@ -415,6 +406,13 @@ function cliVersion(): string {
 	return typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
 }
 
+function finalizeJsonPayload(
+	payload: CliOutputPayload,
+	output: import("./args.js").CliOutputOptions,
+): { kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions } {
+	return { kind: "json", payload: processCliOutputPayload(payload, output), output };
+}
+
 interface StatusReport {
 	cliVersion: string;
 	hisePath: string | null;
@@ -479,38 +477,39 @@ function readStdin(): Promise<string> {
 async function executeScriptApiCommand(
 	command: ScriptApiCommand,
 	useMock: boolean,
+	output: import("./args.js").CliOutputOptions,
 	opts: CliCommandOptions,
-): Promise<{ kind: "json"; payload: CliOutputPayload }> {
+): Promise<{ kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
 	const mockRuntime = !opts.connectionOverride && useMock ? createDefaultMockRuntime() : null;
 	const connection = opts.connectionOverride ?? mockRuntime?.connection ?? new HttpHiseConnection();
 	try {
 		if (command.action === "repl") {
 			const expression = (await readStdin()).trim();
-			if (!expression) return { kind: "json", payload: { ok: false, error: "script repl stdin is empty" } };
+			if (!expression) return finalizeJsonPayload({ ok: false, error: "script repl stdin is empty" }, output);
 			const response = await connection.post("/api/repl", { moduleId: command.moduleId, expression });
-			return { kind: "json", payload: serializeHiseEnvelope(response) };
+			return finalizeJsonPayload(serializeHiseEnvelope(response), output);
 		}
 
 		if (command.action === "get") {
 			const params = new URLSearchParams({ moduleId: command.moduleId });
 			if (command.callback) params.set("callback", command.callback);
 			const response = await connection.get(`/api/get_script?${params.toString()}`);
-			return { kind: "json", payload: serializeHiseEnvelope(response) };
+			return finalizeJsonPayload(serializeHiseEnvelope(response), output);
 		}
 
 		if (command.action === "compile") {
 			const response = await connection.post("/api/recompile", { moduleId: command.moduleId });
-			return { kind: "json", payload: serializeHiseEnvelope(response) };
+			return finalizeJsonPayload(serializeHiseEnvelope(response), output);
 		}
 
 		const callbacks = await readScriptCallbacks(command);
-		if ("error" in callbacks) return { kind: "json", payload: { ok: false, error: callbacks.error } };
+		if ("error" in callbacks) return finalizeJsonPayload({ ok: false, error: callbacks.error }, output);
 		const response = await connection.post("/api/set_script", {
 			moduleId: command.moduleId,
 			callbacks: callbacks.callbacks,
 			compile: command.compile,
 		});
-		return { kind: "json", payload: serializeHiseEnvelope(response) };
+		return finalizeJsonPayload(serializeHiseEnvelope(response), output);
 	} finally {
 		if (!opts.connectionOverride) connection.destroy();
 	}

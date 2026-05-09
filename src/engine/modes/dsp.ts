@@ -462,8 +462,9 @@ export class DspMode implements Mode {
 
 		if (kind === "tree") {
 			if (session.forLlm) {
-				if (!this.lastTreeResult) return textResult("(no tree)");
-				return jsonResult(cleanDspTreeForLlm(this.lastTreeResult));
+				const rawTree = this.lastTreeResult ?? this.rawTree;
+				if (!rawTree) return jsonResult(null);
+				return jsonResult(cleanDspTreeForLlm(rawTree));
 			}
 			if (!this.treeRoot) return textResult("(no tree)");
 			return preformattedResult(renderTreeBox(this.getTree()!), undefined, true);

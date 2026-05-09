@@ -1,11 +1,26 @@
 import { isEnvelopeResponse, isErrorResponse, type HiseResponse } from "../engine/hise.js";
 import type { CommandResult } from "../engine/result.js";
 import { formatRunReport } from "../engine/run/executor.js";
+import type { CliOutputOptions } from "./args.js";
 
 export type CliOutputPayload =
 	| { ok: true; logs?: string[]; value?: unknown }
 	| { ok: false; error: string }
 	| { ok: boolean; result: CommandResult };
+
+export function processCliOutputPayload(
+	payload: CliOutputPayload,
+	options: CliOutputOptions,
+): CliOutputPayload {
+	let next = payload;
+	if (options.compact || options.agent) {
+		next = compactPayload(next) as CliOutputPayload;
+	}
+	if (options.select) {
+		return selectPayloadValue(next, options.select);
+	}
+	return next;
+}
 
 export function serializeCliOutput(
 	mode: string,
@@ -137,6 +152,58 @@ function logLinesFromReport(report: string): string[] {
 function stripAccent(result: CommandResult): CommandResult {
 	const { accent: _accent, ...stripped } = result;
 	return stripped as CommandResult;
+}
+
+function compactPayload(value: unknown): unknown {
+	if (Array.isArray(value)) {
+		return value.map(compactPayload);
+	}
+	if (!value || typeof value !== "object") {
+		return value;
+	}
+
+	const out: Record<string, unknown> = {};
+	for (const [key, child] of Object.entries(value)) {
+		if ((key === "logs" || key === "errors") && Array.isArray(child) && child.length === 0) continue;
+		out[key] = compactPayload(child);
+	}
+	return out;
+}
+
+function selectPayloadValue(payload: CliOutputPayload, path: string): CliOutputPayload {
+	const selected = selectPath(payload, path);
+	if (!selected.found) {
+		return { ok: false, error: `Selection path not found: ${path}` };
+	}
+	return { ok: true, value: selected.value };
+}
+
+function selectPath(root: unknown, path: string): { found: true; value: unknown } | { found: false } {
+	let current = root;
+	for (const part of parseSelectPath(path)) {
+		if (typeof part === "number") {
+			if (!Array.isArray(current) || part < 0 || part >= current.length) return { found: false };
+			current = current[part];
+			continue;
+		}
+		if (!current || typeof current !== "object" || !(part in current)) return { found: false };
+		current = (current as Record<string, unknown>)[part];
+	}
+	return { found: true, value: current };
+}
+
+function parseSelectPath(path: string): Array<string | number> {
+	const parts: Array<string | number> = [];
+	for (const segment of path.split(".")) {
+		if (!segment) continue;
+		const re = /([^\[\]]+)|\[(\d+)\]/g;
+		let match: RegExpExecArray | null;
+		while ((match = re.exec(segment)) !== null) {
+			if (match[1]) parts.push(match[1]);
+			else if (match[2]) parts.push(Number(match[2]));
+		}
+	}
+	return parts;
 }
 
 function hasMeaningfulValue(value: unknown): boolean {

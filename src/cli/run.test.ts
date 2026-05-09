@@ -244,6 +244,107 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("returns structured builder tree output for agent calls", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/builder/tree", () => ({
+			success: true,
+			result: {
+				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
+				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
+				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
+				colour: "#414141", children: [], midi: [], fx: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-builder", "show", "tree", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: { id: "Master Chain", type: "SynthChain" } });
+		}
+	});
+
+	it("returns structured UI tree output for agent calls", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/ui/tree", () => ({
+			success: true,
+			result: {
+				id: "Content",
+				type: "Root",
+				childComponents: [{ id: "Button1", type: "ScriptButton", childComponents: [] }],
+			},
+			logs: [],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-ui", "show", "tree", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: { id: "Content", type: "Root", childComponents: [{ id: "Button1", type: "ScriptButton" }] } });
+		}
+	});
+
+	it("returns structured DSP tree output for agent calls", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: {
+				nodeId: "root",
+				factoryPath: "container.chain",
+				bypassed: false,
+				parameters: [],
+				children: [{ nodeId: "gain1", factoryPath: "core.gain", bypassed: false, parameters: [], children: [] }],
+			},
+			logs: [],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-dsp", "--target:ScriptFX1", "show", "tree", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: { nodeId: "root", factoryPath: "container.chain", bypassed: false, children: [{ nodeId: "gain1", factoryPath: "core.gain", bypassed: false }] } });
+		}
+	});
+
+	it("returns null DSP tree output for agent calls without a selected network", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-dsp", "show", "tree", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: null });
+		}
+	});
+
 	it("returns script logs without undefined value noise", async () => {
 		mockObserverFetch();
 		const connection = new MockHiseConnection()

@@ -44,6 +44,27 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses global agent output flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-status", "--agent"], getCliCommands());
+		expect(result.kind).toBe("status");
+		if (result.kind === "status") {
+			expect(result.output).toEqual({ json: true, agent: true, compact: true });
+		}
+	});
+
+	it("parses select as JSON output", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-status", "--select", "value.connected"], getCliCommands());
+		expect(result.kind).toBe("status");
+		if (result.kind === "status") {
+			expect(result.output).toEqual({ json: true, agent: false, compact: false, select: "value.connected" });
+		}
+	});
+
+	it("rejects select without a path", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-status", "--select"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--select requires a path value" });
+	});
+
 	it("parses one-shot mode command from dash shorthand", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "-"], getCliCommands());
 		expect(result.kind).toBe("execute");

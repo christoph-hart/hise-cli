@@ -442,8 +442,9 @@ export class UiMode implements Mode {
 		return textResult("/");
 	}
 
-	private handleShowTree(): CommandResult {
+	private handleShowTree(session: SessionContext): CommandResult {
 		if (!this.treeRoot) return textResult("No component tree available (requires HISE connection).");
+		if (session.forLlm) return jsonResult(cleanUiTreeForLlm(this.lastTreeResult ?? this.treeRoot));
 		const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(this.treeRoot, this.currentPath) : null;
 		return preformattedResult(renderTreeBox(this.treeRoot, { pwdNode }), undefined, true);
 	}
@@ -569,7 +570,7 @@ export class UiMode implements Mode {
 	}
 
 	private async handleShow(cmd: UiShowCommand, session: SessionContext): Promise<CommandResult> {
-		if (cmd.kind === "tree") return this.handleShowTree();
+		if (cmd.kind === "tree") return this.handleShowTree(session);
 		const connection = session.connection ?? null;
 		const r = this.resolveRefForRead(cmd.target);
 		if ("error" in r) return errorResult(r.error);

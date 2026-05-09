@@ -103,13 +103,17 @@ async function main(): Promise<void> {
 	}
 
 	if (cliResult.kind === "error") {
-		console.error(chalk.red(cliResult.message));
+		if (wantsJsonOutput(process.argv)) {
+			console.log(JSON.stringify({ ok: false, error: cliResult.message }));
+		} else {
+			console.error(chalk.red(cliResult.message));
+		}
 		process.exitCode = 1;
 		return;
 	}
 
 	if (cliResult.kind === "json") {
-		if (process.argv.includes("--json")) {
+		if (cliResult.output.json) {
 			console.log(JSON.stringify(cliResult.payload));
 		} else {
 			const { renderPretty } = await import("./cli/pretty.js");
@@ -143,6 +147,13 @@ function parsePortFlag(args: string[]): number | undefined {
 		}
 	}
 	return undefined;
+}
+
+function wantsJsonOutput(argv: string[]): boolean {
+	return argv.includes("--json")
+		|| argv.includes("--agent")
+		|| argv.includes("--select")
+		|| argv.some((arg) => arg.startsWith("--select="));
 }
 
 void main();

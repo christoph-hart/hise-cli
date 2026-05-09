@@ -5,11 +5,11 @@ export type CliParseResult =
 	| { kind: "help"; scope?: string }
 	| { kind: "error"; message: string }
 	| { kind: "diagnose"; filePath: string }
-	| { kind: "run"; source: { type: "file"; path: string } | { type: "stdin" } | { type: "inline"; content: string }; dryRun: boolean; useMock: boolean; watch: boolean; verbosity: import("../engine/run/executor.js").RunReportVerbosity }
-	| { kind: "script-api"; command: ScriptApiCommand; useMock: boolean }
+	| { kind: "run"; source: { type: "file"; path: string } | { type: "stdin" } | { type: "inline"; content: string }; dryRun: boolean; useMock: boolean; watch: boolean; verbosity: import("../engine/run/executor.js").RunReportVerbosity; output: CliOutputOptions }
+	| { kind: "script-api"; command: ScriptApiCommand; useMock: boolean; output: CliOutputOptions }
 	| { kind: "update"; check: boolean }
-	| { kind: "version" }
-	| { kind: "status" }
+	| { kind: "version"; output: CliOutputOptions }
+	| { kind: "status"; output: CliOutputOptions }
 	| {
 		kind: "execute";
 		entry: CommandEntry;
@@ -17,7 +17,15 @@ export type CliParseResult =
 		mode: string;
 		useMock: boolean;
 		stdin: boolean;
+		output: CliOutputOptions;
 	};
+
+export interface CliOutputOptions {
+	json: boolean;
+	agent: boolean;
+	compact: boolean;
+	select?: string;
+}
 
 export type ScriptApiCommand =
 	| { action: "repl"; moduleId: string; source: { type: "stdin" } }
@@ -25,7 +33,7 @@ export type ScriptApiCommand =
 	| { action: "set"; moduleId: string; callback?: string; source: { type: "stdin" } | { type: "file"; path: string } | { type: "callbacks-json"; path: string }; compile: boolean }
 	| { action: "compile"; moduleId: string };
 
-const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin"]);
+const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select"]);
 
 const VALID_VERBOSITIES = new Set(["verbose", "summary", "quiet"]);
 
@@ -104,6 +112,50 @@ function readFlagValue(args: string[], name: string): string | undefined {
 	return value && !value.startsWith("--") ? value : undefined;
 }
 
+function parseOutputOptions(args: string[]): { args: string[]; output: CliOutputOptions } | { error: string } {
+	const stripped: string[] = [];
+	let agent = false;
+	let compact = false;
+	let json = false;
+	let select: string | undefined;
+
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (arg === "--agent") {
+			agent = true;
+			json = true;
+			compact = true;
+			continue;
+		}
+		if (arg === "--compact") {
+			compact = true;
+			continue;
+		}
+		if (arg === "--json") {
+			json = true;
+			continue;
+		}
+		if (arg === "--select") {
+			const value = args[i + 1];
+			if (!value || value.startsWith("--")) return { error: "--select requires a path value" };
+			select = value;
+			json = true;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--select=")) {
+			const value = arg.slice("--select=".length);
+			if (!value) return { error: "--select requires a path value" };
+			select = value;
+			json = true;
+			continue;
+		}
+		stripped.push(arg);
+	}
+
+	return { args: stripped, output: { json, agent, compact, select } };
+}
+
 function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlags: Set<string>): string | null {
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i]!;
@@ -119,7 +171,7 @@ function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlag
 	return null;
 }
 
-function parseScriptApiArgs(args: string[]): CliParseResult {
+function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseResult {
 	const action = args[1];
 	if (!action) return { kind: "error", message: "script requires a subcommand: repl | get | set | compile" };
 	if (action !== "repl" && action !== "get" && action !== "set" && action !== "compile") {
@@ -139,19 +191,19 @@ function parseScriptApiArgs(args: string[]): CliParseResult {
 		if (!rest.includes("--stdin") && !rest.includes("-")) {
 			return { kind: "error", message: "script repl requires --stdin (or -)" };
 		}
-		return { kind: "script-api", command: { action, moduleId, source: { type: "stdin" } }, useMock };
+		return { kind: "script-api", command: { action, moduleId, source: { type: "stdin" } }, useMock, output };
 	}
 
 	if (action === "get") {
 		const unexpected = findUnexpectedArgs(rest, new Set([...commonValueFlags, "--callback"]), commonBooleanFlags);
 		if (unexpected) return { kind: "error", message: `Unexpected argument for script get: ${unexpected}` };
-		return { kind: "script-api", command: { action, moduleId, callback }, useMock };
+		return { kind: "script-api", command: { action, moduleId, callback }, useMock, output };
 	}
 
 	if (action === "compile") {
 		const unexpected = findUnexpectedArgs(rest, commonValueFlags, commonBooleanFlags);
 		if (unexpected) return { kind: "error", message: `Unexpected argument for script compile: ${unexpected}` };
-		return { kind: "script-api", command: { action, moduleId }, useMock };
+		return { kind: "script-api", command: { action, moduleId }, useMock, output };
 	}
 
 	const unexpected = findUnexpectedArgs(
@@ -177,11 +229,13 @@ function parseScriptApiArgs(args: string[]): CliParseResult {
 		: file
 			? { type: "file" as const, path: file }
 			: { type: "callbacks-json" as const, path: callbacksJson! };
-	return { kind: "script-api", command: { action, moduleId, callback, source, compile }, useMock };
+	return { kind: "script-api", command: { action, moduleId, callback, source, compile }, useMock, output };
 }
 
 export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParseResult {
-	const args = argv.slice(2);
+	const outputResult = parseOutputOptions(argv.slice(2));
+	if ("error" in outputResult) return { kind: "error", message: outputResult.error };
+	const { args, output } = outputResult;
 	if (args.length === 0) return { kind: "tui", args: [] };
 
 	// --help with no mode flag → global help
@@ -197,15 +251,15 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	const first = args[0]!;
 
 	if (first === "--version" || first === "-version") {
-		return { kind: "version" };
+		return { kind: "version", output };
 	}
 
 	if (first === "--status" || first === "-status") {
-		return { kind: "status" };
+		return { kind: "status", output };
 	}
 
 	if (first === "script") {
-		return parseScriptApiArgs(args);
+		return parseScriptApiArgs(args, output);
 	}
 
 	// --run <file.hsc | - | --inline "script"> [--mock] [--dry-run] [--verbosity=<level>]
@@ -231,7 +285,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 			if (watch) {
 				return { kind: "error", message: "--watch cannot be used with --inline" };
 			}
-			return { kind: "run", source: { type: "inline", content: demangleMsys(content) }, dryRun, useMock, watch: false, verbosity };
+			return { kind: "run", source: { type: "inline", content: demangleMsys(content) }, dryRun, useMock, watch: false, verbosity, output };
 		}
 
 		const positional = stripVerbosityFlags(rest).find((a) => !a.startsWith("--"));
@@ -242,9 +296,9 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 			if (watch) {
 				return { kind: "error", message: "--watch cannot be used with stdin" };
 			}
-			return { kind: "run", source: { type: "stdin" }, dryRun, useMock, watch: false, verbosity };
+			return { kind: "run", source: { type: "stdin" }, dryRun, useMock, watch: false, verbosity, output };
 		}
-		return { kind: "run", source: { type: "file", path: positional }, dryRun, useMock, watch, verbosity };
+		return { kind: "run", source: { type: "file", path: positional }, dryRun, useMock, watch, verbosity, output };
 	}
 
 	if (first === "repl") {
@@ -295,7 +349,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 		return { kind: "error", message: `${commandFlag} does not support --target` };
 	}
 
-	const rawTailParts = args.filter((arg) => arg !== commandFlag && arg !== targetArg && arg !== "--mock" && arg !== "--pretty" && arg !== "--json");
+	const rawTailParts = args.filter((arg) => arg !== commandFlag && arg !== targetArg && arg !== "--mock" && arg !== "--pretty");
 	const stdin = rawTailParts.includes("--stdin") || rawTailParts.includes("-");
 	const tailParts = rawTailParts.filter((arg) => arg !== "--stdin" && arg !== "-");
 
@@ -332,6 +386,6 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	const targetSuffix = target ? `.${target}` : "";
 	const canonicalCommand = `/${entry.name}${targetSuffix}${tail ? ` ${tail}` : ""}`;
 
-	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin };
+	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin, output };
 }
 

@@ -36,6 +36,18 @@ OUTPUT FORMAT
              { "ok": true|false, "result": ..., "logs": [...], "errors": [...] }
            Use this in scripts that parse output programmatically.
 
+  --agent  Agent-safe output. Implies --json --compact.
+
+  --compact
+           Compact the final CLI payload by removing empty logs/errors and
+           similar wrapper noise. Output-only: does not alter mode behavior.
+
+  --select <path>
+           Extract a field from the final payload and keep the envelope:
+             { "ok": true, "value": <selected> }
+           Supports dot paths and array indexes, e.g. value.project.name or
+           value.items[0].id. Implies JSON output.
+
   Exit code: 0 on success, 1 on error.
 
 MODES
@@ -55,6 +67,9 @@ MODES
 OPTIONS
   --help             Show this help (or mode help with -<mode> --help)
   --json             Emit structured JSON output instead of pretty text
+  --agent            Emit compact JSON for tool/LLM callers
+  --compact          Compact the final output payload only
+  --select <path>    Select a payload field, preserving { ok, value }
   --stdin            Read a one-shot mode command from stdin
   --target:<path>    Set context path for mode commands`;
 

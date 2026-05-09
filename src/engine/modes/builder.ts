@@ -886,7 +886,7 @@ export class BuilderMode implements Mode {
 		session: SessionContext,
 	): Promise<CommandResult> {
 		if (cmd.kind === "types") return this.handleShowTypes(cmd.filter);
-		if (cmd.kind === "tree") return this.handleShowTree();
+		if (cmd.kind === "tree") return this.handleShowTree(session);
 		return this.handleShowTarget(cmd.target, session);
 	}
 
@@ -914,12 +914,13 @@ export class BuilderMode implements Mode {
 		);
 	}
 
-	private handleShowTree(): CommandResult {
+	private handleShowTree(session: SessionContext): CommandResult {
 		if (!this.treeRoot) {
 			return textResult("No module tree available (requires HISE connection).");
 		}
 		const tree = this.getTree();
 		if (!tree) return textResult("No module tree available (requires HISE connection).");
+		if (session.forLlm) return jsonResult(cleanBuilderTreeForLlm(tree));
 		const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(tree, this.currentPath) : null;
 		return preformattedResult(renderTreeBox(tree, { pwdNode, compact: this.compactView }), undefined, true);
 	}
