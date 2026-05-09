@@ -15,6 +15,7 @@ import {
 	applyUiDiffToTree,
 	collectComponentIds,
 	cleanUiTreeForLlm,
+	cleanUiPropertiesForLlm,
 } from "../../mock/contracts/ui.js";
 import type { CompletionEngine } from "../completion/engine.js";
 import { fuzzyFilter } from "../completion/engine.js";
@@ -588,7 +589,7 @@ export class UiMode implements Mode {
 		}
 
 		if (session.forLlm) {
-			return jsonResult(cleanUiTreeForLlm(data));
+			return jsonResult(cleanUiPropertiesForLlm(data));
 		}
 
 		const properties = data.properties as Array<{ id: string; value: unknown; isDefault: boolean }> | undefined;

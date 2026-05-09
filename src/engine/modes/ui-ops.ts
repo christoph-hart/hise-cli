@@ -29,25 +29,12 @@ export interface UiOp {
 
 const READONLY_FIELDS = new Set(["type"]);
 
-// Field-write coercion: most UI props are scalars; bounds/position/size
-// take numeric arrays.
+// Field-write coercion: most UI props are scalars. Compound fields are
+// expanded before generic property writes so HISE only sees native props.
 function coerceFieldValue(field: string, value: Value): { out: unknown } | { error: string } {
 	const lower = field.toLowerCase();
-	if (lower === "bounds") {
-		if (value.kind !== "arrayN" && value.kind !== "array4") {
-			return { error: `set X.bounds requires a 4-element array; got ${value.kind}` };
-		}
-		const arr = value.n as readonly number[];
-		if (arr.length !== 4) return { error: `set X.bounds requires 4 ints (got ${arr.length})` };
-		return { out: [...arr] };
-	}
-	if (lower === "position" || lower === "size") {
-		if (value.kind !== "arrayN" && value.kind !== "array2") {
-			return { error: `set X.${lower} requires a 2-element array; got ${value.kind}` };
-		}
-		const arr = value.n as readonly number[];
-		if (arr.length !== 2) return { error: `set X.${lower} requires 2 ints (got ${arr.length})` };
-		return { out: [...arr] };
+	if (lower === "bounds" || lower === "position" || lower === "size") {
+		return { error: `set X.${lower} is a compound field and must be expanded before coercion` };
 	}
 	if (lower === "visible" || lower === "enabled" || lower === "locked"
 		|| lower === "saveinpreset" || lower === "ispluginparameter"
@@ -71,6 +58,35 @@ function coerceFieldValue(field: string, value: Value): { out: unknown } | { err
 	const s = coerceString(value);
 	if (s.ok) return { out: s.out };
 	return { error: `cannot coerce ${value.kind} to UI field value` };
+}
+
+function coerceCompoundProperties(field: string, value: Value): { properties: Record<string, number> } | { error: string } | null {
+	const lower = field.toLowerCase();
+	if (lower === "bounds") {
+		if (value.kind !== "arrayN" && value.kind !== "array4") {
+			return { error: `set X.bounds requires a 4-element array; got ${value.kind}` };
+		}
+		const arr = value.n as readonly number[];
+		if (arr.length !== 4) return { error: `set X.bounds requires 4 ints (got ${arr.length})` };
+		return { properties: { x: arr[0]!, y: arr[1]!, width: arr[2]!, height: arr[3]! } };
+	}
+	if (lower === "position") {
+		if (value.kind !== "arrayN" && value.kind !== "array2") {
+			return { error: `set X.position requires a 2-element array; got ${value.kind}` };
+		}
+		const arr = value.n as readonly number[];
+		if (arr.length !== 2) return { error: `set X.position requires 2 ints (got ${arr.length})` };
+		return { properties: { x: arr[0]!, y: arr[1]! } };
+	}
+	if (lower === "size") {
+		if (value.kind !== "arrayN" && value.kind !== "array2") {
+			return { error: `set X.size requires a 2-element array; got ${value.kind}` };
+		}
+		const arr = value.n as readonly number[];
+		if (arr.length !== 2) return { error: `set X.size requires 2 ints (got ${arr.length})` };
+		return { properties: { width: arr[0]!, height: arr[1]! } };
+	}
+	return null;
 }
 
 function resolveRefToTarget(
@@ -260,6 +276,18 @@ function translateSetClause(
 			return { error: `cannot determine current parent of "${target.id}" — tree unavailable` };
 		}
 		return { ops: [{ op: "move", target: target.id, parent: currentParent, index: idx.out }] };
+	}
+
+	const compound = coerceCompoundProperties(tail, clause.value);
+	if (compound) {
+		if ("error" in compound) return compound;
+		return {
+			ops: Object.entries(compound.properties).map(([key, value]) => ({
+				op: "set",
+				target: target.id,
+				properties: { [key]: value },
+			})),
+		};
 	}
 
 	const f = coerceFieldValue(tail, clause.value);

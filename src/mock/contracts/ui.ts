@@ -97,6 +97,33 @@ export function cleanUiTreeForLlm(raw: unknown): unknown {
 	return out;
 }
 
+/** Strip GET /api/get_component_properties to the fields agents need for
+ *  discovery and safe writes: component id/type and current property values. */
+export function cleanUiPropertiesForLlm(raw: unknown): unknown {
+	if (!raw || typeof raw !== "object") return null;
+	const n = raw as Record<string, unknown>;
+	const out: Record<string, unknown> = {};
+	if (typeof n.id === "string") out.id = n.id;
+	if (typeof n.type === "string") out.type = n.type;
+
+	const properties = Array.isArray(n.properties) ? n.properties : [];
+	const cleaned = properties
+		.map((property) => {
+			if (!property || typeof property !== "object") return null;
+			const p = property as Record<string, unknown>;
+			if (typeof p.id !== "string") return null;
+			const entry: Record<string, unknown> = { id: p.id };
+			if ("value" in p) entry.value = p.value;
+			if (p.isDefault === false) entry.modified = true;
+			if (Array.isArray(p.items) && p.items.length > 0) entry.items = p.items;
+			return entry;
+		})
+		.filter((property) => property !== null);
+
+	if (cleaned.length > 0) out.properties = cleaned;
+	return out;
+}
+
 /** Normalize the result from GET /api/ui/tree into a TreeNode. */
 export function normalizeUiTreeResponse(value: unknown): TreeNode {
 	if (!value || typeof value !== "object") {

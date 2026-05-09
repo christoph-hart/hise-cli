@@ -14,6 +14,7 @@ describe("parseCliArgs", () => {
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe("/script Console.print(234)");
 			expect(result.mode).toBe("script");
+			expect(result.stdin).toBe(false);
 		}
 	});
 
@@ -30,6 +31,33 @@ describe("parseCliArgs", () => {
 		expect(result).toEqual({
 			kind: "error",
 			message: "-script requires a one-shot command or expression",
+		});
+	});
+
+	it("parses one-shot mode command from --stdin", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-builder", "--stdin"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder");
+			expect(result.mode).toBe("builder");
+			expect(result.stdin).toBe(true);
+		}
+	});
+
+	it("parses one-shot mode command from dash shorthand", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-builder", "-"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder");
+			expect(result.stdin).toBe(true);
+		}
+	});
+
+	it("rejects --stdin combined with inline mode command", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-builder", "--stdin", "show", "tree"], getCliCommands());
+		expect(result).toEqual({
+			kind: "error",
+			message: "-builder --stdin cannot be combined with an inline one-shot command",
 		});
 	});
 
@@ -135,6 +163,66 @@ describe("parseCliArgs --run verbosity", () => {
 			expect(result.source).toEqual({ type: "file", path: "foo.hsc" });
 			expect(result.verbosity).toBe("quiet");
 		}
+	});
+});
+
+describe("script direct subcommands", () => {
+	it("parses script repl from stdin", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "repl", "--module-id", "Interface", "--stdin"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api") {
+			expect(result.command).toEqual({ action: "repl", moduleId: "Interface", source: { type: "stdin" } });
+		}
+	});
+
+	it("parses script get with callback", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "get", "--callback", "onInit"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api") {
+			expect(result.command).toEqual({ action: "get", moduleId: "Interface", callback: "onInit" });
+		}
+	});
+
+	it("parses script set stdin with compile default", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api" && result.command.action === "set") {
+			expect(result.command.compile).toBe(true);
+			expect(result.command.source).toEqual({ type: "stdin" });
+		}
+	});
+
+	it("parses script set file with --no-compile", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "set", "--callback", "onInit", "--file", "onInit.js", "--no-compile"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api" && result.command.action === "set") {
+			expect(result.command.compile).toBe(false);
+			expect(result.command.source).toEqual({ type: "file", path: "onInit.js" });
+		}
+	});
+
+	it("rejects script set without exactly one source", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "set", "--callback", "onInit"], getCliCommands());
+		expect(result).toEqual({
+			kind: "error",
+			message: "script set requires exactly one source: --stdin, --file <path>, or --callbacks-json <path>",
+		});
+	});
+
+	it("rejects script set stdin without callback", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "set", "--stdin"], getCliCommands());
+		expect(result).toEqual({
+			kind: "error",
+			message: "script set with --stdin or --file requires --callback <name>",
+		});
+	});
+
+	it("rejects unexpected direct script args", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "compile", "--callback", "onInit"], getCliCommands());
+		expect(result).toEqual({
+			kind: "error",
+			message: "Unexpected argument for script compile: --callback",
+		});
 	});
 });
 

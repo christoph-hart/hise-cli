@@ -5,6 +5,7 @@ import {
 	normalizeUiApplyResult,
 	applyUiDiffToTree,
 	collectComponentIds,
+	cleanUiPropertiesForLlm,
 } from "./ui.js";
 import { MOCK_COMPONENT_TREE } from "../componentTree.js";
 
@@ -119,6 +120,29 @@ describe("normalizeUiApplyResult", () => {
 	it("returns null for null/undefined", () => {
 		expect(normalizeUiApplyResult(null)).toBeNull();
 		expect(normalizeUiApplyResult(undefined)).toBeNull();
+	});
+});
+
+describe("cleanUiPropertiesForLlm", () => {
+	it("preserves live component property ids and values", () => {
+		expect(cleanUiPropertiesForLlm({
+			success: true,
+			id: "Button1",
+			type: "ScriptButton",
+			properties: [
+				{ id: "text", value: "Button1", isDefault: true },
+				{ id: "radioGroup", value: 1, isDefault: false },
+				{ id: "style", value: 0, items: ["Text", "Toggle"] },
+			],
+		})).toEqual({
+			id: "Button1",
+			type: "ScriptButton",
+			properties: [
+				{ id: "text", value: "Button1" },
+				{ id: "radioGroup", value: 1, modified: true },
+				{ id: "style", value: 0, items: ["Text", "Toggle"] },
+			],
+		});
 	});
 });
 

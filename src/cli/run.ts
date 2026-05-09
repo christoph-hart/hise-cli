@@ -3,6 +3,7 @@ import type { DataLoader } from "../engine/data.js";
 import { HttpHiseConnection, type HiseConnection } from "../engine/hise.js";
 import type { CommandEntry } from "../engine/commands/registry.js";
 import { parseCliArgs } from "./args.js";
+import type { ScriptApiCommand } from "./args.js";
 import { ObserverClient } from "./observer.js";
 import { CapturingHiseConnection } from "./capture.js";
 import { serializeCliOutput, type CliOutputPayload } from "./output.js";
@@ -43,7 +44,7 @@ import { registerAssetsWizardHandlers } from "../tui/wizard-handlers/index.js";
 import { readFile as fsReadFile } from "node:fs/promises";
 import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js";
 import { extractStatusPayload } from "../engine/modes/inspect.js";
-import { isErrorResponse, isSuccessResponse } from "../engine/hise.js";
+import { isEnvelopeResponse, isErrorResponse, isSuccessResponse } from "../engine/hise.js";
 
 export interface CliCommandOptions {
 	connectionOverride?: HiseConnection;
@@ -65,6 +66,9 @@ export async function executeCliCommand(
 	const parsed = parseCliArgs(argv, commands);
 	if (parsed.kind === "run") {
 		return executeRunCommand(parsed, dataLoader, opts);
+	}
+	if (parsed.kind === "script-api") {
+		return executeScriptApiCommand(parsed.command, parsed.useMock, opts);
 	}
 	if (parsed.kind === "version") {
 		return { kind: "json", payload: { ok: true, value: { version: cliVersion() } } };
@@ -126,19 +130,23 @@ export async function executeCliCommand(
 		}
 	}
 
+	const canonicalCommand = parsed.stdin
+		? `${parsed.canonicalCommand} ${(await readStdin()).trim()}`.trim()
+		: parsed.canonicalCommand;
+
 	const observer = new ObserverClient();
 	const commandId = randomUUID();
 	await observer.emit({
 		id: commandId,
 		type: "command.start",
 		source: "llm",
-		command: parsed.canonicalCommand,
+		command: canonicalCommand,
 		mode: parsed.mode,
 		timestamp: Date.now(),
 	});
 
 	try {
-		const result = await session.handleInput(parsed.canonicalCommand);
+		const result = await session.handleInput(canonicalCommand);
 		const payload = serializeCliOutput(parsed.mode, result, connection.getLastReplResponse());
 
 		await observer.emit({
@@ -460,10 +468,98 @@ async function detectHisePath(): Promise<string | null> {
 
 function readStdin(): Promise<string> {
 	return new Promise((res, reject) => {
-		const chunks: Buffer[] = [];
+		const chunks: string[] = [];
 		process.stdin.setEncoding("utf-8");
-		process.stdin.on("data", (chunk: Buffer) => chunks.push(chunk));
-		process.stdin.on("end", () => res(Buffer.concat(chunks).toString("utf-8")));
+		process.stdin.on("data", (chunk: string) => chunks.push(chunk));
+		process.stdin.on("end", () => res(chunks.join("")));
 		process.stdin.on("error", reject);
 	});
+}
+
+async function executeScriptApiCommand(
+	command: ScriptApiCommand,
+	useMock: boolean,
+	opts: CliCommandOptions,
+): Promise<{ kind: "json"; payload: CliOutputPayload }> {
+	const mockRuntime = !opts.connectionOverride && useMock ? createDefaultMockRuntime() : null;
+	const connection = opts.connectionOverride ?? mockRuntime?.connection ?? new HttpHiseConnection();
+	try {
+		if (command.action === "repl") {
+			const expression = (await readStdin()).trim();
+			if (!expression) return { kind: "json", payload: { ok: false, error: "script repl stdin is empty" } };
+			const response = await connection.post("/api/repl", { moduleId: command.moduleId, expression });
+			return { kind: "json", payload: serializeHiseEnvelope(response) };
+		}
+
+		if (command.action === "get") {
+			const params = new URLSearchParams({ moduleId: command.moduleId });
+			if (command.callback) params.set("callback", command.callback);
+			const response = await connection.get(`/api/get_script?${params.toString()}`);
+			return { kind: "json", payload: serializeHiseEnvelope(response) };
+		}
+
+		if (command.action === "compile") {
+			const response = await connection.post("/api/recompile", { moduleId: command.moduleId });
+			return { kind: "json", payload: serializeHiseEnvelope(response) };
+		}
+
+		const callbacks = await readScriptCallbacks(command);
+		if ("error" in callbacks) return { kind: "json", payload: { ok: false, error: callbacks.error } };
+		const response = await connection.post("/api/set_script", {
+			moduleId: command.moduleId,
+			callbacks: callbacks.callbacks,
+			compile: command.compile,
+		});
+		return { kind: "json", payload: serializeHiseEnvelope(response) };
+	} finally {
+		if (!opts.connectionOverride) connection.destroy();
+	}
+}
+
+async function readScriptCallbacks(
+	command: Extract<ScriptApiCommand, { action: "set" }>,
+): Promise<{ callbacks: Record<string, string> } | { error: string }> {
+	if (command.source.type === "callbacks-json") {
+		try {
+			const raw = await readFile(resolve(command.source.path), "utf-8");
+			const parsed = JSON.parse(raw) as unknown;
+			if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+				return { error: "--callbacks-json must contain an object mapping callback names to script strings" };
+			}
+			const callbacks: Record<string, string> = {};
+			for (const [key, value] of Object.entries(parsed)) {
+				if (typeof value !== "string") return { error: `Callback "${key}" must be a string` };
+				callbacks[key] = value;
+			}
+			return { callbacks };
+		} catch (err) {
+			return { error: `Failed to read callbacks JSON: ${err instanceof Error ? err.message : String(err)}` };
+		}
+	}
+
+	const callback = command.callback!;
+	try {
+		const content = command.source.type === "stdin"
+			? await readStdin()
+			: await readFile(resolve(command.source.path), "utf-8");
+		return { callbacks: { [callback]: content.trimEnd() } };
+	} catch (err) {
+		return { error: `Failed to read script source: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+function serializeHiseEnvelope(response: import("../engine/hise.js").HiseResponse): CliOutputPayload {
+	if (isErrorResponse(response)) return { ok: false, error: response.message };
+	if (!isEnvelopeResponse(response)) return { ok: false, error: "Unexpected response from HISE" };
+	if (!response.success || response.errors.length > 0) {
+		const error = response.errors.length > 0
+			? response.errors.map((e) => e.callstack.length > 0 ? `${e.errorMessage}\n${e.callstack.join("\n")}` : e.errorMessage).join("\n")
+			: String(response.result ?? "HISE request failed");
+		return { ok: false, error };
+	}
+
+	const { success: _success, logs, errors: _errors, ...value } = response;
+	const payload: { ok: true; value: Record<string, unknown>; logs?: string[] } = { ok: true, value };
+	if (logs.length > 0) payload.logs = logs;
+	return payload as CliOutputPayload;
 }

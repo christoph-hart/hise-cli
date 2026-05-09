@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { PassThrough } from "node:stream";
 import { executeCliCommand } from "./run.js";
 import { createSession } from "../session-bootstrap.js";
 import { MockHiseConnection } from "../engine/hise.js";
 import type { DataLoader, ModuleList } from "../engine/data.js";
 import { listCliCommands } from "./commands.js";
+
+const ORIGINAL_STDIN = process.stdin;
 
 function getCliCommands() {
 	return listCliCommands(createSession({ connection: null }).session.allCommands());
@@ -11,6 +14,7 @@ function getCliCommands() {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	Object.defineProperty(process, "stdin", { value: ORIGINAL_STDIN, configurable: true });
 });
 
 function mockObserverFetch() {
@@ -196,6 +200,50 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("executes builder one-shot command from stdin", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end('add LFO as "LFO"');
+
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/builder/tree", () => ({
+			success: true,
+			result: {
+				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
+				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
+				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
+				colour: "#414141", children: [], midi: [], fx: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/builder/apply", () => ({
+			success: true,
+			result: { scope: "root", groupName: "root", diff: [{ domain: "builder", action: "+", target: "LFO" }] },
+			logs: ["Add LFO"],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-builder", "--stdin"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toMatchObject({
+				ok: true,
+				result: {
+					type: "text",
+					content: expect.stringContaining("Add LFO"),
+				},
+			});
+		}
+	});
+
 	it("returns script logs without undefined value noise", async () => {
 		mockObserverFetch();
 		const connection = new MockHiseConnection()
@@ -340,6 +388,122 @@ describe("executeCliCommand", () => {
 				onNoteOn: "function onNoteOn()\n{\n\tConsole.print(Message.getNoteNumber());\n}",
 			},
 		});
+	});
+
+	it("runs direct script repl from stdin", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end("Engine.getSampleRate()");
+
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/repl", () => ({
+				success: true,
+				value: 48000,
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "repl", "--stdin"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") expect(result.payload).toEqual({ ok: true, value: { value: 48000 } });
+		expect(connection.calls.find((call) => call.endpoint === "/api/repl")?.body).toEqual({
+			moduleId: "Interface",
+			expression: "Engine.getSampleRate()",
+		});
+	});
+
+	it("runs direct script get", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onGet("/api/get_script?moduleId=Interface&callback=onInit", () => ({
+				success: true,
+				moduleId: "Interface",
+				callbacks: { onInit: "Console.print(1);" },
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "get", "--callback", "onInit"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: { moduleId: "Interface", callbacks: { onInit: "Console.print(1);" } } });
+		}
+	});
+
+	it("runs direct script set from stdin", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end("Console.print(123);\n");
+
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/set_script", () => ({
+				success: true,
+				result: "Compiled OK",
+				updatedCallbacks: ["onInit"],
+				logs: ["123"],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: true,
+				value: { result: "Compiled OK", updatedCallbacks: ["onInit"] },
+				logs: ["123"],
+			});
+		}
+		expect(connection.calls.find((call) => call.endpoint === "/api/set_script")?.body).toEqual({
+			moduleId: "Interface",
+			callbacks: { onInit: "Console.print(123);" },
+			compile: true,
+		});
+	});
+
+	it("runs direct script compile", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/recompile", () => ({
+				success: true,
+				result: "Recompiled OK",
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "compile", "--module-id", "Interface"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") expect(result.payload).toEqual({ ok: true, value: { result: "Recompiled OK" } });
+		expect(connection.calls.find((call) => call.endpoint === "/api/recompile")?.body).toEqual({ moduleId: "Interface" });
 	});
 });
 

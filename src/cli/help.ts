@@ -16,6 +16,7 @@ const GLOBAL_HELP = `hise-cli — automation frontend for HISE audio plugin fram
 USAGE
   hise-cli                                  Open the interactive TUI
   hise-cli -<mode> "<command>"              One-shot mode command
+  hise-cli -<mode> --stdin < command.txt     Read one-shot mode command from stdin
   hise-cli --run <file.hsc> [--dry-run] [--verbosity=<level>]   Run a .hsc script file
   hise-cli --run --inline "<script>"        Run an inline script
   hise-cli --run - < script.hsc             Run script from stdin
@@ -54,6 +55,7 @@ MODES
 OPTIONS
   --help             Show this help (or mode help with -<mode> --help)
   --json             Emit structured JSON output instead of pretty text
+  --stdin            Read a one-shot mode command from stdin
   --target:<path>    Set context path for mode commands`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────
@@ -63,10 +65,12 @@ const SCOPED_HELP: Record<string, string> = {
 
 SYNTAX
   hise-cli -builder "<command>"
+  hise-cli -builder --stdin < command.txt
   hise-cli -builder --target:<path> "<command>"
 
 QUICK START
   hise-cli -builder "show tree"                       inspect current modules
+  echo 'show tree' | hise-cli -builder --stdin --json  same, without shell-quoting a command arg
   hise-cli -builder "add SimpleGain as \"Drive\""        add at root (auto-picked chain)
   hise-cli -builder "add LFO as \"Shape\" to MyGain"     add under an existing module
   hise-cli -builder "show types script"               filter types by substring
@@ -422,13 +426,38 @@ EXAMPLES
   hise-cli -dsp --target:"Script FX1" "screenshot scale 100% file \"graph.png\""
   hise-cli -dsp --target:"Script FX1" "save"`,
 
-	script: `hise-cli -script — HiseScript REPL
+	script: `hise-cli script — HiseScript REPL and callback editing
 
 SYNTAX
-  hise-cli -script "<expression>"
+  hise-cli -script "<expression>"                         REPL expression (legacy one-shot)
+  hise-cli -script --stdin                                 REPL expression from stdin
+  hise-cli script repl --module-id Interface --stdin       REPL expression from stdin
+  hise-cli script get --module-id Interface [--callback onInit]
+  hise-cli script set --module-id Interface --callback onInit --stdin
+  hise-cli script set --module-id Interface --callback onInit --file ./onInit.js
+  hise-cli script set --module-id Interface --callback onInit --stdin --no-compile
+  hise-cli script set --module-id Interface --callbacks-json ./callbacks.json
+  hise-cli script compile --module-id Interface
 
-Evaluates any HiseScript expression against the running HISE instance.
-Output includes return value, type, console logs, and errors.
+REPL
+  Evaluates HiseScript against the running HISE instance. Output includes
+  return value, Console.print logs, and errors.
+
+CALLBACK EDITING
+  Use the direct 'script set' commands for agent-safe callback edits. Script
+  bodies come from stdin or files only — no inline body argument, so callback
+  content never has to be shell-escaped. 'script set' compiles by default;
+  add --no-compile to update without compiling.
+
+  --module-id defaults to Interface.
+  --callback is required with --stdin and --file.
+  --callbacks-json reads an object mapping callback names to script strings.
+
+CALLBACK JSON SHAPE
+  {
+    "onInit": "Content.makeFrontInterface(600, 600);",
+    "onNoteOn": "Console.print(Message.getNoteNumber());"
+  }
 
 COMPLETION (TUI)
   Tab completes API namespaces and methods:
@@ -436,9 +465,11 @@ COMPLETION (TUI)
 
 EXAMPLES
   hise-cli -script "Engine.getSampleRate()"
-  hise-cli -script "Console.print(123)"
-  hise-cli -script "Synth.addNoteOn(1, 64, 127, 0)"
-  hise-cli -script "Content.getComponent('Knob1').getValue()"`,
+  echo 'Engine.getSampleRate()' | hise-cli script repl --stdin --json
+  hise-cli script get --callback onInit --json
+  echo 'Content.makeFrontInterface(600, 600);' | hise-cli script set --callback onInit --stdin --json
+  hise-cli script set --callback onInit --file ./Scripts/onInit.js --no-compile --json
+  hise-cli script compile --module-id Interface --json`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 

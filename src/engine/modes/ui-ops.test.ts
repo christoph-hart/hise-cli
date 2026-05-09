@@ -75,18 +75,34 @@ describe("ui-ops — set scalar properties", () => {
 });
 
 describe("ui-ops — bounds / position / size", () => {
-	it("set X.bounds [a,b,c,d] requires 4 ints", () => {
+	it("set X.bounds [a,b,c,d] expands to x/y/width/height writes", () => {
 		const ops = opsOk("set Play.bounds [100, 200, 80, 32]");
-		expect((ops[0]!.properties as Record<string, unknown>).bounds).toEqual([100, 200, 80, 32]);
+		expect(ops).toEqual([
+			{ op: "set", target: "Play", properties: { x: 100 } },
+			{ op: "set", target: "Play", properties: { y: 200 } },
+			{ op: "set", target: "Play", properties: { width: 80 } },
+			{ op: "set", target: "Play", properties: { height: 32 } },
+		]);
 	});
 
 	it("rejects 3-int bounds", () => {
 		expect(opsErr("set Play.bounds [1, 2, 3]")).toMatch(/4 ints/);
 	});
 
-	it("set X.position [a,b] requires 2 ints", () => {
+	it("set X.position [a,b] expands to x/y writes", () => {
 		const ops = opsOk("set Play.position [10, 20]");
-		expect((ops[0]!.properties as Record<string, unknown>).position).toEqual([10, 20]);
+		expect(ops).toEqual([
+			{ op: "set", target: "Play", properties: { x: 10 } },
+			{ op: "set", target: "Play", properties: { y: 20 } },
+		]);
+	});
+
+	it("set X.size [w,h] expands to width/height writes", () => {
+		const ops = opsOk("set Play.size [80, 32]");
+		expect(ops).toEqual([
+			{ op: "set", target: "Play", properties: { width: 80 } },
+			{ op: "set", target: "Play", properties: { height: 32 } },
+		]);
 	});
 
 	it("rejects 4-int position", () => {
