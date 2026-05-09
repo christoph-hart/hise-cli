@@ -36,7 +36,9 @@ OUTPUT FORMAT
              { "ok": true|false, "result": ..., "logs": [...], "errors": [...] }
            Use this in scripts that parse output programmatically.
 
-  --agent  Agent-safe output. Implies --json --compact.
+  --agent  Agent-safe output. Implies --json --compact and guarantees
+           errors include a stable code:
+             { "ok": false, "code": "hise_api_error", "error": "..." }
 
   --compact
            Compact the final CLI payload by removing empty logs/errors and
@@ -48,7 +50,14 @@ OUTPUT FORMAT
            Supports dot paths and array indexes, e.g. value.project.name or
            value.items[0].id. Implies JSON output.
 
-  Exit code: 0 on success, 1 on error.
+  Exit codes:
+    0 success
+    1 generic execution error
+    2 usage error or --select path not found
+    3 HISE unavailable / transport error
+    4 HISE API error
+    5 validation error
+    6 expectation failure
 
 MODES
   -builder "<command>"     Module tree editor       (--help for syntax)

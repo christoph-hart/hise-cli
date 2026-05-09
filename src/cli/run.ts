@@ -7,6 +7,7 @@ import type { ScriptApiCommand } from "./args.js";
 import { ObserverClient } from "./observer.js";
 import { CapturingHiseConnection } from "./capture.js";
 import { processCliOutputPayload, serializeCliOutput, type CliOutputPayload } from "./output.js";
+import { classifyTransportError, cliError } from "./errors.js";
 import { createSession, loadSessionDatasets } from "../session-bootstrap.js";
 import { createDefaultMockRuntime } from "../mock/runtime.js";
 import type { WizardHandlerRegistry } from "../engine/wizard/handler-registry.js";
@@ -217,6 +218,7 @@ async function executeRunCommand(
 	if (parsed.source.type === "file" && needsProjectFolder(parsed.source.path) && !session.projectFolder) {
 		return finalizeJsonPayload({
 			ok: false,
+			code: "hise_unavailable",
 			error: `Cannot resolve "${parsed.source.path}": HISE is not running and no project is open. ` +
 				`Open a project in HISE, prefix the path with "./" for CWD-relative, or pass an absolute path.`,
 		}, parsed.output);
@@ -231,7 +233,7 @@ async function executeRunCommand(
 			source = await readRunSource(parsed.source);
 		}
 	} catch (err) {
-		return finalizeJsonPayload({ ok: false, error: `Failed to load script: ${err instanceof Error ? err.message : String(err)}` }, parsed.output);
+		return finalizeJsonPayload(cliError("execution_error", `Failed to load script: ${err instanceof Error ? err.message : String(err)}`), parsed.output);
 	}
 
 	try {
@@ -260,7 +262,7 @@ async function executeRunCommand(
 
 		if (!validation.ok) {
 			const { formatValidationReport } = await import("../engine/run/validator.js");
-			return finalizeJsonPayload({ ok: false, error: formatValidationReport(validation) }, parsed.output);
+			return finalizeJsonPayload(cliError("validation_error", formatValidationReport(validation)), parsed.output);
 		}
 
 		// Execute
@@ -485,7 +487,7 @@ async function executeScriptApiCommand(
 	try {
 		if (command.action === "repl") {
 			const expression = (await readStdin()).trim();
-			if (!expression) return finalizeJsonPayload({ ok: false, error: "script repl stdin is empty" }, output);
+			if (!expression) return finalizeJsonPayload(cliError("usage_error", "script repl stdin is empty"), output);
 			const response = await connection.post("/api/repl", { moduleId: command.moduleId, expression });
 			return finalizeJsonPayload(serializeHiseEnvelope(response), output);
 		}
@@ -503,7 +505,7 @@ async function executeScriptApiCommand(
 		}
 
 		const callbacks = await readScriptCallbacks(command);
-		if ("error" in callbacks) return finalizeJsonPayload({ ok: false, error: callbacks.error }, output);
+		if ("error" in callbacks) return finalizeJsonPayload(cliError("execution_error", callbacks.error), output);
 		const response = await connection.post("/api/set_script", {
 			moduleId: command.moduleId,
 			callbacks: callbacks.callbacks,
@@ -548,13 +550,13 @@ async function readScriptCallbacks(
 }
 
 function serializeHiseEnvelope(response: import("../engine/hise.js").HiseResponse): CliOutputPayload {
-	if (isErrorResponse(response)) return { ok: false, error: response.message };
-	if (!isEnvelopeResponse(response)) return { ok: false, error: "Unexpected response from HISE" };
+	if (isErrorResponse(response)) return cliError(classifyTransportError(response.message), response.message);
+	if (!isEnvelopeResponse(response)) return cliError("hise_api_error", "Unexpected response from HISE");
 	if (!response.success || response.errors.length > 0) {
 		const error = response.errors.length > 0
 			? response.errors.map((e) => e.callstack.length > 0 ? `${e.errorMessage}\n${e.callstack.join("\n")}` : e.errorMessage).join("\n")
 			: String(response.result ?? "HISE request failed");
-		return { ok: false, error };
+		return cliError("hise_api_error", error);
 	}
 
 	const { success: _success, logs, errors: _errors, ...value } = response;

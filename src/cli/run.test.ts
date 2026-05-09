@@ -393,6 +393,7 @@ describe("executeCliCommand", () => {
 		if (result.kind === "json") {
 			expect(result.payload).toEqual({
 				ok: false,
+				code: "hise_api_error",
 				error: "Component with name x wasn't found.",
 			});
 		}
@@ -606,6 +607,49 @@ describe("executeCliCommand", () => {
 		if (result.kind === "json") expect(result.payload).toEqual({ ok: true, value: { result: "Recompiled OK" } });
 		expect(connection.calls.find((call) => call.endpoint === "/api/recompile")?.body).toEqual({ moduleId: "Interface" });
 	});
+
+	it("classifies direct HISE API envelope failures", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/recompile", () => ({
+				success: false,
+				result: "Compile failed",
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "compile", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: false, code: "hise_api_error", error: "Compile failed" });
+		}
+	});
+
+	it("classifies direct transport failures", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/recompile", () => ({ error: true, message: "POST /api/recompile: TypeError: fetch failed" }));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "compile", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toMatchObject({ ok: false, code: "hise_unavailable" });
+		}
+	});
 });
 
 describe("-wizard mode flag", () => {
@@ -709,6 +753,7 @@ describe("--run path resolution", () => {
 			expect(result.payload.ok).toBe(false);
 			expect(result.payload).toMatchObject({
 				ok: false,
+				code: "hise_unavailable",
 				error: expect.stringContaining("HISE is not running"),
 			});
 		}
@@ -731,6 +776,7 @@ describe("--run path resolution", () => {
 			// Reaches readFile and reports a load error — not the abort message.
 			expect(result.payload).toMatchObject({
 				ok: false,
+				code: "execution_error",
 				error: expect.stringContaining("Failed to load script"),
 			});
 			if ("error" in result.payload) {
@@ -752,6 +798,7 @@ describe("--run path resolution", () => {
 		if (result.kind === "json") {
 			expect(result.payload.ok).toBe(false);
 			if ("error" in result.payload) {
+				expect(result.payload.code).toBe("execution_error");
 				expect(result.payload.error).not.toContain("HISE is not running");
 				expect(result.payload.error).toContain("Failed to load script");
 			}

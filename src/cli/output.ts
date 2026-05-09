@@ -2,10 +2,11 @@ import { isEnvelopeResponse, isErrorResponse, type HiseResponse } from "../engin
 import type { CommandResult } from "../engine/result.js";
 import { formatRunReport } from "../engine/run/executor.js";
 import type { CliOutputOptions } from "./args.js";
+import { cliError, type CliErrorCode, type CliErrorPayload } from "./errors.js";
 
 export type CliOutputPayload =
 	| { ok: true; logs?: string[]; value?: unknown }
-	| { ok: false; error: string }
+	| CliErrorPayload
 	| { ok: boolean; result: CommandResult };
 
 export function processCliOutputPayload(
@@ -17,7 +18,10 @@ export function processCliOutputPayload(
 		next = compactPayload(next) as CliOutputPayload;
 	}
 	if (options.select) {
-		return selectPayloadValue(next, options.select);
+		next = selectPayloadValue(next, options.select);
+	}
+	if (options.agent && !next.ok && !("code" in next)) {
+		return cliError("execution_error", payloadErrorText(next));
 	}
 	return next;
 }
@@ -53,22 +57,22 @@ export function serializeCliOutput(
 function serializeScriptOutput(
 	replResponse: HiseResponse | null | undefined,
 	result: CommandResult,
-): { ok: true; logs?: string[]; value?: unknown } | { ok: false; error: string } | null {
+): { ok: true; logs?: string[]; value?: unknown } | CliErrorPayload | null {
 	if (replResponse) {
 		if (isErrorResponse(replResponse)) {
-			return { ok: false, error: replResponse.message };
+			return { ok: false, code: classifyCliError(replResponse.message), error: replResponse.message };
 		}
 
 		if (!isEnvelopeResponse(replResponse)) {
-			return { ok: false, error: "Unexpected response from HISE" };
+		return cliError("hise_api_error", "Unexpected response from HISE");
 		}
 
 		if (replResponse.errors.length > 0) {
-			return { ok: false, error: formatScriptErrors(replResponse.errors) };
+		return cliError("hise_api_error", formatScriptErrors(replResponse.errors));
 		}
 
 		if (!replResponse.success) {
-			return { ok: false, error: String(replResponse.result ?? "REPL evaluation failed") };
+		return cliError("hise_api_error", String(replResponse.result ?? "REPL evaluation failed"));
 		}
 
 		const payload: { ok: true; logs?: string[]; value?: unknown } = { ok: true };
@@ -82,7 +86,7 @@ function serializeScriptOutput(
 	}
 
 	if (result.type === "error") {
-		return { ok: false, error: formatCommandError(result) };
+		return cliError("execution_error", formatCommandError(result));
 	}
 
 	return null;
@@ -137,6 +141,12 @@ function serializeRunReport(
 	if (logs.length > 0) {
 		cliPayload.logs = logs;
 	}
+	if (!r.ok) {
+		return {
+			...cliPayload,
+			code: total > 0 && passed < total ? "expectation_failed" : "execution_error",
+		} as CliOutputPayload;
+	}
 	return cliPayload as CliOutputPayload;
 }
 
@@ -173,9 +183,19 @@ function compactPayload(value: unknown): unknown {
 function selectPayloadValue(payload: CliOutputPayload, path: string): CliOutputPayload {
 	const selected = selectPath(payload, path);
 	if (!selected.found) {
-		return { ok: false, error: `Selection path not found: ${path}` };
+		return cliError("select_not_found", `Selection path not found: ${path}`);
 	}
 	return { ok: true, value: selected.value };
+}
+
+function payloadErrorText(payload: CliOutputPayload): string {
+	if ("error" in payload && typeof payload.error === "string") return payload.error;
+	if ("result" in payload && payload.result.type === "error") return formatCommandError(payload.result);
+	return "Command failed";
+}
+
+function classifyCliError(message: string): CliErrorCode {
+	return /^(GET|POST)\s+\/api\//.test(message) ? "hise_unavailable" : "hise_api_error";
 }
 
 function selectPath(root: unknown, path: string): { found: true; value: unknown } | { found: false } {

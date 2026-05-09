@@ -10,6 +10,7 @@ import { listCliCommands } from "./cli/commands.js";
 import { createDefaultMockRuntime } from "./mock/runtime.js";
 import { registerUpdateHandlers } from "./tui/wizard-handlers/index.js";
 import { bootstrapNodeRuntime, type NodeRuntime } from "./bootstrap-runtime.js";
+import { cliError, exitCodeForPayload } from "./cli/errors.js";
 
 // ── Runtime singleton ───────────────────────────────────────────────
 
@@ -103,12 +104,13 @@ async function main(): Promise<void> {
 	}
 
 	if (cliResult.kind === "error") {
+		const payload = cliError("usage_error", cliResult.message);
 		if (wantsJsonOutput(process.argv)) {
-			console.log(JSON.stringify({ ok: false, error: cliResult.message }));
+			console.log(JSON.stringify(payload));
 		} else {
 			console.error(chalk.red(cliResult.message));
 		}
-		process.exitCode = 1;
+		process.exitCode = exitCodeForPayload(payload);
 		return;
 	}
 
@@ -120,7 +122,7 @@ async function main(): Promise<void> {
 			const text = renderPretty(cliResult.payload);
 			if (text) console.log(text);
 		}
-		process.exitCode = cliResult.payload.ok ? 0 : 1;
+		process.exitCode = exitCodeForPayload(cliResult.payload);
 		return;
 	}
 
