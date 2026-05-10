@@ -11,7 +11,7 @@ export type CliParseResult =
 	| { kind: "update"; check: boolean }
 	| { kind: "version"; output: CliOutputOptions }
 	| { kind: "status"; output: CliOutputOptions }
-	| { kind: "agent-context"; output: CliOutputOptions }
+	| { kind: "agent-context"; query: AgentContextQuery; output: CliOutputOptions }
 	| { kind: "which"; query: string; limit: number; output: CliOutputOptions }
 	| {
 		kind: "execute";
@@ -30,6 +30,12 @@ export interface CliOutputOptions {
 	select?: string;
 	pretty?: boolean;
 }
+
+export type AgentContextQuery =
+	| { type: "manifest" }
+	| { type: "mode"; modeId: string }
+	| { type: "capability"; id: string }
+	| { type: "capability-index" };
 
 export type ScriptApiCommand =
 	| { action: "repl"; moduleId: string; source: { type: "stdin" } }
@@ -291,6 +297,44 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 	return { kind: "script-api", command: { action, moduleId, callback, source, compile }, useMock, output };
 }
 
+function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliParseResult {
+	const rest = args.slice(1);
+	let modeId: string | undefined;
+	let capabilityId: string | undefined;
+	let listCapabilities = false;
+
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i]!;
+		if (arg === "--list-capabilities") {
+			listCapabilities = true;
+			continue;
+		}
+		if (arg === "--capability") {
+			const value = rest[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: "--capability requires an id" };
+			capabilityId = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--capability=")) {
+			const value = arg.slice("--capability=".length);
+			if (!value) return { kind: "error", message: "--capability requires an id" };
+			capabilityId = value;
+			continue;
+		}
+		if (arg.startsWith("--")) return { kind: "error", message: `Unexpected argument for agent-context: ${arg}` };
+		if (modeId) return { kind: "error", message: `Unexpected argument for agent-context: ${arg}` };
+		modeId = stripMatchedOuterQuotes(arg);
+	}
+
+	const queryCount = [Boolean(modeId), Boolean(capabilityId), listCapabilities].filter(Boolean).length;
+	if (queryCount > 1) return { kind: "error", message: "agent-context accepts only one query: <mode>, --capability <id>, or --list-capabilities" };
+	if (capabilityId) return { kind: "agent-context", query: { type: "capability", id: capabilityId }, output: { ...output, json: true } };
+	if (listCapabilities) return { kind: "agent-context", query: { type: "capability-index" }, output: { ...output, json: true } };
+	if (modeId) return { kind: "agent-context", query: { type: "mode", modeId }, output: { ...output, json: true } };
+	return { kind: "agent-context", query: { type: "manifest" }, output: { ...output, json: true } };
+}
+
 function parseScriptShowApiArgs(rest: string[], moduleId: string, useMock: boolean, output: CliOutputOptions): CliParseResult {
 	const positional: Array<{ value: string; index: number }> = [];
 	for (let i = 0; i < rest.length; i++) {
@@ -377,7 +421,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	}
 
 	if (first === "agent-context") {
-		return { kind: "agent-context", output: { ...output, json: true } };
+		return parseAgentContextArgs(args, output);
 	}
 
 	if (first === "which") {

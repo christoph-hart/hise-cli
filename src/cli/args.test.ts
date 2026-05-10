@@ -69,8 +69,60 @@ describe("parseCliArgs", () => {
 		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--pretty"], getCliCommands());
 		expect(result.kind).toBe("agent-context");
 		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "manifest" });
 			expect(result.output).toEqual({ json: true, agent: false, compact: false, pretty: true });
 		}
+	});
+
+	it("parses scoped agent-context mode queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "mode", modeId: "script" });
+			expect(result.output.json).toBe(true);
+		}
+	});
+
+	it("parses scoped agent-context capability queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability", "script.compile"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "capability", id: "script.compile" });
+		}
+	});
+
+	it("parses scoped agent-context capability equals queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability=script.compile"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "capability", id: "script.compile" });
+		}
+	});
+
+	it("parses agent-context capability index queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--list-capabilities"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "capability-index" });
+		}
+	});
+
+	it("rejects ambiguous agent-context queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script", "--capability", "script.compile"], getCliCommands());
+		expect(result).toEqual({
+			kind: "error",
+			message: "agent-context accepts only one query: <mode>, --capability <id>, or --list-capabilities",
+		});
+	});
+
+	it("rejects missing agent-context capability ids", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--capability requires an id" });
+	});
+
+	it("rejects unknown agent-context flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--unknown"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "Unexpected argument for agent-context: --unknown" });
 	});
 
 	it("parses which queries as JSON output", () => {

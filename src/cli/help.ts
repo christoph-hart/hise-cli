@@ -23,7 +23,7 @@ USAGE
   hise-cli --run - < script.hsc             Run script from stdin
   hise-cli -wizard <subcommand>             Wizard operations
   hise-cli diagnose <filepath>              Diagnose HiseScript file
-  hise-cli agent-context [--pretty]         Emit structured CLI context for agents
+  hise-cli agent-context [scope]            Emit structured CLI context for agents
   hise-cli which "<intent>"                  Find the command for a capability
   hise-cli update [--check]                 Self-update to latest GitHub release
   hise-cli -version                         Print the CLI version
@@ -459,12 +459,24 @@ EXAMPLES
 
 SYNTAX
   hise-cli agent-context
+  hise-cli agent-context <mode>
+  hise-cli agent-context --capability <id>
+  hise-cli agent-context --list-capabilities
   hise-cli agent-context --pretty
 
 DESCRIPTION
-  Emits JSON describing agent-safe flags, error exit codes, and authored
-  capability recipes generated from docs/agent-context/*.yaml. This command
-  does not require a running HISE instance.`,
+	Emits JSON describing agent-safe flags, error exit codes, and authored
+	capability recipes generated from docs/agent-context/*.yaml. This command
+	does not require a running HISE instance.
+
+	The default output is a compact manifest. Use a mode or capability query for
+	full details when needed.
+
+EXAMPLES
+  hise-cli agent-context --agent
+  hise-cli agent-context script --agent
+  hise-cli agent-context --capability script.compile --agent
+  hise-cli agent-context --list-capabilities --select value[0].id`,
 
 	which: `hise-cli which — find commands by capability
 

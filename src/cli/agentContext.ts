@@ -1,35 +1,65 @@
 import { GENERATED_AGENT_CONTEXT } from "./generated-agent-context.js";
-import { CLI_ERROR_EXIT_CODES } from "./errors.js";
+import { CLI_ERROR_EXIT_CODES, cliError, type CliErrorPayload } from "./errors.js";
+import type { AgentContextQuery } from "./args.js";
 import type { AgentCapability, AgentContextMode } from "./agentContextTypes.js";
 
-export function buildAgentContext(): object {
+export function buildAgentContext(query: AgentContextQuery = { type: "manifest" }): { ok: true; value: object } | CliErrorPayload {
+	if (query.type === "manifest") return { ok: true, value: buildAgentContextManifest() };
+	if (query.type === "capability-index") return { ok: true, value: buildAgentCapabilityIndex() };
+	if (query.type === "mode") {
+		const mode = getAgentContextMode(query.modeId);
+		if (!mode) return cliError("usage_error", `Unknown agent-context mode: ${query.modeId}`);
+		return { ok: true, value: mode };
+	}
+	const capability = getAgentCapability(query.id);
+	if (!capability) return cliError("usage_error", `Unknown agent-context capability: ${query.id}`);
+	return { ok: true, value: capability };
+}
+
+export function buildAgentContextManifest(): object {
 	return {
 		schemaVersion: GENERATED_AGENT_CONTEXT.schemaVersion,
-		cli: {
-			name: "hise-cli",
-			description: "Modal REPL and CLI for controlling HISE via REST.",
-			hiseBaseUrl: "http://127.0.0.1:1900",
-		},
-		globalFlags: [
-			{ flag: "--agent", description: "Implies --json --compact and guarantees coded errors." },
-			{ flag: "--json", description: "Emit structured JSON output." },
-			{ flag: "--compact", description: "Remove empty wrapper noise from the final output payload only." },
-			{ flag: "--select <path>", description: "Extract a payload field while preserving { ok, value }. Implies JSON output." },
-			{ flag: "--target <path>", description: "Preferred context flag for one-shot mode commands." },
-			{ flag: "--stdin", description: "Read a one-shot mode command or script expression from stdin when supported." },
-		],
-		inputPatterns: [
-			{ pattern: "stdin", description: "Preferred for script expressions and callback bodies." },
-			{ pattern: "file", description: "Preferred for multi-line callback edits." },
-			{ pattern: "argv", description: "Use argv tokens for short mode commands, e.g. hise-cli -builder show tree --agent." },
-		],
+		cli: cliInfo(),
+		globalFlags: globalFlags(),
+		inputPatterns: inputPatterns(),
 		errorExitCodes: CLI_ERROR_EXIT_CODES,
-		modes: GENERATED_AGENT_CONTEXT.modes,
+		modes: GENERATED_AGENT_CONTEXT.modes.map((mode) => ({
+			id: mode.id,
+			title: mode.title,
+			summary: mode.summary,
+			capabilityCount: mode.capabilities.length,
+		})),
+		capabilities: buildAgentCapabilityIndex(),
+		lookup: {
+			mode: "hise-cli agent-context <mode>",
+			capability: "hise-cli agent-context --capability <id>",
+			capabilityIndex: "hise-cli agent-context --list-capabilities",
+			intent: "hise-cli which \"<intent>\"",
+		},
 	};
+}
+
+export function buildAgentCapabilityIndex(): object[] {
+	return GENERATED_AGENT_CONTEXT.modes.flatMap((mode) => mode.capabilities.map((capability) => ({
+		id: capability.id,
+		mode: mode.id,
+		title: capability.title,
+		purpose: capability.purpose,
+		command: capability.command,
+		tags: capability.tags,
+	}))).sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export function getAgentContextMode(modeId: string): AgentContextMode | undefined {
 	return GENERATED_AGENT_CONTEXT.modes.find((mode) => mode.id === modeId);
+}
+
+export function getAgentCapability(id: string): AgentCapability | undefined {
+	for (const mode of GENERATED_AGENT_CONTEXT.modes) {
+		const capability = mode.capabilities.find((entry) => entry.id === id);
+		if (capability) return capability;
+	}
+	return undefined;
 }
 
 export function renderAgentModeHelp(modeId: string): string | null {
@@ -82,4 +112,31 @@ function renderExamples(capability: AgentCapability): string[] {
 function quoteShell(value: string): string {
 	if (!value.includes("\n") && !value.includes("'")) return `'${value}'`;
 	return "'<stdin>'";
+}
+
+function cliInfo(): object {
+	return {
+		name: "hise-cli",
+		description: "Modal REPL and CLI for controlling HISE via REST.",
+		hiseBaseUrl: "http://127.0.0.1:1900",
+	};
+}
+
+function globalFlags(): object[] {
+	return [
+		{ flag: "--agent", description: "Implies --json --compact and guarantees coded errors." },
+		{ flag: "--json", description: "Emit structured JSON output." },
+		{ flag: "--compact", description: "Remove empty wrapper noise from the final output payload only." },
+		{ flag: "--select <path>", description: "Extract a payload field while preserving { ok, value }. Implies JSON output." },
+		{ flag: "--target <path>", description: "Preferred context flag for one-shot mode commands." },
+		{ flag: "--stdin", description: "Read a one-shot mode command or script expression from stdin when supported." },
+	];
+}
+
+function inputPatterns(): object[] {
+	return [
+		{ pattern: "stdin", description: "Preferred for script expressions and callback bodies." },
+		{ pattern: "file", description: "Preferred for multi-line callback edits." },
+		{ pattern: "argv", description: "Use argv tokens for short mode commands, e.g. hise-cli -builder show tree --agent." },
+	];
 }

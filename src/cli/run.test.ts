@@ -420,6 +420,68 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("executes agent-context manifest queries without HISE", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "agent-context", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			new MockHiseConnection().setProbeResult(false),
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload.ok).toBe(true);
+			expect((result.payload as { value: { modes: Array<{ id: string }>; capabilities: Array<{ id: string; examples?: unknown }> } }).value.modes.some((mode) => mode.id === "script")).toBe(true);
+			expect((result.payload as { value: { capabilities: Array<{ id: string; examples?: unknown }> } }).value.capabilities.find((capability) => capability.id === "script.compile")?.examples).toBeUndefined();
+		}
+	});
+
+	it("executes scoped agent-context mode queries with select", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "agent-context", "script", "--select", "value.id"],
+			getCliCommands(),
+			createDataLoader(),
+			new MockHiseConnection().setProbeResult(false),
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: "script" });
+		}
+	});
+
+	it("executes scoped agent-context capability queries with select", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "agent-context", "--capability", "script.compile", "--select", "value.command.display"],
+			getCliCommands(),
+			createDataLoader(),
+			new MockHiseConnection().setProbeResult(false),
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: "hise-cli script compile --module-id Interface --agent" });
+		}
+	});
+
+	it("returns coded errors for unknown scoped agent-context queries", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "agent-context", "nonesuch", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			new MockHiseConnection().setProbeResult(false),
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: false,
+				code: "usage_error",
+				error: "Unknown agent-context mode: nonesuch",
+			});
+		}
+	});
+
 	it("flattens evaluation-failed script envelopes into a compact error payload", async () => {
 		mockObserverFetch();
 		const connection = new MockHiseConnection()

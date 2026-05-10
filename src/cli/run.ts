@@ -81,7 +81,7 @@ export async function executeCliCommand(
 		return finalizeJsonPayload({ ok: true, value: await collectStatus(opts) }, parsed.output);
 	}
 	if (parsed.kind === "agent-context") {
-		return finalizeJsonPayload({ ok: true, value: buildAgentContext() }, parsed.output);
+		return finalizeJsonPayload(buildAgentContext(parsed.query), parsed.output);
 	}
 	if (parsed.kind === "which") {
 		return finalizeJsonPayload(executeWhich(parsed.query, parsed.limit), parsed.output);
