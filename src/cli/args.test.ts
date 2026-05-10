@@ -65,6 +65,14 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses agent-context as JSON output", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--pretty"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.output).toEqual({ json: true, agent: false, compact: false, pretty: true });
+		}
+	});
+
 	it("parses select as JSON output", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-status", "--select", "value.connected"], getCliCommands());
 		expect(result.kind).toBe("status");

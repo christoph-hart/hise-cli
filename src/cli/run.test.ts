@@ -299,6 +299,39 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("includes UI set value callback logs in agent output", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onPost("/api/set_component_value", () => ({
+			success: true,
+			result: "OK",
+			logs: ["Button1: 1.0"],
+			errors: [],
+		}));
+		conn.onGet("/api/ui/tree", () => ({
+			success: true,
+			result: { id: "Content", type: "Root", childComponents: [{ id: "Button1", type: "ScriptButton", childComponents: [] }] },
+			logs: [],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-ui", "set", "Button1.value", "1", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: true,
+				result: { type: "text", content: "OK" },
+				logs: ["Button1: 1.0"],
+			});
+		}
+	});
+
 	it("returns structured DSP tree output for separated multi-word target agent calls", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);

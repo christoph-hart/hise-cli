@@ -15,6 +15,16 @@ export interface CliErrorPayload {
 	code?: CliErrorCode;
 }
 
+export const CLI_ERROR_EXIT_CODES = {
+	execution_error: 1,
+	usage_error: 2,
+	select_not_found: 2,
+	hise_unavailable: 3,
+	hise_api_error: 4,
+	validation_error: 5,
+	expectation_failed: 6,
+} as const satisfies Record<CliErrorCode, number>;
+
 export function cliError(code: CliErrorCode, error: string): CliErrorPayload {
 	return { ok: false, code, error };
 }
@@ -25,16 +35,17 @@ export function exitCodeForPayload(payload: CliOutputPayload): number {
 	switch (code) {
 		case "usage_error":
 		case "select_not_found":
-			return 2;
+			return CLI_ERROR_EXIT_CODES[code];
 		case "hise_unavailable":
-			return 3;
+			return CLI_ERROR_EXIT_CODES[code];
 		case "hise_api_error":
-			return 4;
+			return CLI_ERROR_EXIT_CODES[code];
 		case "validation_error":
-			return 5;
+			return CLI_ERROR_EXIT_CODES[code];
 		case "expectation_failed":
-			return 6;
+			return CLI_ERROR_EXIT_CODES[code];
 		case "execution_error":
+			return CLI_ERROR_EXIT_CODES[code];
 		default:
 			return 1;
 	}

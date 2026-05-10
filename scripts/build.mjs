@@ -4,6 +4,16 @@ import { spawnSync } from "node:child_process";
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
 
+{
+	const result = spawnSync(process.execPath, ["scripts/generate-agent-context.mjs"], {
+		stdio: "inherit",
+	});
+	if (result.status !== 0) {
+		process.stderr.write("[build] agent context generation failed\n");
+		process.exit(1);
+	}
+}
+
 rmSync("dist", { recursive: true, force: true });
 mkdirSync("dist", { recursive: true });
 

@@ -29,4 +29,13 @@ describe("renderCliHelp", () => {
 		expect(help).toContain("4 HISE API error");
 		expect(help).toContain("6 expectation failure");
 	});
+
+	it("renders script help from generated agent capabilities", () => {
+		const help = renderCliHelp(getCliCommands(), "script");
+
+		expect(help).toContain("COMMON COMMANDS");
+		expect(help).toContain("hise-cli script repl --module-id Interface --stdin --agent");
+		expect(help).toContain("hise-cli script compile --module-id Interface --agent");
+		expect(help).not.toContain("CALLBACK JSON SHAPE");
+	});
 });

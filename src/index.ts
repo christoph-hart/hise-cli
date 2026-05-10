@@ -116,7 +116,7 @@ async function main(): Promise<void> {
 
 	if (cliResult.kind === "json") {
 		if (cliResult.output.json) {
-			console.log(JSON.stringify(cliResult.payload));
+			console.log(JSON.stringify(cliResult.payload, null, cliResult.output.pretty ? "\t" : undefined));
 		} else {
 			const { renderPretty } = await import("./cli/pretty.js");
 			const text = renderPretty(cliResult.payload);

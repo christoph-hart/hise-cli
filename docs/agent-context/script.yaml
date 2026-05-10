@@ -1,0 +1,173 @@
+schemaVersion: 1
+mode:
+  id: script
+  title: HiseScript REPL and callback editing
+  summary: Evaluate HiseScript expressions and read or update script callbacks without shell-quoting callback bodies.
+  invocation:
+    - argv: [hise-cli, script, repl, --module-id, Interface, --stdin, --agent]
+    - argv: [hise-cli, script, get, --module-id, Interface, --callback, onInit, --agent]
+    - argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --file, ./onInit.js, --agent]
+  notes:
+    - Prefer stdin or file inputs for script bodies.
+    - script set compiles by default; use --no-compile to skip compilation.
+    - --module-id defaults to Interface.
+    - REPL evaluation cannot create persistent declarations in the script engine. Do not use it to add variables, functions, callbacks, includes, or other durable script source.
+    - Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.
+    - For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.
+    - If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.
+    - Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations.
+    - Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher.
+  antiPatterns:
+    - avoid: Passing callback bodies as inline shell arguments.
+      prefer: hise-cli script set --module-id Interface --callback onInit --stdin --agent
+    - avoid: Using legacy quoted REPL expressions for multi-line scripts.
+      prefer: hise-cli script repl --module-id Interface --stdin --agent
+    - avoid: Trying to declare persistent variables, functions, callbacks, or includes via REPL.
+      prefer: hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
+    - avoid: Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.
+      prefer: hise-cli -ui set Button1.text "my text" --agent
+    - avoid: Putting large implementation bodies directly into onInit.
+      prefer: Keep onInit small and include external script files that can be edited and diagnosed separately.
+    - avoid: Building a large global onControl dispatcher.
+      prefer: Assign component-specific callbacks with Component.setControlCallback(f).
+capabilities:
+  - id: script.repl.stdin
+    title: Evaluate REPL expression from stdin
+    purpose: Evaluate a HiseScript expression using stdin so callers avoid shell quoting issues.
+    command:
+      argv: [hise-cli, script, repl, --module-id, Interface, --stdin, --agent]
+    examples:
+      - title: Read the sample rate
+        argv: [hise-cli, script, repl, --module-id, Interface, --stdin, --agent]
+        stdin: Engine.getSampleRate()
+    tags: [script, repl, stdin, expression]
+    aliases:
+      - run hise script expression
+      - evaluate hise script
+      - repl from stdin
+    notes:
+      - REPL evaluation cannot create persistent declarations in the script engine.
+      - Use REPL for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.
+      - Prefer dedicated hise-cli modes for UI, builder, DSP, project, or asset changes when available.
+    help:
+      visibility: common
+      order: 10
+  - id: script.get.callback
+    title: Get one script callback
+    purpose: Read one callback from a script processor.
+    command:
+      argv: [hise-cli, script, get, --module-id, Interface, --callback, onInit, --agent]
+    examples:
+      - title: Read onInit
+        argv: [hise-cli, script, get, --module-id, Interface, --callback, onInit, --agent]
+      - title: Read onControl
+        argv: [hise-cli, script, get, --module-id, Interface, --callback, onControl, --agent]
+    tags: [script, callback, get, read]
+    aliases:
+      - read onInit
+      - get callback
+      - show callback source
+    help:
+      visibility: common
+      order: 20
+  - id: script.get.all
+    title: Get all script callbacks
+    purpose: Read all callbacks and external file references for a script processor.
+    command:
+      argv: [hise-cli, script, get, --module-id, Interface, --agent]
+    examples:
+      - title: Read all callbacks
+        argv: [hise-cli, script, get, --module-id, Interface, --agent]
+    tags: [script, callback, get, read, all]
+    aliases:
+      - list callbacks
+      - get all callbacks
+      - show script callbacks
+    help:
+      visibility: common
+      order: 30
+  - id: script.set.callback.stdin
+    title: Set script callback from stdin
+    purpose: Update one callback from stdin and compile by default.
+    command:
+      argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --stdin, --agent]
+    examples:
+      - title: Replace onInit from stdin
+        argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --stdin, --agent]
+        stdin: |-
+          Content.makeFrontInterface(600, 600);
+          Console.print("ready");
+    tags: [script, callback, set, stdin, compile]
+    aliases:
+      - edit onInit from stdin
+      - update callback from stdin
+      - set callback body
+    notes:
+      - Use --no-compile when staging callback changes without recompilation.
+    help:
+      visibility: common
+      order: 40
+  - id: script.set.callback.file
+    title: Set script callback from file
+    purpose: Update one callback from a file and compile by default.
+    command:
+      argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --file, ./onInit.js, --agent]
+    examples:
+      - title: Replace onInit from a file
+        argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --file, ./onInit.js, --agent]
+    tags: [script, callback, set, file, compile]
+    aliases:
+      - edit onInit from file
+      - update callback from file
+      - load callback file
+    notes:
+      - This is the preferred path for multi-line callback edits.
+    help:
+      visibility: common
+      order: 50
+  - id: script.set.callbacks-json
+    title: Set multiple callbacks from JSON
+    purpose: Update multiple callbacks from a JSON file and compile by default.
+    command:
+      argv: [hise-cli, script, set, --module-id, Interface, --callbacks-json, ./callbacks.json, --agent]
+    examples:
+      - title: Replace callbacks from JSON
+        argv: [hise-cli, script, set, --module-id, Interface, --callbacks-json, ./callbacks.json, --agent]
+    tags: [script, callback, set, json, compile]
+    aliases:
+      - update multiple callbacks
+      - set callbacks json
+      - load callbacks from json
+    help:
+      visibility: common
+      order: 60
+  - id: script.compile
+    title: Compile script processor
+    purpose: Recompile a script processor after editing callback or external script files.
+    command:
+      argv: [hise-cli, script, compile, --module-id, Interface, --agent]
+    examples:
+      - title: Compile Interface
+        argv: [hise-cli, script, compile, --module-id, Interface, --agent]
+    tags: [script, compile, recompile]
+    aliases:
+      - recompile script
+      - compile Interface
+      - rerun initialization code
+    help:
+      visibility: common
+      order: 70
+  - id: script.legacy.repl
+    title: Legacy one-shot REPL expression
+    purpose: Evaluate a short HiseScript expression using the legacy mode form.
+    command:
+      argv: [hise-cli, -script, Engine.getSampleRate(), --agent]
+    tags: [script, repl, legacy]
+    aliases:
+      - legacy script expression
+      - one shot script expression
+    notes:
+      - Accepted for short expressions, but stdin is preferred for agent workflows.
+    help:
+      visibility: hidden
+      order: 100

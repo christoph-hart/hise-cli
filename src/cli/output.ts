@@ -7,7 +7,7 @@ import { cliError, type CliErrorCode, type CliErrorPayload } from "./errors.js";
 export type CliOutputPayload =
 	| { ok: true; logs?: string[]; value?: unknown }
 	| CliErrorPayload
-	| { ok: boolean; result: CommandResult };
+	| { ok: boolean; result: CommandResult; logs?: string[] };
 
 export function processCliOutputPayload(
 	payload: CliOutputPayload,
@@ -45,12 +45,17 @@ export function serializeCliOutput(
 
 	// json: emit the structured value directly (e.g. `show tree` raw HISE result)
 	if (result.type === "json") {
-		return { ok: true, value: result.value };
+		return result.logs && result.logs.length > 0
+			? { ok: true, value: result.value, logs: result.logs }
+			: { ok: true, value: result.value };
 	}
+
+	const logs = "logs" in result && result.logs && result.logs.length > 0 ? result.logs : undefined;
 
 	return {
 		ok: result.type !== "error",
 		result: stripAccent(result),
+		...(logs ? { logs } : {}),
 	};
 }
 
@@ -160,7 +165,12 @@ function logLinesFromReport(report: string): string[] {
 }
 
 function stripAccent(result: CommandResult): CommandResult {
-	const { accent: _accent, ...stripped } = result;
+	const { accent: _accent, ...withoutAccent } = result;
+	if ("logs" in withoutAccent) {
+		const { logs: _logs, ...stripped } = withoutAccent;
+		return stripped as CommandResult;
+	}
+	const stripped = withoutAccent;
 	return stripped as CommandResult;
 }
 

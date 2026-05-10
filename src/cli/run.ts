@@ -8,6 +8,7 @@ import { ObserverClient } from "./observer.js";
 import { CapturingHiseConnection } from "./capture.js";
 import { processCliOutputPayload, serializeCliOutput, type CliOutputPayload } from "./output.js";
 import { classifyTransportError, cliError } from "./errors.js";
+import { buildAgentContext } from "./agentContext.js";
 import { createSession, loadSessionDatasets } from "../session-bootstrap.js";
 import { createDefaultMockRuntime } from "../mock/runtime.js";
 import type { WizardHandlerRegistry } from "../engine/wizard/handler-registry.js";
@@ -76,6 +77,9 @@ export async function executeCliCommand(
 	}
 	if (parsed.kind === "status") {
 		return finalizeJsonPayload({ ok: true, value: await collectStatus(opts) }, parsed.output);
+	}
+	if (parsed.kind === "agent-context") {
+		return finalizeJsonPayload({ ok: true, value: buildAgentContext() }, parsed.output);
 	}
 	if (parsed.kind !== "execute") return parsed;
 

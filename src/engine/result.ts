@@ -41,7 +41,7 @@ export interface TreeNode {
 }
 
 export type CommandResult =
-	| { type: "text"; content: string; accent?: string }
+	| { type: "text"; content: string; logs?: string[]; accent?: string }
 	| { type: "error"; message: string; detail?: string; accent?: string }
 	| { type: "code"; content: string; language?: string; accent?: string }
 	| { type: "table"; headers: string[]; rows: string[][]; accent?: string }
@@ -49,7 +49,7 @@ export type CommandResult =
 	| { type: "wizard"; definition: WizardDefinition; prefill: WizardAnswers; autoRun: boolean; accent?: string }
 	| { type: "run-report"; source: string; runResult: RunResult; verbosity: import("./run/executor.js").RunReportVerbosity; accent?: string }
 	| { type: "preformatted"; content: string; accent?: string; plain?: boolean }
-	| { type: "json"; value: unknown; fallbackText?: string; accent?: string }
+	| { type: "json"; value: unknown; logs?: string[]; fallbackText?: string; accent?: string }
 	| { type: "empty"; accent?: string };
 
 // ── Result factory helpers ──────────────────────────────────────────

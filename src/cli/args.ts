@@ -10,6 +10,7 @@ export type CliParseResult =
 	| { kind: "update"; check: boolean }
 	| { kind: "version"; output: CliOutputOptions }
 	| { kind: "status"; output: CliOutputOptions }
+	| { kind: "agent-context"; output: CliOutputOptions }
 	| {
 		kind: "execute";
 		entry: CommandEntry;
@@ -25,6 +26,7 @@ export interface CliOutputOptions {
 	agent: boolean;
 	compact: boolean;
 	select?: string;
+	pretty?: boolean;
 }
 
 export type ScriptApiCommand =
@@ -155,6 +157,7 @@ function parseOutputOptions(args: string[]): { args: string[]; output: CliOutput
 	let compact = false;
 	let json = false;
 	let select: string | undefined;
+	let pretty = false;
 
 	for (let i = 0; i < args.length; i++) {
 		const arg = args[i]!;
@@ -170,6 +173,10 @@ function parseOutputOptions(args: string[]): { args: string[]; output: CliOutput
 		}
 		if (arg === "--json") {
 			json = true;
+			continue;
+		}
+		if (arg === "--pretty") {
+			pretty = true;
 			continue;
 		}
 		if (arg === "--select") {
@@ -190,7 +197,7 @@ function parseOutputOptions(args: string[]): { args: string[]; output: CliOutput
 		stripped.push(arg);
 	}
 
-	return { args: stripped, output: { json, agent, compact, select } };
+	return { args: stripped, output: { json, agent, compact, select, ...(pretty ? { pretty } : {}) } };
 }
 
 function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlags: Set<string>): string | null {
@@ -293,6 +300,10 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 
 	if (first === "--status" || first === "-status") {
 		return { kind: "status", output };
+	}
+
+	if (first === "agent-context") {
+		return { kind: "agent-context", output: { ...output, json: true } };
 	}
 
 	if (first === "script") {

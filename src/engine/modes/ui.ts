@@ -501,6 +501,7 @@ export class UiMode implements Mode {
 	): Promise<CommandResult> {
 		const valueOps = ops.filter((o) => o.op === "set_value");
 		const applyOps = ops.filter((o) => o.op !== "set_value");
+		const logs: string[] = [];
 
 		for (const op of valueOps) {
 			const response = await connection.post("/api/set_component_value", {
@@ -515,11 +516,12 @@ export class UiMode implements Mode {
 					: `Failed to set value on "${op.target as string}"`;
 				return errorResult(msg);
 			}
+			if (isEnvelopeResponse(response)) logs.push(...response.logs);
 		}
 
 		if (applyOps.length === 0) {
 			await this.fetchTree(connection);
-			return textResult(valueOps.length > 0 ? "OK" : "");
+			return { type: "text", content: valueOps.length > 0 ? "OK" : "", logs };
 		}
 
 		const response = await connection.post("/api/ui/apply", {
@@ -551,11 +553,12 @@ export class UiMode implements Mode {
 			applyUiDiffToTree(this.treeRoot, localDiff);
 		}
 
-		const summary = response.logs.length > 0
-			? response.logs.join("; ")
+		logs.push(...response.logs);
+		const summary = logs.length > 0
+			? logs.join("; ")
 			: applyOps.map((o) => `${o.op} ${(o as Record<string, unknown>).target ?? (o as Record<string, unknown>).id ?? ""}`).join(", ") || "OK";
 
-		return textResult(summary);
+		return { type: "text", content: summary, logs };
 	}
 
 	private resolveRefForRead(ref: PathRef): { id: string } | { error: string } {

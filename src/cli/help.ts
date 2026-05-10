@@ -1,4 +1,5 @@
 import type { CommandEntry } from "../engine/commands/registry.js";
+import { renderAgentModeHelp } from "./agentContext.js";
 
 export function renderCliHelp(_commands: CommandEntry[], scope?: string): string {
 	if (scope) {
@@ -22,6 +23,7 @@ USAGE
   hise-cli --run - < script.hsc             Run script from stdin
   hise-cli -wizard <subcommand>             Wizard operations
   hise-cli diagnose <filepath>              Diagnose HiseScript file
+  hise-cli agent-context [--pretty]         Emit structured CLI context for agents
   hise-cli update [--check]                 Self-update to latest GitHub release
   hise-cli -version                         Print the CLI version
   hise-cli -status                          Print CLI + HISE status
@@ -450,50 +452,18 @@ EXAMPLES
   hise-cli -dsp --target "Script FX1" "screenshot scale 100% file \"graph.png\""
   hise-cli -dsp --target "Script FX1" "save"`,
 
-	script: `hise-cli script — HiseScript REPL and callback editing
+	script: renderAgentModeHelp("script") ?? "hise-cli script - HiseScript REPL and callback editing",
+
+	"agent-context": `hise-cli agent-context — structured context for agents
 
 SYNTAX
-  hise-cli -script "<expression>"                         REPL expression (legacy one-shot)
-  hise-cli -script --stdin                                 REPL expression from stdin
-  hise-cli script repl --module-id Interface --stdin       REPL expression from stdin
-  hise-cli script get --module-id Interface [--callback onInit]
-  hise-cli script set --module-id Interface --callback onInit --stdin
-  hise-cli script set --module-id Interface --callback onInit --file ./onInit.js
-  hise-cli script set --module-id Interface --callback onInit --stdin --no-compile
-  hise-cli script set --module-id Interface --callbacks-json ./callbacks.json
-  hise-cli script compile --module-id Interface
+  hise-cli agent-context
+  hise-cli agent-context --pretty
 
-REPL
-  Evaluates HiseScript against the running HISE instance. Output includes
-  return value, Console.print logs, and errors.
-
-CALLBACK EDITING
-  Use the direct 'script set' commands for agent-safe callback edits. Script
-  bodies come from stdin or files only — no inline body argument, so callback
-  content never has to be shell-escaped. 'script set' compiles by default;
-  add --no-compile to update without compiling.
-
-  --module-id defaults to Interface.
-  --callback is required with --stdin and --file.
-  --callbacks-json reads an object mapping callback names to script strings.
-
-CALLBACK JSON SHAPE
-  {
-    "onInit": "Content.makeFrontInterface(600, 600);",
-    "onNoteOn": "Console.print(Message.getNoteNumber());"
-  }
-
-COMPLETION (TUI)
-  Tab completes API namespaces and methods:
-  Engine., Synth., Console., Content., Math., Array., String.
-
-EXAMPLES
-  hise-cli -script "Engine.getSampleRate()"
-  echo 'Engine.getSampleRate()' | hise-cli script repl --stdin --json
-  hise-cli script get --callback onInit --json
-  echo 'Content.makeFrontInterface(600, 600);' | hise-cli script set --callback onInit --stdin --json
-  hise-cli script set --callback onInit --file ./Scripts/onInit.js --no-compile --json
-  hise-cli script compile --module-id Interface --json`,
+DESCRIPTION
+  Emits JSON describing agent-safe flags, error exit codes, and authored
+  capability recipes generated from docs/agent-context/*.yaml. This command
+  does not require a running HISE instance.`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 
