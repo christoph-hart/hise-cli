@@ -4,6 +4,7 @@ import type { CommandResult } from "../result.js";
 import { textResult, errorResult } from "../result.js";
 import type { Session } from "../session.js";
 import type { Mode } from "../modes/mode.js";
+import type { ModeId } from "../modes/mode.js";
 import type {
 	ParsedScript,
 	RunResult,
@@ -19,6 +20,11 @@ import { isEnvelopeResponse, isErrorResponse } from "../hise.js";
 import { ScriptMode } from "../modes/script.js";
 import type { ParseError } from "./types.js";
 
+export interface ExecuteScriptOptions {
+	initialMode?: ModeId;
+	initialModeCommand?: string;
+}
+
 /**
  * Execute a parsed .hsc script against a live session.
  *
@@ -32,9 +38,10 @@ export async function executeScript(
 	script: ParsedScript,
 	session: Session,
 	onProgress?: (event: ScriptProgressEvent) => void,
+	options: ExecuteScriptOptions = {},
 ): Promise<RunResult> {
 	// Optimize: batch consecutive builder commands
-	script = optimizeScript(script);
+	script = optimizeScript(script, { initialMode: options.initialMode });
 	const savedStack = saveModeStack(session);
 	const expects: ExpectResult[] = [];
 	const results: import("./types.js").CommandOutput[] = [];
@@ -54,6 +61,19 @@ export async function executeScript(
 	}
 
 	try {
+		if (options.initialModeCommand) {
+			const modeResult = await session.handleInput(options.initialModeCommand);
+			if (modeResult.type === "error") {
+				return {
+					ok: false,
+					linesExecuted: 0,
+					expects,
+					results,
+					error: { line: 0, message: modeResult.message },
+				};
+			}
+		}
+
 		for (const line of script.lines) {
 			// Active processor for /capture buffer routing.
 			const activeProcessor = activeScriptProcessor(session);

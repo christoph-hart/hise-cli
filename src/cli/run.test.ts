@@ -244,6 +244,55 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("executes multiline builder stdin through the script runner", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end('add LFO as "LFO"\nadd LFO as "LFO2"');
+
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/builder/tree", () => ({
+			success: true,
+			result: {
+				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
+				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
+				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
+				colour: "#414141", children: [], midi: [], fx: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/builder/apply", () => ({
+			success: true,
+			result: { scope: "root", groupName: "root", diff: [
+				{ domain: "builder", action: "+", target: "LFO" },
+				{ domain: "builder", action: "+", target: "LFO2" },
+			] },
+			logs: ["Add LFO", "Add LFO2"],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-builder", "--stdin", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toMatchObject({
+				ok: true,
+				value: {
+					linesExecuted: 1,
+					summary: expect.stringContaining("1 commands"),
+				},
+			});
+		}
+		const applyCalls = conn.calls.filter((call) => call.endpoint === "/api/builder/apply");
+		expect(applyCalls).toHaveLength(1);
+	});
+
 	it("returns structured builder tree output for agent calls", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);

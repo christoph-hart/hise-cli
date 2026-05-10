@@ -85,6 +85,8 @@ OPTIONS
   --compact          Compact the final output payload only
   --select <path>    Select a payload field, preserving { ok, value }
   --stdin            Read a one-shot mode command from stdin
+                     For -builder, -ui, and -dsp, multiple non-empty stdin
+                     lines execute as a newline command batch.
   --target <path>    Set context path for mode commands`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────

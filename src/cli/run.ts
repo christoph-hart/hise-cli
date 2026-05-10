@@ -19,6 +19,7 @@ import { isAbsolutePath, isExplicitRelative } from "../engine/session.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { watch } from "node:fs";
+import type { ModeId } from "../engine/modes/mode.js";
 
 /** Fetch project info from HISE so resolvePath uses the project folder. */
 async function fetchProjectInfo(
@@ -151,8 +152,14 @@ export async function executeCliCommand(
 		}
 	}
 
-	const canonicalCommand = parsed.stdin
-		? `${parsed.canonicalCommand} ${(await readStdin()).trim()}`.trim()
+	const stdinSource = parsed.stdin ? await readStdin() : null;
+	const stdinBatch = stdinSource !== null
+		? await prepareModeStdinBatch(parsed.mode, stdinSource)
+		: null;
+	const canonicalCommand = stdinSource !== null
+		? stdinBatch
+			? `${parsed.canonicalCommand}\n${stdinSource}`.trim()
+			: `${parsed.canonicalCommand} ${stdinSource.trim()}`.trim()
 		: parsed.canonicalCommand;
 
 	const observer = new ObserverClient();
@@ -167,8 +174,21 @@ export async function executeCliCommand(
 	});
 
 	try {
-		const result = await session.handleInput(canonicalCommand);
-		const payload = serializeCliOutput(parsed.mode, result, connection.getLastReplResponse());
+		let result: import("../engine/result.js").CommandResult;
+		let payload: CliOutputPayload;
+		if (stdinBatch) {
+			const { executeScript } = await import("../engine/run/executor.js");
+			const { runReportResult } = await import("../engine/result.js");
+			const runResult = await executeScript(stdinBatch.script, session, undefined, {
+				initialMode: parsed.mode as ModeId,
+				initialModeCommand: parsed.canonicalCommand,
+			});
+			result = runReportResult(stdinSource ?? "", runResult, "summary");
+			payload = serializeCliOutput("run", result);
+		} else {
+			result = await session.handleInput(canonicalCommand);
+			payload = serializeCliOutput(parsed.mode, result, connection.getLastReplResponse());
+		}
 
 		await observer.emit({
 			id: commandId,
@@ -183,6 +203,18 @@ export async function executeCliCommand(
 	} finally {
 		connection.destroy();
 	}
+}
+
+const BATCHABLE_STDIN_MODES = new Set(["builder", "ui", "dsp"]);
+
+async function prepareModeStdinBatch(
+	mode: string,
+	source: string,
+): Promise<{ script: import("../engine/run/types.js").ParsedScript } | null> {
+	if (!BATCHABLE_STDIN_MODES.has(mode)) return null;
+	const { parseScript } = await import("../engine/run/parser.js");
+	const script = parseScript(source);
+	return script.lines.length > 1 ? { script } : null;
 }
 
 // ── --run command execution ─────────────────────────────────────────

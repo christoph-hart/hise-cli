@@ -46,6 +46,21 @@ Use `--stdin` when a command body is easier or safer to pipe than quote:
 echo 'show tree' | hise-cli -builder --stdin --agent
 ```
 
+For `builder`, `ui`, and `dsp`, `--stdin` can also execute a newline batch.
+Each non-empty line is one complete command in the selected mode; comma
+chaining remains the same-verb clause separator inside a single line:
+
+```
+hise-cli -builder --stdin --agent <<'EOF'
+add SineSynth as "Lead"
+set Lead.Volume -6
+show tree
+EOF
+```
+
+Multiline stdin is not treated as a command batch for `script` or `mcp`, where
+multiline input has mode-specific meaning.
+
 `--target <path>` sets the mode context for one-shot mode commands. The separated form is preferred because it is robust for multi-word targets across shells:
 
 ```

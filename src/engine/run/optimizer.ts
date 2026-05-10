@@ -13,7 +13,7 @@
 // - Navigation commands (ls, pwd, reset)
 
 import type { ParsedScript, ScriptLine } from "./types.js";
-import { SLASH_MODE_IDS } from "../modes/mode.js";
+import { SLASH_MODE_IDS, type ModeId } from "../modes/mode.js";
 
 /** Commands that force a segment boundary (can't be batched). */
 const BOUNDARY_PREFIXES = ["cd ", "cd\t", "ls", "pwd", "reset"];
@@ -25,10 +25,15 @@ const BOUNDARY_PREFIXES = ["cd ", "cd\t", "ls", "pwd", "reset"];
  * Only operates on mode-command lines (non-slash) that appear while
  * the virtual mode is "builder". Slash commands are never merged.
  */
-export function optimizeScript(script: ParsedScript): ParsedScript {
+export interface OptimizeScriptOptions {
+	initialMode?: ModeId;
+}
+
+export function optimizeScript(script: ParsedScript, options: OptimizeScriptOptions = {}): ParsedScript {
 	const result: ScriptLine[] = [];
-	let currentMode = "root";
+	let currentMode: string = options.initialMode ?? "root";
 	let batch: ScriptLine[] = [];
+	let batchVerb: string | null = null;
 
 	const flushBatch = () => {
 		if (batch.length === 0) return;
@@ -39,12 +44,13 @@ export function optimizeScript(script: ParsedScript): ParsedScript {
 			const merged: ScriptLine = {
 				lineNumber: batch[0]!.lineNumber,
 				raw: batch.map((l) => l.raw).join("\n"),
-				content: batch.map((l) => l.content).join(", "),
+				content: mergeBatchContent(batch, batchVerb!),
 				kind: "command",
 			};
 			result.push(merged);
 		}
 		batch = [];
+		batchVerb = null;
 	};
 
 	for (const line of script.lines) {
@@ -75,7 +81,10 @@ export function optimizeScript(script: ParsedScript): ParsedScript {
 		}
 
 		// Mode-specific command
-		if (currentMode === "builder" && isBatchable(line.content)) {
+		const verb = currentMode === "builder" ? batchableVerb(line.content) : null;
+		if (verb) {
+			if (batchVerb && batchVerb !== verb) flushBatch();
+			batchVerb = verb;
 			batch.push(line);
 		} else {
 			flushBatch();
@@ -88,17 +97,28 @@ export function optimizeScript(script: ParsedScript): ParsedScript {
 }
 
 /**
- * Check if a builder command can be safely batched with others.
- * Navigation commands (cd, ls, pwd, reset) force boundaries.
+ * Return the builder verb if this line can be safely comma-batched with
+ * other clauses of the same verb. Mixed verbs must remain separate lines.
  */
-function isBatchable(content: string): boolean {
+function batchableVerb(content: string): string | null {
 	const lower = content.toLowerCase();
 	for (const prefix of BOUNDARY_PREFIXES) {
 		if (lower === prefix.trimEnd() || lower.startsWith(prefix)) {
-			return false;
+			return null;
 		}
 	}
-	return true;
+	const match = lower.match(/^([a-z_][a-z0-9_]*)\b/);
+	const verb = match?.[1] ?? null;
+	if (!verb) return null;
+	if (verb === "add" && /\sto\s/.test(lower)) return null;
+	return ["add", "set", "get", "remove"].includes(verb) ? verb : null;
+}
+
+function mergeBatchContent(batch: ScriptLine[], verb: string): string {
+	return batch.map((line, index) => {
+		if (index === 0) return line.content;
+		return line.content.replace(new RegExp(`^${verb}\\s+`, "i"), "");
+	}).join(", ");
 }
 
 const MODE_IDS = SLASH_MODE_IDS;

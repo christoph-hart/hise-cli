@@ -3,17 +3,36 @@ import { optimizeScript } from "./optimizer.js";
 import { parseScript } from "./parser.js";
 
 describe("optimizeScript", () => {
-	it("merges consecutive builder commands into comma-chained line", () => {
+	it("merges consecutive same-verb builder commands into comma-chained line", () => {
 		const script = parseScript(
-			"/builder\nadd SineSynth\nadd SimpleGain\nset Gain.Volume 0.5",
+			"/builder\nset Lead.Volume -6\nset Lead.Pan 0",
 		);
 		const optimized = optimizeScript(script);
-		// /builder stays as-is, three commands merged into one
+		// /builder stays as-is, two set commands merged into one
 		expect(optimized.lines).toHaveLength(2);
 		expect(optimized.lines[0]!.content).toBe("/builder");
 		expect(optimized.lines[1]!.content).toBe(
-			"add SineSynth, add SimpleGain, set Gain.Volume 0.5",
+			"set Lead.Volume -6, Lead.Pan 0",
 		);
+	});
+
+	it("does not merge mixed builder verbs", () => {
+		const script = parseScript(
+			"/builder\nadd SineSynth as \"Lead\"\nset Lead.Volume -6",
+		);
+		const optimized = optimizeScript(script);
+		expect(optimized.lines.map((line) => line.content)).toEqual([
+			"/builder",
+			"add SineSynth as \"Lead\"",
+			"set Lead.Volume -6",
+		]);
+	});
+
+	it("uses initial mode for stdin-style batches", () => {
+		const script = parseScript("set Lead.Volume -6\nset Lead.Pan 0");
+		const optimized = optimizeScript(script, { initialMode: "builder" });
+		expect(optimized.lines).toHaveLength(1);
+		expect(optimized.lines[0]!.content).toBe("set Lead.Volume -6, Lead.Pan 0");
 	});
 
 	it("does not merge across mode switches", () => {
