@@ -15,6 +15,7 @@ import { wireScriptFileOps, wireExtendedFileOps } from "../node-io.js";
 import { createNodeAssetEnvironment } from "./nodeAssetIo.js";
 import { InlineApp } from "./InlineApp.js";
 import { renderInlineBanner } from "./banner.js";
+import { HttpMcpClient } from "../mcp/httpClient.js";
 
 export async function launchInlineRepl(
 	connection: HiseConnection,
@@ -56,6 +57,7 @@ export async function launchInlineRepl(
 		handlerRegistry: runtime.handlerRegistry,
 		launcher: runtime.hiseLauncher,
 		assetEnvironment,
+		mcpClient: new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL }),
 	});
 
 	wireScriptFileOps(session);

@@ -26,6 +26,15 @@ describe("generated agent context", () => {
 		]));
 	});
 
+	it("contains mcp capabilities from the YAML source", () => {
+		const mcp = GENERATED_AGENT_CONTEXT.modes.find((mode) => mode.id === "mcp");
+		expect(mcp?.capabilities.map((capability) => capability.id)).toEqual(expect.arrayContaining([
+			"mcp.tool.fields",
+			"mcp.search.docs",
+			"mcp.query.api",
+		]));
+	});
+
 	it("parses concrete capability and example argv recipes", () => {
 		const commands = getCliCommands();
 		for (const mode of GENERATED_AGENT_CONTEXT.modes) {

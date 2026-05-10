@@ -420,6 +420,77 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("executes mcp tool calls without HISE", async () => {
+		const calls: Array<{ name?: string; args?: unknown }> = [];
+		const result = await executeCliCommand(
+			["node", "hise-cli", "mcp", "search_hise", "--query", "sampler", "--limit", "2", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			{
+				connectionOverride: new MockHiseConnection().setProbeResult(false),
+				mcpClient: {
+					async call() { return {}; },
+					async callTool(request) {
+						calls.push({ name: request.name, args: request.arguments });
+						return { content: [{ type: "text", text: "ok" }] };
+					},
+				},
+			},
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: { content: [{ type: "text", text: "ok" }] } });
+		}
+		expect(calls).toEqual([{ name: "search_hise", args: { query: "sampler", limit: 2 } }]);
+	});
+
+	it("executes raw mcp methods with select", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--select", "value.contents[0].text"],
+			getCliCommands(),
+			createDataLoader(),
+			{
+				connectionOverride: new MockHiseConnection().setProbeResult(false),
+				mcpClient: {
+					async call(request) {
+						expect(request).toEqual({ method: "resources/read", params: { uri: "hise://style-guides/hisescript-style" } });
+						return { contents: [{ text: "# HiseScript" }] };
+					},
+					async callTool() { return {}; },
+				},
+			},
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: "# HiseScript" });
+		}
+	});
+
+	it("executes mcp mode one-shots without HISE bootstrap", async () => {
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-mcp", "explore_hise", "sampler", "--agent", "--select", "result.type"],
+			getCliCommands(),
+			createDataLoader(),
+			{
+				connectionOverride: new MockHiseConnection().setProbeResult(false),
+				mcpClient: {
+					async call() { return {}; },
+					async callTool(request) {
+						expect(request).toEqual({ name: "explore_hise", arguments: { query: "sampler" } });
+						return { content: [{ type: "text", text: "# Sampler" }] };
+					},
+				},
+			},
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: true, value: "markdown" });
+		}
+	});
+
 	it("executes agent-context manifest queries without HISE", async () => {
 		const result = await executeCliCommand(
 			["node", "hise-cli", "agent-context", "--agent"],

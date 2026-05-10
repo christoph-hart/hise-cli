@@ -25,7 +25,8 @@ export type ModeId =
 	| "analyse"
 	| "publish"
 	| "assets"
-	| "api";
+	| "api"
+	| "mcp";
 
 export interface CompletionItem {
 	label: string;

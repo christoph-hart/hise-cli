@@ -13,6 +13,7 @@ export type CliParseResult =
 	| { kind: "status"; output: CliOutputOptions }
 	| { kind: "agent-context"; query: AgentContextQuery; output: CliOutputOptions }
 	| { kind: "which"; query: string; limit: number; output: CliOutputOptions }
+	| { kind: "mcp"; command: McpCliCommand; output: CliOutputOptions }
 	| {
 		kind: "execute";
 		entry: CommandEntry;
@@ -36,6 +37,14 @@ export type AgentContextQuery =
 	| { type: "mode"; modeId: string }
 	| { type: "capability"; id: string }
 	| { type: "capability-index" };
+
+export interface McpCliCommand {
+	target: string;
+	mode: "tool" | "method";
+	argsSource: { type: "none" } | { type: "inline"; json: string } | { type: "file"; path: string } | { type: "stdin" } | { type: "fields"; fields: Array<{ key: string; value: string | true }> };
+	url?: string;
+	timeoutMs?: number;
+}
 
 export type ScriptApiCommand =
 	| { action: "repl"; moduleId: string; source: { type: "stdin" } }
@@ -335,6 +344,112 @@ function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliPar
 	return { kind: "agent-context", query: { type: "manifest" }, output: { ...output, json: true } };
 }
 
+function parseMcpArgs(args: string[], output: CliOutputOptions): CliParseResult {
+	const rest = args.slice(1);
+	const target = rest[0];
+	if (!target || target.startsWith("--")) return { kind: "error", message: "mcp requires a tool or method name" };
+	let url: string | undefined;
+	let timeoutMs: number | undefined;
+	let inlineJson: string | undefined;
+	let argsFile: string | undefined;
+	let argsStdin = false;
+	const fields: Array<{ key: string; value: string | true }> = [];
+
+	for (let i = 1; i < rest.length; i++) {
+		const arg = rest[i]!;
+		if (arg === "--args") {
+			const value = rest[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: "--args requires a JSON value" };
+			inlineJson = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--args=")) {
+			inlineJson = arg.slice("--args=".length);
+			if (!inlineJson) return { kind: "error", message: "--args requires a JSON value" };
+			continue;
+		}
+		if (arg === "--args-file") {
+			const value = rest[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: "--args-file requires a path" };
+			argsFile = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--args-file=")) {
+			argsFile = arg.slice("--args-file=".length);
+			if (!argsFile) return { kind: "error", message: "--args-file requires a path" };
+			continue;
+		}
+		if (arg === "--args-stdin") {
+			argsStdin = true;
+			continue;
+		}
+		if (arg === "--url") {
+			const value = rest[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: "--url requires a value" };
+			url = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--url=")) {
+			url = arg.slice("--url=".length);
+			if (!url) return { kind: "error", message: "--url requires a value" };
+			continue;
+		}
+		if (arg === "--timeout") {
+			const value = rest[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: "--timeout requires seconds or milliseconds" };
+			const parsed = parseTimeoutMs(value);
+			if (parsed == null) return { kind: "error", message: "--timeout must be a positive duration" };
+			timeoutMs = parsed;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--timeout=")) {
+			const parsed = parseTimeoutMs(arg.slice("--timeout=".length));
+			if (parsed == null) return { kind: "error", message: "--timeout must be a positive duration" };
+			timeoutMs = parsed;
+			continue;
+		}
+		if (!arg.startsWith("--")) return { kind: "error", message: `Unexpected argument for mcp ${target}: ${arg}` };
+		const eq = arg.indexOf("=");
+		if (eq !== -1) {
+			fields.push({ key: arg.slice(2, eq), value: arg.slice(eq + 1) });
+			continue;
+		}
+		const value = rest[i + 1];
+		if (value && !value.startsWith("--")) {
+			fields.push({ key: arg.slice(2), value });
+			i++;
+		} else {
+			fields.push({ key: arg.slice(2), value: true });
+		}
+	}
+
+	const jsonSourceCount = [Boolean(inlineJson), Boolean(argsFile), argsStdin].filter(Boolean).length;
+	if (jsonSourceCount > 1) return { kind: "error", message: "mcp accepts only one args source: --args, --args-file, or --args-stdin" };
+	if (jsonSourceCount > 0 && fields.length > 0) return { kind: "error", message: "mcp field flags cannot be combined with --args, --args-file, or --args-stdin" };
+	const argsSource = inlineJson
+		? { type: "inline" as const, json: inlineJson }
+		: argsFile
+			? { type: "file" as const, path: argsFile }
+			: argsStdin
+				? { type: "stdin" as const }
+				: fields.length > 0
+					? { type: "fields" as const, fields }
+					: { type: "none" as const };
+	return { kind: "mcp", command: { target, mode: target.includes("/") ? "method" : "tool", argsSource, url, timeoutMs }, output: { ...output, json: true } };
+}
+
+function parseTimeoutMs(value: string): number | null {
+	const match = value.match(/^(\d+(?:\.\d+)?)(ms|s)?$/);
+	if (!match) return null;
+	const amount = Number(match[1]);
+	if (!Number.isFinite(amount) || amount <= 0) return null;
+	return Math.round(amount * (match[2] === "ms" ? 1 : 1000));
+}
+
 function parseScriptShowApiArgs(rest: string[], moduleId: string, useMock: boolean, output: CliOutputOptions): CliParseResult {
 	const positional: Array<{ value: string; index: number }> = [];
 	for (let i = 0; i < rest.length; i++) {
@@ -446,6 +561,10 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 			queryParts.push(stripMatchedOuterQuotes(arg));
 		}
 		return { kind: "which", query: queryParts.join(" ").trim(), limit, output: { ...output, json: true } };
+	}
+
+	if (first === "mcp") {
+		return parseMcpArgs(args, output);
 	}
 
 	if (first === "script") {

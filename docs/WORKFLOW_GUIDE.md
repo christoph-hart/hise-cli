@@ -166,50 +166,37 @@ Need one thing done?
 
 ---
 
-## 3. Undo and plan groups
+## 3. Undo and CLI automation
 
 Every mutation (add, remove, set, clone, rename, bypass) creates an undo
-entry. Without plan groups, five `add` commands create five separate undo
-steps — the user must undo five times to revert.
-
-### When to use plan groups
-
-**Use a plan group when making 2+ related mutations.** This batches them
-into a single undo/redo step. The pattern:
+entry. One-shot CLI automation intentionally exposes only direct undo history
+navigation:
 
 ```bash
-hise-cli -undo 'plan "Add synth layer"'
-hise-cli -builder "add SineSynth as Lead"
-hise-cli -builder "add SimpleGain to Lead"
-hise-cli -builder "add AHDSR to Lead.gain"
-hise-cli -builder "set Lead.Gain 0.5"
-hise-cli -builder "show tree"           # verify before committing
-hise-cli -undo "apply"                  # finalize the group
+hise-cli -undo "back"
+hise-cli -undo "forward"
+hise-cli -undo "history"
+hise-cli -undo "clear"
 ```
 
-To roll back everything: `hise-cli -undo "discard"` instead of `apply`.
+Plan groups are interactive-only. Use them in the TUI or inside `.hsc` scripts
+when you explicitly want a grouped rollback boundary, but do not use them for
+ordinary one-shot CLI automation.
 
-### When unsure about the outcome
+### CLI workflow
 
-**If you are uncertain whether a command sequence will produce the right
-result, always use a plan group.** Execute the commands, inspect the result
-with `show tree` or `show <target>`, and then decide:
-
-- Looks correct → `hise-cli -undo "apply"`
-- Something wrong → `hise-cli -undo "discard"` (reverts everything)
-
-This is especially important for LLM agents: plan groups give you a safe
-rollback mechanism when you cannot visually verify the result.
-
-### When NOT to use plan groups
-
-- Single operations that are trivially correct (e.g. `set Volume -6`)
-- Read-only commands (`show tree`, `show types`)
-
-### Checking plan state
+Run direct commands and verify after each logical step:
 
 ```bash
-hise-cli -undo "diff"      # see what the current plan group changed
+hise-cli -builder "add SineSynth as Lead"
+hise-cli -builder "add SimpleGain to Lead"
+hise-cli -builder "set Lead.Gain 0.5"
+hise-cli -builder "show tree"
+```
+
+### Checking undo history
+
+```bash
 hise-cli -undo "history"   # see full undo history
 ```
 
@@ -593,11 +580,6 @@ After `/compile`, verify the interface was created:
 ### Pattern: Build and verify a module tree
 
 ```hsc
-# Wrap in a plan group for atomic undo
-/undo
-plan "Create synth layer"
-/exit
-
 /builder
 add SineSynth as Lead
 add SimpleGain to Lead.fx
@@ -606,9 +588,6 @@ set Lead.Gain 0.5
 /expect get Lead.Gain is 0.5
 /exit
 
-/undo
-apply
-/exit
 ```
 
 **Tip:** For test scripts that run repeatedly, start with `/builder reset`
@@ -674,7 +653,7 @@ play "smoke_test"
 | Mistake | Correct approach |
 |---|---|
 | Calling `Synth.addNoteOn()` via `-script` | Use `/sequence` mode — handles note-off automatically |
-| Making many mutations without a plan group | Wrap in `/undo plan` + `apply` for clean undo |
+| Using CLI undo plans for routine automation | Run direct commands and verify after logical steps; reserve plan groups for TUI / `.hsc` workflows |
 | Guessing module type names | Query with `show types` or the MCP `list_module_types` tool |
 | Guessing parameter names | Use `show <module>` or MCP `query_module_parameter` |
 | Setting values without checking ranges | Check range first — `50` on a 0-1 param means +34dB |

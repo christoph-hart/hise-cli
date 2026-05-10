@@ -26,6 +26,7 @@ export const MODE_ACCENTS = {
 	publish: "#ff79c6",
 	assets: "#a6c8e6",
 	api: "#7dcfff",
+	mcp: "#b4f8c8",
 } as const;
 
 /** Mode names that can be entered via slash commands (e.g. /builder, /script).
@@ -34,5 +35,5 @@ export const MODE_ACCENTS = {
 export const SLASH_MODE_IDS = new Set<string>([
 	"builder", "script", "dsp", "sampler", "inspect",
 	"project", "export", "undo", "ui", "sequence", "hise", "analyse",
-	"publish", "assets", "api",
+	"publish", "assets", "api", "mcp",
 ]);

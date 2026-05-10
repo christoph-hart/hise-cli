@@ -29,7 +29,7 @@ const SYNONYMS: Record<string, string[]> = {
 };
 
 export function executeWhich(query: string, limit: number): { ok: true; value: WhichMatch[] } | CliErrorPayload {
-	const capabilities = GENERATED_AGENT_CONTEXT.modes.flatMap((mode) => mode.capabilities) as AgentCapability[];
+	const capabilities = GENERATED_AGENT_CONTEXT.modes.flatMap((mode) => [...mode.capabilities]) as unknown as AgentCapability[];
 	if (!query) {
 		return { ok: true, value: capabilities.slice(0, limit).map((capability) => toMatch(capability, 0, "listed capability")) };
 	}

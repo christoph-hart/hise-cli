@@ -6,6 +6,438 @@ export const GENERATED_AGENT_CONTEXT = {
 	"schemaVersion": 1,
 	"modes": [
 		{
+			"id": "mcp",
+			"title": "HISE MCP documentation bridge",
+			"summary": "Call the HISE MCP documentation server through hise-cli when native MCP access is unavailable.",
+			"invocation": [
+				{
+					"title": "Invocation 1",
+					"argv": [
+						"hise-cli",
+						"mcp",
+						"search_hise",
+						"--query",
+						"Content.addKnob",
+						"--domain",
+						"api",
+						"--limit",
+						"3",
+						"--agent"
+					],
+					"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
+				},
+				{
+					"title": "Invocation 2",
+					"argv": [
+						"hise-cli",
+						"mcp",
+						"explore_hise",
+						"--query",
+						"sampler",
+						"--agent"
+					],
+					"display": "hise-cli mcp explore_hise --query sampler --agent"
+				},
+				{
+					"title": "Invocation 3",
+					"argv": [
+						"hise-cli",
+						"mcp",
+						"resources/read",
+						"--uri",
+						"hise://style-guides/hisescript-style",
+						"--agent"
+					],
+					"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
+				}
+			],
+			"notes": [
+				"Use native MCP access directly when the current AI agent has the HISE MCP server installed.",
+				"Use hise-cli mcp as a fallback bridge when native MCP setup is unavailable or unreliable.",
+				"hise-cli mcp preserves the MCP result under the normal hise-cli JSON envelope.",
+				"Use --args, --args-file, or --args-stdin for nested or complex MCP arguments.",
+				"Use docs lookup before inventing HiseScript APIs, UI properties, module parameters, or LAF functions."
+			],
+			"antiPatterns": [
+				{
+					"avoid": "Guessing HiseScript APIs from JavaScript knowledge.",
+					"prefer": "hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent"
+				},
+				{
+					"avoid": "Embedding complex nested JSON in shell arguments when it becomes hard to quote.",
+					"prefer": "hise-cli mcp <tool> --args-file ./mcp-args.json --agent"
+				}
+			],
+			"capabilities": [
+				{
+					"id": "mcp.tool.fields",
+					"title": "Call an MCP tool with field flags",
+					"purpose": "Call a HISE MCP tool using CLI-friendly flags that map to MCP arguments.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"explore_hise",
+							"--query",
+							"sampler",
+							"--agent"
+						],
+						"display": "hise-cli mcp explore_hise --query sampler --agent"
+					},
+					"tags": [
+						"mcp",
+						"docs",
+						"tool",
+						"fields"
+					],
+					"aliases": [
+						"call hise mcp tool",
+						"use mcp docs bridge",
+						"search hise docs from cli"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 10
+					},
+					"examples": [
+						{
+							"title": "Explore sampler concepts",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"explore_hise",
+								"--query",
+								"sampler",
+								"--agent"
+							],
+							"display": "hise-cli mcp explore_hise --query sampler --agent"
+						},
+						{
+							"title": "Search for an API method",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"search_hise",
+								"--query",
+								"Content.addKnob",
+								"--domain",
+								"api",
+								"--limit",
+								"3",
+								"--agent"
+							],
+							"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
+						}
+					]
+				},
+				{
+					"id": "mcp.tool.json",
+					"title": "Call an MCP tool with exact JSON arguments",
+					"purpose": "Call a HISE MCP tool with exact JSON arguments for complex or nested inputs.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"explore_hise",
+							"--args",
+							"{\"query\":\"sampler\",\"source\":\"docs\"}",
+							"--agent"
+						],
+						"display": "hise-cli mcp explore_hise --args \"{\\\"query\\\":\\\"sampler\\\",\\\"source\\\":\\\"docs\\\"}\" --agent"
+					},
+					"tags": [
+						"mcp",
+						"docs",
+						"json",
+						"passthrough"
+					],
+					"aliases": [
+						"exact mcp args",
+						"mcp json arguments",
+						"pass json to mcp tool"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 20
+					},
+					"examples": [
+						{
+							"title": "Explore docs only",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"explore_hise",
+								"--args",
+								"{\"query\":\"sampler\",\"source\":\"docs\"}",
+								"--agent"
+							],
+							"display": "hise-cli mcp explore_hise --args \"{\\\"query\\\":\\\"sampler\\\",\\\"source\\\":\\\"docs\\\"}\" --agent"
+						}
+					]
+				},
+				{
+					"id": "mcp.raw.method",
+					"title": "Call a raw MCP method",
+					"purpose": "Call raw MCP methods such as resources/list, resources/read, tools/list, or prompts/list.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"resources/read",
+							"--uri",
+							"hise://style-guides/hisescript-style",
+							"--agent"
+						],
+						"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
+					},
+					"tags": [
+						"mcp",
+						"resources",
+						"prompts",
+						"methods"
+					],
+					"aliases": [
+						"read mcp resource",
+						"list mcp tools",
+						"call mcp method"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 30
+					},
+					"examples": [
+						{
+							"title": "List MCP tools",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"tools/list",
+								"--agent"
+							],
+							"display": "hise-cli mcp tools/list --agent"
+						},
+						{
+							"title": "Read HiseScript style guide",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"resources/read",
+								"--uri",
+								"hise://style-guides/hisescript-style",
+								"--agent"
+							],
+							"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
+						}
+					]
+				},
+				{
+					"id": "mcp.search.docs",
+					"title": "Search HISE documentation",
+					"purpose": "Search HISE docs by keyword, API symbol, module type, UI component, or scriptnode concept.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"search_hise",
+							"--query",
+							"Content.addKnob",
+							"--domain",
+							"api",
+							"--limit",
+							"3",
+							"--agent"
+						],
+						"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
+					},
+					"tags": [
+						"mcp",
+						"docs",
+						"search",
+						"api"
+					],
+					"aliases": [
+						"search hise docs",
+						"find hise api docs",
+						"lookup hise documentation"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 40
+					},
+					"examples": [
+						{
+							"title": "Search API docs",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"search_hise",
+								"--query",
+								"Content.addKnob",
+								"--domain",
+								"api",
+								"--limit",
+								"3",
+								"--agent"
+							],
+							"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
+						}
+					]
+				},
+				{
+					"id": "mcp.explore.semantic",
+					"title": "Explore HISE concepts semantically",
+					"purpose": "Use semantic HISE docs discovery when you do not know the exact API class or method.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"explore_hise",
+							"--query",
+							"create slider callback",
+							"--domain",
+							"ui",
+							"--source",
+							"docs",
+							"--timeout",
+							"180",
+							"--agent"
+						],
+						"display": "hise-cli mcp explore_hise --query \"create slider callback\" --domain ui --source docs --timeout 180 --agent"
+					},
+					"tags": [
+						"mcp",
+						"docs",
+						"semantic",
+						"explore"
+					],
+					"aliases": [
+						"semantic hise search",
+						"explore hise concepts",
+						"find the right hise class"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 50
+					},
+					"examples": [
+						{
+							"title": "Explore slider callbacks",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"explore_hise",
+								"--query",
+								"create slider callback",
+								"--domain",
+								"ui",
+								"--source",
+								"docs",
+								"--timeout",
+								"180",
+								"--agent"
+							],
+							"display": "hise-cli mcp explore_hise --query \"create slider callback\" --domain ui --source docs --timeout 180 --agent"
+						}
+					],
+					"notes": [
+						"The first semantic call can be slower if the MCP server is warming up an embedding model."
+					]
+				},
+				{
+					"id": "mcp.query.api",
+					"title": "Query exact HiseScript API details",
+					"purpose": "Get exact method signatures, parameter details, examples, and pitfalls for a HiseScript API class or method.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"mcp",
+							"query_scripting_api",
+							"--api-call",
+							"ScriptSlider.setControlCallback",
+							"--agent"
+						],
+						"display": "hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent"
+					},
+					"tags": [
+						"mcp",
+						"api",
+						"hissescript",
+						"docs"
+					],
+					"aliases": [
+						"query hise api method",
+						"get hise method signature",
+						"verify hise api call"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 60
+					},
+					"examples": [
+						{
+							"title": "Query setControlCallback",
+							"argv": [
+								"hise-cli",
+								"mcp",
+								"query_scripting_api",
+								"--api-call",
+								"ScriptSlider.setControlCallback",
+								"--agent"
+							],
+							"display": "hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent"
+						}
+					]
+				},
+				{
+					"id": "mcp.tui.mode",
+					"title": "Use interactive MCP mode",
+					"purpose": "Enter /mcp TUI mode and call MCP tools with a concise first-token command syntax.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-mcp",
+							"explore_hise",
+							"sampler",
+							"--agent"
+						],
+						"display": "hise-cli -mcp explore_hise sampler --agent"
+					},
+					"tags": [
+						"mcp",
+						"tui",
+						"docs",
+						"interactive"
+					],
+					"aliases": [
+						"mcp tui mode",
+						"interactive hise docs mode",
+						"slash mcp mode"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 70
+					},
+					"examples": [
+						{
+							"title": "Explore sampler in TUI mode syntax",
+							"argv": [
+								"hise-cli",
+								"-mcp",
+								"explore_hise",
+								"sampler",
+								"--agent"
+							],
+							"display": "hise-cli -mcp explore_hise sampler --agent"
+						}
+					],
+					"notes": [
+						"In TUI mode, autocomplete and syntax highlighting apply only to the first token.",
+						"Text and resource responses render as markdown for humans."
+					]
+				}
+			]
+		},
+		{
 			"id": "script",
 			"title": "HiseScript REPL and callback editing",
 			"summary": "Evaluate HiseScript expressions and read or update script callbacks without shell-quoting callback bodies.",

@@ -1,8 +1,12 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import YAML from "yaml";
 
-const sources = ["docs/agent-context/script.yaml"];
+const sourceDir = "docs/agent-context";
+const sources = readdirSync(sourceDir)
+	.filter((name) => name.endsWith(".yaml"))
+	.sort()
+	.map((name) => join(sourceDir, name).replace(/\\/g, "/"));
 const outFile = "src/cli/generated-agent-context.ts";
 
 function quoteArg(arg) {

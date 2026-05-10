@@ -118,6 +118,7 @@ async function handleModes(
 		["publish", "Build & sign installers", MODE_ACCENTS.publish],
 		["assets", "Install, manage, and publish asset packages", MODE_ACCENTS.assets],
 		["api", "HiseScript API doc browser", MODE_ACCENTS.api],
+		["mcp", "HISE MCP docs bridge", MODE_ACCENTS.mcp],
 	];
 
 	return tableResult(
@@ -1462,6 +1463,13 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
 		name: "api",
 		description: "Browse HiseScript API docs (e.g. /api Console, /api Console.print())",
 		handler: createModeHandler("api"),
+		kind: "mode",
+	});
+
+	registry.register({
+		name: "mcp",
+		description: "Call the HISE MCP documentation server",
+		handler: createModeHandler("mcp"),
 		kind: "mode",
 	});
 

@@ -50,6 +50,19 @@ describe("UndoMode basics", () => {
 		const result = await mode.parse("foobar", session);
 		expect(result.type).toBe("error");
 	});
+
+	it("rejects plan-group commands for CLI / LLM sessions", async () => {
+		const { mode, session } = createUndoWithMock();
+		const cliSession: SessionContext = { ...session, forLlm: true };
+
+		for (const command of ["plan \"Test\"", "apply", "discard", "diff"]) {
+			const result = await mode.parse(command, cliSession);
+			expect(result.type).toBe("error");
+			if (result.type === "error") {
+				expect(result.message).toContain("interactive TUI");
+			}
+		}
+	});
 });
 
 // ── Back / Forward / Clear ──────────────────────────────────────────

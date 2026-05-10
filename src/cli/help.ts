@@ -25,6 +25,7 @@ USAGE
   hise-cli diagnose <filepath>              Diagnose HiseScript file
   hise-cli agent-context [scope]            Emit structured CLI context for agents
   hise-cli which "<intent>"                  Find the command for a capability
+  hise-cli mcp <tool-or-method>             Call the HISE MCP docs server
   hise-cli update [--check]                 Self-update to latest GitHub release
   hise-cli -version                         Print the CLI version
   hise-cli -status                          Print CLI + HISE status
@@ -68,11 +69,12 @@ MODES
   -ui "<command>"          UI component editor      (--help for syntax)
   -script "<expression>"   HiseScript REPL          (--help for syntax)
   -inspect "<command>"     Runtime monitor           (--help for syntax)
-  -undo "<command>"        Undo history & plan groups (--help for syntax)
+  -undo "<command>"        Undo history navigation   (--help for syntax)
   -hise "<command>"        Runtime control            (--help for syntax)
   -publish "<command>"     Build & sign installers    (--help for syntax)
   -assets "<command>"      Install, manage, and publish asset packages (--help for syntax)
   -api "<query>"           HiseScript API doc browser (--help for syntax)
+  -mcp "<tool> <args>"     HISE MCP docs bridge     (--help for syntax)
 
   -wizard <subcommand>     Guided workflows          (--help for syntax)
 
@@ -130,8 +132,9 @@ GRAMMAR
     hex (0xAARRGGBB). Shorter hex forms are parse errors.
   - Booleans: true / false.
   - Arrays: [0, 1, -1, -1] for routing matrices.
-  - Comma chaining: every clause provides its full path. Verb inheritance
-    is gone. "set Lead.Volume -6, Lead.Pan 10" — note the repeated target.
+  - Comma chaining: the verb is written once, then inherited by each clause.
+    Every clause still provides full arguments and full identifier paths:
+    "set Lead.Volume -6, Lead.Pan 10".
 
 COMMANDS
   add <type> as "<name>" [to <parent>[.<chain>]]
@@ -145,7 +148,7 @@ COMMANDS
     supported via builder yet (set X.index is a stub — see PROPERTY WRITES).
     Name collisions are auto-suffixed (e.g. "LFO", "LFO2", "LFO3").
     Chained add disallows "to" — every clause lands at the cwd:
-      "add SineSynth as \"L\", add SineSynth as \"R\""
+      "add SineSynth as \"L\", SineSynth as \"R\""
 
   remove <target> [, <target>...]
     Remove modules and all their children. Chained — every clause is a
@@ -241,11 +244,6 @@ CONTEXT TARGET
   --target sets an implicit parent without entering the mode:
     hise-cli -builder --target Master "add LFO as \"Shape\" to gain"
 
-UNDO
-  All tree mutations (add, remove, set, clone, rename) are undoable via
-  the undo mode. See: hise-cli -undo --help. Plan groups batch multiple
-  operations into a single undo step.
-
 RESPONSE FORMAT
   Successful mutations return a diff summary: { ok: true, result: "+ModuleId" }
   for add, "-ModuleId" for remove, "*ModuleId.Param" for set.
@@ -272,16 +270,6 @@ CHAIN TYPES (exhaustive list)
   midi       MIDI processors
   gain       Gain/volume modulators
   pitch      Pitch modulators
-
-RECOMMENDED WORKFLOW (complex module trees)
-  Use undo plan groups to batch operations into a single undoable unit:
-    1. hise-cli -undo 'plan "Add synth layer"'
-    2. hise-cli -builder "add SineSynth as \"Lead\" to Master Chain"
-    3. hise-cli -builder "add SimpleGain as \"Drive\" to Lead"
-    4. hise-cli -builder "add AHDSR as \"VolEnv\" to Lead.gain"
-    5. hise-cli -builder "set Lead.Volume -6, Lead.bypassed false"
-    6. hise-cli -builder "show tree"
-    7. hise-cli -undo "apply"            (or "discard" to rollback all)
 
 EXAMPLES
   hise-cli -builder "show tree"
@@ -355,8 +343,8 @@ NETWORK LIFECYCLE
 GRAMMAR
   - Paths: bare ID or dotted "node.param.field". Quoted segments allow
     spaces or reserved words.
-  - Comma chaining: every clause provides full args. Verb inheritance is
-    gone: "set A.Freq 440, set B.Freq 880" — note the repeated verb.
+  - Comma chaining: the verb is written once, then inherited by each clause.
+    Every clause still provides full args: "set A.Freq 440, B.Freq 880".
   - Numeric values: int/float, percent (50% → 0.5), strict 8-digit hex
     (0xAARRGGBB).
 
@@ -365,7 +353,7 @@ GRAPH EDITING
     Add a node. Factory paths use dot notation (core.oscillator, filters.svf,
     control.pma). "as <id>" is mandatory. Without "to", adds to the current
     cd path. Chained add lands all clauses at the cwd:
-      add core.gain as "L", add core.gain as "R"
+      add core.gain as "L", core.gain as "R"
 
   remove <nodeId> [, ...]
     Remove nodes. Chained — every clause is a full path.
@@ -445,7 +433,8 @@ EXAMPLES
   hise-cli -dsp --target "Script FX1" "show root"
   hise-cli -dsp --target "Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
   hise-cli -dsp --target "Script FX1" "add filters.svf as \"F1\""
-  hise-cli -dsp --target "Script FX1" "add control.pma as \"LFO1\", connect LFO1 to F1.Frequency matched"
+  hise-cli -dsp --target "Script FX1" "add control.pma as \"LFO1\""
+  hise-cli -dsp --target "Script FX1" "connect LFO1 to F1.Frequency matched"
   hise-cli -dsp --target "Script FX1" "disconnect F1.Frequency"
   hise-cli -dsp --target "Script FX1" "create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3"
   hise-cli -dsp --target "Script FX1" "set Osc1.Frequency.stepSize 1"
@@ -493,6 +482,46 @@ EXAMPLES
   hise-cli which "edit onInit from file" --agent
   hise-cli which "compile script" --limit 1 --agent
   hise-cli which "evaluate expression from stdin" --agent`,
+
+	mcp: `hise-cli mcp — HISE MCP bridge
+
+SYNTAX
+  hise-cli mcp <tool-name> [--field value ...] [--agent]
+  hise-cli mcp <mcp-method> [--field value ...] [--agent]
+  hise-cli mcp <tool-name> --args '<json>' [--agent]
+  hise-cli mcp <tool-name> --args-file ./args.json [--agent]
+  hise-cli mcp <tool-name> --args-stdin [--agent]
+
+DESCRIPTION
+  Calls the HISE MCP documentation server using Streamable HTTP. Tool names
+  without a slash are sent as MCP tools/call requests. Names containing a slash
+  are sent as raw MCP methods such as resources/read or tools/list.
+
+  Default endpoint: HISE_MCP_URL or http://localhost:4406/mcp.
+
+OPTIONS
+  --url <url>          Override the MCP endpoint
+  --timeout <seconds>  Request timeout (also accepts 500ms or 2s)
+  --args <json>        Exact JSON arguments / params
+  --args-file <path>   Read exact JSON arguments / params from a file
+  --args-stdin         Read exact JSON arguments / params from stdin
+
+FIELD FLAGS
+  Any other --field value flag becomes an MCP argument. Kebab-case is converted
+  to camelCase, so --api-call becomes apiCall. Repeated flags become arrays.
+
+EXAMPLES
+  hise-cli mcp search_hise --query "Content.addKnob" --domain api --limit 3 --agent
+  hise-cli mcp explore_hise --query "create slider callback" --domain ui --source docs --timeout 180 --agent
+  hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
+  hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent
+  hise-cli mcp tools/list --agent
+
+TUI MODE
+  Type /mcp, then enter calls like:
+    explore_hise sampler
+    search_hise Content.addKnob
+    resources/read hise://style-guides/hisescript-style`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 
@@ -604,7 +633,8 @@ GRAMMAR
       size     → Array2: [w, h]
   - Component value writes go through /api/set_component_value:
       set Knob.value 0.5
-  - Comma chaining: full clause per comma. Verb inheritance is gone.
+  - Comma chaining: the verb is written once, then inherited by each clause.
+    Every clause still provides full arguments and full identifier paths.
 
 COMMANDS
   add <type> as "<name>" [to <parent>]         Add a component
@@ -644,7 +674,7 @@ EXAMPLES
   hise-cli -ui "set VolumeKnob.value 0.5"
   hise-cli -ui "show PlayButton"`,
 
-	undo: `hise-cli -undo — undo history and plan groups
+	undo: `hise-cli -undo — undo history navigation
 
 SYNTAX
   hise-cli -undo "<command>"
@@ -653,18 +683,16 @@ COMMANDS
   back             Undo last action
   forward          Redo last undone action
   clear            Clear undo history
-  plan "<name>"    Start a named plan group (batches operations)
-  apply            Apply the current plan group
-  discard          Discard the current plan group
-  diff             Show diff of current plan group
   history          Show undo history
 
-Plan groups batch multiple builder operations into a single undoable unit.
+Plan groups are interactive TUI-only and are intentionally hidden from the
+one-shot CLI surface. CLI automation should run direct commands or use .hsc
+scripts for scripted workflows.
 
 EXAMPLES
   hise-cli -undo "back"
-  hise-cli -undo "history"
-  hise-cli -undo 'plan "My Refactor"'`,
+  hise-cli -undo "forward"
+  hise-cli -undo "history"`,
 
 	wizard: `hise-cli -wizard — guided multi-step workflows
 

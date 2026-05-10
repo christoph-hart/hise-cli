@@ -135,6 +135,46 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses mcp tool calls with field flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "search_hise", "--query", "Content.addKnob", "--domain", "api", "--limit", "3", "--agent"], getCliCommands());
+		expect(result.kind).toBe("mcp");
+		if (result.kind === "mcp") {
+			expect(result.command).toEqual({
+				target: "search_hise",
+				mode: "tool",
+				argsSource: { type: "fields", fields: [
+					{ key: "query", value: "Content.addKnob" },
+					{ key: "domain", value: "api" },
+					{ key: "limit", value: "3" },
+				] },
+			});
+			expect(result.output).toEqual({ json: true, agent: true, compact: true });
+		}
+	});
+
+	it("parses mcp raw methods with url and timeout", () => {
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--url", "http://localhost:4406/mcp", "--timeout", "180"], getCliCommands());
+		expect(result.kind).toBe("mcp");
+		if (result.kind === "mcp") {
+			expect(result.command.mode).toBe("method");
+			expect(result.command.url).toBe("http://localhost:4406/mcp");
+			expect(result.command.timeoutMs).toBe(180000);
+		}
+	});
+
+	it("parses mcp exact JSON args", () => {
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "explore_hise", "--args", '{"query":"sampler"}'], getCliCommands());
+		expect(result.kind).toBe("mcp");
+		if (result.kind === "mcp") {
+			expect(result.command.argsSource).toEqual({ type: "inline", json: '{"query":"sampler"}' });
+		}
+	});
+
+	it("rejects mixed mcp field and JSON args", () => {
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "explore_hise", "--query", "sampler", "--args", '{"query":"sampler"}'], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "mcp field flags cannot be combined with --args, --args-file, or --args-stdin" });
+	});
+
 	it("parses select as JSON output", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-status", "--select", "value.connected"], getCliCommands());
 		expect(result.kind).toBe("status");

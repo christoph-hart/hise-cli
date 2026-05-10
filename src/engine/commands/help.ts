@@ -433,8 +433,8 @@ ScriptMultipageDialog, ScriptWebView
 
 ## Features
 
-- **Comma chaining**: \`add ScriptButton as "A", add ScriptSlider as "B"\`
-  (full clause per comma — verb inheritance is gone)
+- **Comma chaining**: \`add ScriptButton as "A", ScriptSlider as "B"\`
+  (the verb is written once; every clause still provides full arguments)
 - **Tab completion**: component types, IDs, property names
 - **Tree sidebar**: shows component hierarchy, dims invisible components, ★ for saveInPreset`,
 

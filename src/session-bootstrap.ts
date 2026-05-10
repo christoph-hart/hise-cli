@@ -15,6 +15,8 @@ import { AnalyseMode } from "./engine/modes/analyse.js";
 import { PublishMode } from "./engine/modes/publish.js";
 import { AssetsMode } from "./engine/modes/assets.js";
 import { ApiMode } from "./engine/modes/api.js";
+import { McpMode } from "./engine/modes/mcp.js";
+import type { McpClient } from "./engine/mcp/types.js";
 import type { AssetEnvironment } from "./engine/assets/environment.js";
 import { WizardRegistry } from "./engine/wizard/registry.js";
 import type { WizardHandlerRegistry } from "./engine/wizard/handler-registry.js";
@@ -22,7 +24,7 @@ import { registerWizardAliases } from "./engine/commands/slash.js";
 import { createProvider } from "./engine/llm/index.js";
 import { renderCliHelp } from "./cli/help.js";
 
-export const SUPPORTED_MODE_IDS = ["script", "inspect", "builder", "dsp", "project", "undo", "ui", "sequence", "hise", "analyse", "publish", "assets", "api"] as const;
+export const SUPPORTED_MODE_IDS = ["script", "inspect", "builder", "dsp", "project", "undo", "ui", "sequence", "hise", "analyse", "publish", "assets", "api", "mcp"] as const;
 
 export interface CreateSessionOptions {
 	connection: HiseConnection | null;
@@ -43,6 +45,7 @@ export interface CreateSessionOptions {
 	/** Asset environment for the `/assets` mode. Optional — when absent, the
 	 *  mode reports unavailability. Wired by node platform glue (Phase 4). */
 	assetEnvironment?: AssetEnvironment;
+	mcpClient?: McpClient;
 	/** Host process working directory. Used by `/project switch ./` etc.
 	 *  Defaults to `process.cwd()` when running on Node. */
 	cwd?: string;
@@ -65,6 +68,7 @@ export function createSession({
 	handlerRegistry,
 	launcher,
 	assetEnvironment,
+	mcpClient,
 	cwd,
 	enableLlm,
 }: CreateSessionOptions): { session: Session; completionEngine: CompletionEngine } {
@@ -99,6 +103,7 @@ export function createSession({
 	session.registerMode("publish", () => new PublishMode());
 	session.registerMode("assets", () => new AssetsMode(assetEnvironment ?? null, completionEngine));
 	session.registerMode("api", () => new ApiMode(getScriptingApi?.(), { forLlm: forLlm ?? false }));
+	session.registerMode("mcp", () => new McpMode(mcpClient ?? null));
 
 	if (enableLlm !== false) {
 		session.llmProvider = createProvider({ kind: "ollama", model: "qwen3.5:9b", think: false });

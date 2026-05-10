@@ -1,4 +1,4 @@
-// ── Undo mode — history navigation, plan groups, diff inspection ─────
+// ── Undo mode — history navigation, TUI plan groups ──────────────────
 //
 // Phase 4.3: Top-level /undo mode providing undo/redo, plan groups
 // (push_group/pop_group), and history visualization in the sidebar.
@@ -110,6 +110,15 @@ export class UndoMode implements Mode {
 		await this.ensureHistory(conn);
 		await this.syncPlanState(conn);
 
+		const cliPlanCommands = new Set(["plan", "apply", "discard", "diff"]);
+		if (session.forLlm && cliPlanCommands.has(keyword ?? "")) {
+			return errorResult(
+				`Undo plan groups are only available in the interactive TUI. ` +
+				`CLI automation should run direct commands or use .hsc scripts. ` +
+				`Available CLI undo commands: back, forward, clear, history`,
+			);
+		}
+
 		// Commands that mutate state — invalidate all mode trees after
 		const MUTATING = new Set(["back", "forward", "clear", "apply", "discard"]);
 
@@ -153,7 +162,9 @@ export class UndoMode implements Mode {
 			default:
 				return errorResult(
 					`Unknown undo command: "${keyword ?? ""}". ` +
-					`Available: back, forward, clear, plan, apply, discard, diff, history`,
+					(session.forLlm
+						? `Available: back, forward, clear, history`
+						: `Available: back, forward, clear, plan, apply, discard, diff, history`),
 				);
 		}
 

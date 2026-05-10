@@ -49,11 +49,15 @@ import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js"
 import { extractStatusPayload } from "../engine/modes/inspect.js";
 import { isEnvelopeResponse, isErrorResponse, isSuccessResponse } from "../engine/hise.js";
 import { executeScriptShow } from "../engine/modes/script-symbols.js";
+import { HttpMcpClient, mcpErrorPayload } from "../mcp/httpClient.js";
+import { prepareMcpCommand } from "./mcp.js";
+import { McpMode } from "../engine/modes/mcp.js";
 
 export interface CliCommandOptions {
 	connectionOverride?: HiseConnection;
 	handlerRegistry?: WizardHandlerRegistry;
 	launcher?: import("../engine/modes/hise.js").HiseLauncher;
+	mcpClient?: import("../engine/mcp/types.js").McpClient;
 }
 
 export async function executeCliCommand(
@@ -86,7 +90,13 @@ export async function executeCliCommand(
 	if (parsed.kind === "which") {
 		return finalizeJsonPayload(executeWhich(parsed.query, parsed.limit), parsed.output);
 	}
+	if (parsed.kind === "mcp") {
+		return finalizeJsonPayload(await executeMcpCliCommand(parsed.command, parsed.output, opts), parsed.output);
+	}
 	if (parsed.kind !== "execute") return parsed;
+	if (parsed.mode === "mcp") {
+		return executeMcpModeOneShot(parsed, opts);
+	}
 
 	const mockRuntime: ReturnType<typeof createDefaultMockRuntime> | null = !opts.connectionOverride && parsed.useMock ? createDefaultMockRuntime() : null;
 	const connection = new CapturingHiseConnection(
@@ -114,6 +124,7 @@ export async function executeCliCommand(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
+		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
 	});
 	// Wire up script file I/O for /run, /parse, and /edit commands
 	session.loadScriptFile = async (filePath: string) => {
@@ -208,6 +219,7 @@ async function executeRunCommand(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
+		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
 	});
 	session.loadScriptFile = async (fp: string) => readFile(resolve(fp), "utf-8");
 	wireScriptFileOps(session);
@@ -314,6 +326,7 @@ async function runWatchMode(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
+		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
 	});
 	session.loadScriptFile = async (fp: string) => readFile(resolve(fp), "utf-8");
 	wireScriptFileOps(session);
@@ -415,6 +428,44 @@ async function readRunSource(source: RunSource): Promise<string> {
 
 function cliVersion(): string {
 	return typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
+}
+
+async function executeMcpModeOneShot(
+	parsed: Extract<import("./args.js").CliParseResult, { kind: "execute" }>,
+	opts: CliCommandOptions,
+): Promise<{ kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
+	const command = parsed.stdin
+		? `${parsed.canonicalCommand} ${(await readStdin()).trim()}`.trim()
+		: parsed.canonicalCommand;
+	const body = command.replace(/^\/mcp\s*/, "").trim();
+	const mode = new McpMode(opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }));
+	const result = await mode.parse(body, {} as import("../engine/modes/mode.js").SessionContext);
+	return finalizeJsonPayload(serializeCliOutput("mcp", result), parsed.output);
+}
+
+async function executeMcpCliCommand(
+	command: import("./args.js").McpCliCommand,
+	_output: import("./args.js").CliOutputOptions,
+	opts: CliCommandOptions,
+): Promise<CliOutputPayload> {
+	const prepared = await prepareMcpCommand(command, async (source) => {
+		if (source.type === "stdin") return readStdin();
+		return readFile(resolve(source.path), "utf-8");
+	});
+	if ("ok" in prepared) return prepared;
+	const client = opts.mcpClient ?? new HttpMcpClient({
+		defaultUrl: process.env.HISE_MCP_URL,
+		clientVersion: cliVersion(),
+	});
+	try {
+		const options = { url: prepared.url, timeoutMs: prepared.timeoutMs };
+		const value = prepared.kind === "tool"
+			? await client.callTool(prepared.request as import("../engine/mcp/types.js").McpToolRequest, options)
+			: await client.call(prepared.request as import("../engine/mcp/types.js").McpCallRequest, options);
+		return { ok: true, value };
+	} catch (err) {
+		return mcpErrorPayload(err);
+	}
 }
 
 function finalizeJsonPayload(
