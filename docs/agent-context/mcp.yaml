@@ -11,13 +11,13 @@ mode:
     - Use native MCP access directly when the current AI agent has the HISE MCP server installed.
     - Use hise-cli mcp as a fallback bridge when native MCP setup is unavailable or unreliable.
     - hise-cli mcp preserves the MCP result under the normal hise-cli JSON envelope.
-    - Use --args, --args-file, or --args-stdin for nested or complex MCP arguments.
+    - Use --args-stdin or --args-file for nested or complex MCP arguments; keep inline --args only for tiny JSON.
     - Use docs lookup before inventing HiseScript APIs, UI properties, module parameters, or LAF functions.
   antiPatterns:
     - avoid: Guessing HiseScript APIs from JavaScript knowledge.
       prefer: hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
     - avoid: Embedding complex nested JSON in shell arguments when it becomes hard to quote.
-      prefer: hise-cli mcp <tool> --args-file ./mcp-args.json --agent
+      prefer: hise-cli mcp <tool> --args-stdin --agent
 capabilities:
   - id: mcp.tool.fields
     title: Call an MCP tool with field flags
@@ -41,10 +41,11 @@ capabilities:
     title: Call an MCP tool with exact JSON arguments
     purpose: Call a HISE MCP tool with exact JSON arguments for complex or nested inputs.
     command:
-      argv: [hise-cli, mcp, explore_hise, --args, '{"query":"sampler","source":"docs"}', --agent]
+      argv: [hise-cli, mcp, explore_hise, --args-stdin, --agent]
     examples:
       - title: Explore docs only
-        argv: [hise-cli, mcp, explore_hise, --args, '{"query":"sampler","source":"docs"}', --agent]
+        argv: [hise-cli, mcp, explore_hise, --args-stdin, --agent]
+        stdin: '{"query":"sampler","source":"docs"}'
     tags: [mcp, docs, json, passthrough]
     aliases:
       - exact mcp args

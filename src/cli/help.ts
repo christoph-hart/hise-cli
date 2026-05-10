@@ -16,8 +16,8 @@ const GLOBAL_HELP = `hise-cli — automation frontend for HISE audio plugin fram
 
 USAGE
   hise-cli                                  Open the interactive TUI
-  hise-cli -<mode> "<command>"              One-shot mode command
-  hise-cli -<mode> --stdin < command.txt     Read one-shot mode command from stdin
+  hise-cli -<mode> "<command>"              One-shot mode command (trivial/read-only)
+  hise-cli -<mode> --stdin < command.txt     Read same-mode commands from stdin
   hise-cli --run <file.hsc> [--dry-run] [--verbosity=<level>]   Run a .hsc script file
   hise-cli --run --inline "<script>"        Run an inline script
   hise-cli --run - < script.hsc             Run script from stdin
@@ -84,9 +84,10 @@ OPTIONS
   --agent            Emit compact JSON for tool/LLM callers
   --compact          Compact the final output payload only
   --select <path>    Select a payload field, preserving { ok, value }
-  --stdin            Read a one-shot mode command from stdin
-                     For -builder, -ui, and -dsp, multiple non-empty stdin
-                     lines execute as a newline command batch.
+  --stdin            Preferred for non-trivial -builder/-ui/-dsp mutations
+                     and shell-sensitive content. For those modes, multiple
+                     non-empty stdin lines execute serially in the selected
+                     mode only; use --run for workflows that switch modes.
   --target <path>    Set context path for mode commands`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────
@@ -101,12 +102,15 @@ SYNTAX
 
 QUICK START
   hise-cli -builder "show tree"                       inspect current modules
-  echo 'show tree' | hise-cli -builder --stdin --json  same, without shell-quoting a command arg
-  hise-cli -builder "add SimpleGain as \"Drive\""        add at root (auto-picked chain)
-  hise-cli -builder "add LFO as \"Shape\" to MyGain"     add under an existing module
   hise-cli -builder "show types script"               filter types by substring
+  hise-cli -builder --stdin --agent <<'EOF'
+  add SimpleGain as "Drive"
+  add LFO as "Shape" to MyGain
+  EOF
 
   Notes:
+    - Prefer --stdin for mutations. Multiline stdin runs serially in builder
+      mode and cannot switch modes.
     - "as <name>" is mandatory on add — every module gets an explicit alias.
     - Without "to", add lands at the current cd context (root by default).
     - Chain (.fx/.gain/...) is auto-resolved from the module's category;
@@ -313,6 +317,10 @@ MODULE CONTEXT
 
   CLI: pass the host via --target:
     hise-cli -dsp --target "Script FX" "<command>"
+    hise-cli -dsp --target "Script FX" --stdin --agent < commands.txt
+
+  Prefer --stdin for graph mutations. Multiline stdin runs serially in dsp
+  mode and cannot switch modes.
 
 NETWORK PROVISIONING (now from builder mode)
   Networks are created or loaded from builder mode:
@@ -433,16 +441,20 @@ SCREENSHOT
 EXAMPLES
   hise-cli -dsp --target "Script FX1" "show networks"
   hise-cli -dsp --target "Script FX1" "show root"
-  hise-cli -dsp --target "Script FX1" "add core.oscillator as \"Osc1\", set Osc1.Frequency 440"
-  hise-cli -dsp --target "Script FX1" "add filters.svf as \"F1\""
-  hise-cli -dsp --target "Script FX1" "add control.pma as \"LFO1\""
-  hise-cli -dsp --target "Script FX1" "connect LFO1 to F1.Frequency matched"
-  hise-cli -dsp --target "Script FX1" "disconnect F1.Frequency"
-  hise-cli -dsp --target "Script FX1" "create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3"
-  hise-cli -dsp --target "Script FX1" "set Osc1.Frequency.stepSize 1"
+  hise-cli -dsp --target "Script FX1" --stdin --agent <<'EOF'
+  add core.oscillator as "Osc1"
+  set Osc1.Frequency 440
+  add filters.svf as "F1"
+  add control.pma as "LFO1"
+  connect LFO1 to F1.Frequency matched
+  disconnect F1.Frequency
+  create_parameter root.Cutoff [20, 20000] default 1000 skewFactor 0.3
+  set Osc1.Frequency.stepSize 1
+  screenshot scale 100% file "graph.png"
+  save
+  EOF
   hise-cli -dsp --target "Script FX1" "get F1.Frequency.source"
-  hise-cli -dsp --target "Script FX1" "screenshot scale 100% file \"graph.png\""
-  hise-cli -dsp --target "Script FX1" "save"`,
+  hise-cli -dsp --target "Script FX1" "show root"`,
 
 	script: renderAgentModeHelp("script") ?? "hise-cli script - HiseScript REPL and callback editing",
 
@@ -623,9 +635,12 @@ EXAMPLES
 
 SYNTAX
   hise-cli -ui "<command>"
+  hise-cli -ui --stdin < command.txt
   hise-cli -ui --target <component> "<command>"
 
 GRAMMAR
+  - Prefer --stdin for mutations. Multiline stdin runs serially in ui mode
+    and cannot switch modes.
   - "as <name>" is mandatory on add (no positional names).
   - Reparent / reorder via property writes: set X.parent <path>,
     set X.index <n>. Both are real /api/ui/apply move ops.
@@ -664,16 +679,16 @@ COMPONENT TYPES
   ScriptMultipageDialog, ScriptWebView
 
 EXAMPLES
-  hise-cli -ui "add ScriptButton as \\"PlayButton\\""
-  hise-cli -ui "set PlayButton.bounds [100, 200, 128, 32]"
-  hise-cli -ui "set PlayButton.visible false"
-  hise-cli -ui "set PlayButton.parent MainPanel"
-  hise-cli -ui "set PlayButton.index 0"
-  hise-cli -ui "rename PlayButton as \\"StartButton\\""
-  hise-cli -ui "add ScriptPanel as \\"Header\\", add ScriptButton as \\"Logo\\" to Header"
-  hise-cli -ui "set Logo.bounds [10, 5, 40, 40]"
-  hise-cli -ui --target MainPanel "add ScriptSlider as \\"VolumeKnob\\""
-  hise-cli -ui "set VolumeKnob.value 0.5"
+  hise-cli -ui --stdin --agent <<'EOF'
+  add ScriptButton as "PlayButton"
+  set PlayButton.bounds [100, 200, 128, 32]
+  set PlayButton.visible false
+  rename PlayButton as "StartButton"
+  EOF
+  hise-cli -ui --target MainPanel --stdin --agent <<'EOF'
+  add ScriptSlider as "VolumeKnob"
+  set VolumeKnob.value 0.5
+  EOF
   hise-cli -ui "show PlayButton"`,
 
 	undo: `hise-cli -undo — undo history navigation

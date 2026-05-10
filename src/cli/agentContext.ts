@@ -129,14 +129,14 @@ function globalFlags(): object[] {
 		{ flag: "--compact", description: "Remove empty wrapper noise from the final output payload only." },
 		{ flag: "--select <path>", description: "Extract a payload field while preserving { ok, value }. Implies JSON output." },
 		{ flag: "--target <path>", description: "Preferred context flag for one-shot mode commands." },
-		{ flag: "--stdin", description: "Read stdin input. For builder/ui/dsp, multiple non-empty lines execute as a command batch." },
+		{ flag: "--stdin", description: "Preferred for non-trivial builder/ui/dsp mutations. Multiple non-empty lines execute serially as a same-mode command batch." },
 	];
 }
 
 function inputPatterns(): object[] {
 	return [
-		{ pattern: "stdin", description: "Preferred for mode commands with quoting. Builder/ui/dsp support newline command batches." },
+		{ pattern: "stdin", description: "Default for non-trivial builder/ui/dsp mutations and shell-sensitive content. Newline batches run serially in the selected mode only." },
 		{ pattern: "file", description: "Preferred for multi-line callback edits." },
-		{ pattern: "argv", description: "Use argv tokens for short mode commands, e.g. hise-cli -builder show tree --agent." },
+		{ pattern: "argv", description: "Use only for trivial read-only mode commands, e.g. hise-cli -builder show tree --agent." },
 	];
 }

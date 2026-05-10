@@ -89,9 +89,20 @@ Use the mode that matches the state you are changing:
 ```bash
 hise-cli -builder "show tree" --agent
 hise-cli -ui "show tree" --agent
-hise-cli -ui set Button1.text "Start" --agent
 hise-cli -dsp "show tree" --agent
 ```
+
+For non-trivial mutations in `-builder`, `-ui`, and `-dsp`, prefer `--stdin` instead of quoting commands through argv. This avoids shell quoting failures with quoted names, paths, JSON-like values, CSS, HiseScript snippets, callback bodies, comma chains, and multi-step edits:
+
+```bash
+hise-cli -ui --stdin --agent <<'EOF'
+add ScriptButton as "PlayButton"
+set PlayButton.bounds [100, 200, 128, 32]
+set PlayButton.text "Start"
+EOF
+```
+
+For `-builder`, `-ui`, and `-dsp`, multiline stdin runs each non-empty line serially as one complete command in the selected mode. It cannot switch modes. Use `hise-cli --run <file.hsc>` when a workflow needs mode switching.
 
 Prefer these modes over mutating UI, builder, DSP, project, or asset state through REPL-side HiseScript when a dedicated command exists.
 
@@ -119,7 +130,8 @@ Agent errors use stable `code` values. Exit codes are:
 
 - Prefer `hise-cli which` and `hise-cli agent-context` for command discovery.
 - Use `hise-cli mcp` or equivalent native HISE MCP docs before guessing HISE APIs.
-- Prefer stdin, file, or JSON-file inputs for multi-line or nested data.
+- Prefer stdin, file, or JSON-file inputs for multi-line, nested, quoted, or shell-sensitive data.
+- Use `--stdin` by default for non-trivial `-builder`, `-ui`, and `-dsp` mutations; use argv only for trivial read-only commands.
 - Prefer `--target "Script FX1"` syntax for targets with spaces.
 - Keep `onInit` small in real projects; include external files that can be diagnosed separately.
 - Prefer component-specific control callbacks using `Component.setControlCallback(f)`. HISE requires `f` to be an `inline function` reference with signature `(component, value)`.

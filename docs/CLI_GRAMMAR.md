@@ -33,17 +33,20 @@ Filters (`show types <filter>`) are case-insensitive substring matches — same 
 
 ## CLI invocation layer
 
-Mode commands can be passed as a single quoted string or as unquoted argv tokens after the mode flag. These are equivalent:
+Mode commands can be passed as a single quoted string or as unquoted argv tokens after the mode flag. These are equivalent and best kept to trivial read-only commands:
 
 ```
 hise-cli -builder "show tree"
 hise-cli -builder show tree
 ```
 
-Use `--stdin` when a command body is easier or safer to pipe than quote:
+For agent workflows, use `--stdin` by default for non-trivial mode mutations. Use it whenever a command contains quoted names or paths, JSON-like values, CSS, HiseScript, callback bodies, comma chains, or other shell-sensitive content:
 
 ```
-echo 'show tree' | hise-cli -builder --stdin --agent
+hise-cli -ui --stdin --agent <<'EOF'
+add ScriptSlider as "Cutoff"
+set Cutoff.bounds [20, 20, 160, 32]
+EOF
 ```
 
 For `builder`, `ui`, and `dsp`, `--stdin` can also execute a newline batch.
@@ -58,8 +61,7 @@ show tree
 EOF
 ```
 
-Multiline stdin is not treated as a command batch for `script` or `mcp`, where
-multiline input has mode-specific meaning.
+Multiline stdin batches cannot switch modes. Use `.hsc` scripts via `hise-cli --run` for workflows that need to move between modes. Multiline stdin is not treated as a command batch for `script` or `mcp`, where multiline input has mode-specific meaning.
 
 `--target <path>` sets the mode context for one-shot mode commands. The separated form is preferred because it is robust for multi-word targets across shells:
 

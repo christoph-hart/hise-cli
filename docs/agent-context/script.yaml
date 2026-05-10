@@ -8,13 +8,14 @@ mode:
     - argv: [hise-cli, script, get, --module-id, Interface, --callback, onInit, --agent]
     - argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --file, ./onInit.js, --agent]
   notes:
-    - Prefer stdin or file inputs for script bodies.
+    - Prefer stdin or file inputs for script bodies; never pass multi-line HiseScript or callback bodies through argv.
     - script set compiles by default; use --no-compile to skip compilation.
     - --module-id defaults to Interface.
     - REPL evaluation cannot create persistent declarations in the script engine. Do not use it to add variables, functions, callbacks, includes, or other durable script source.
     - Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.
     - For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.
     - If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.
+    - For multi-step workflows that need to switch modes, use hise-cli --run with a .hsc script instead of multiline mode stdin.
     - Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.
     - Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher. HISE requires f to be an inline function reference with signature (component, value).
   antiPatterns:
@@ -25,7 +26,7 @@ mode:
     - avoid: Trying to declare persistent variables, functions, callbacks, or includes via REPL.
       prefer: hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
     - avoid: Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.
-      prefer: hise-cli -ui set Button1.text "my text" --agent
+      prefer: hise-cli -ui --stdin --agent
     - avoid: Putting large implementation bodies directly into onInit.
       prefer: Keep onInit small and include external script files that can be edited and diagnosed separately with script diagnose.
     - avoid: Building a large global onControl dispatcher or passing an anonymous regular function to setControlCallback.

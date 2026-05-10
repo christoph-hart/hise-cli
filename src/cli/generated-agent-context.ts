@@ -55,7 +55,7 @@ export const GENERATED_AGENT_CONTEXT = {
 				"Use native MCP access directly when the current AI agent has the HISE MCP server installed.",
 				"Use hise-cli mcp as a fallback bridge when native MCP setup is unavailable or unreliable.",
 				"hise-cli mcp preserves the MCP result under the normal hise-cli JSON envelope.",
-				"Use --args, --args-file, or --args-stdin for nested or complex MCP arguments.",
+				"Use --args-stdin or --args-file for nested or complex MCP arguments; keep inline --args only for tiny JSON.",
 				"Use docs lookup before inventing HiseScript APIs, UI properties, module parameters, or LAF functions."
 			],
 			"antiPatterns": [
@@ -65,7 +65,7 @@ export const GENERATED_AGENT_CONTEXT = {
 				},
 				{
 					"avoid": "Embedding complex nested JSON in shell arguments when it becomes hard to quote.",
-					"prefer": "hise-cli mcp <tool> --args-file ./mcp-args.json --agent"
+					"prefer": "hise-cli mcp <tool> --args-stdin --agent"
 				}
 			],
 			"capabilities": [
@@ -139,11 +139,10 @@ export const GENERATED_AGENT_CONTEXT = {
 							"hise-cli",
 							"mcp",
 							"explore_hise",
-							"--args",
-							"{\"query\":\"sampler\",\"source\":\"docs\"}",
+							"--args-stdin",
 							"--agent"
 						],
-						"display": "hise-cli mcp explore_hise --args \"{\\\"query\\\":\\\"sampler\\\",\\\"source\\\":\\\"docs\\\"}\" --agent"
+						"display": "hise-cli mcp explore_hise --args-stdin --agent"
 					},
 					"tags": [
 						"mcp",
@@ -167,11 +166,11 @@ export const GENERATED_AGENT_CONTEXT = {
 								"hise-cli",
 								"mcp",
 								"explore_hise",
-								"--args",
-								"{\"query\":\"sampler\",\"source\":\"docs\"}",
+								"--args-stdin",
 								"--agent"
 							],
-							"display": "hise-cli mcp explore_hise --args \"{\\\"query\\\":\\\"sampler\\\",\\\"source\\\":\\\"docs\\\"}\" --agent"
+							"display": "hise-cli mcp explore_hise --args-stdin --agent",
+							"stdin": "{\"query\":\"sampler\",\"source\":\"docs\"}"
 						}
 					]
 				},
@@ -487,13 +486,14 @@ export const GENERATED_AGENT_CONTEXT = {
 				}
 			],
 			"notes": [
-				"Prefer stdin or file inputs for script bodies.",
+				"Prefer stdin or file inputs for script bodies; never pass multi-line HiseScript or callback bodies through argv.",
 				"script set compiles by default; use --no-compile to skip compilation.",
 				"--module-id defaults to Interface.",
 				"REPL evaluation cannot create persistent declarations in the script engine. Do not use it to add variables, functions, callbacks, includes, or other durable script source.",
 				"Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.",
 				"For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.",
 				"If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.",
+				"For multi-step workflows that need to switch modes, use hise-cli --run with a .hsc script instead of multiline mode stdin.",
 				"Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.",
 				"Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher. HISE requires f to be an inline function reference with signature (component, value)."
 			],
@@ -512,7 +512,7 @@ export const GENERATED_AGENT_CONTEXT = {
 				},
 				{
 					"avoid": "Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.",
-					"prefer": "hise-cli -ui set Button1.text \"my text\" --agent"
+					"prefer": "hise-cli -ui --stdin --agent"
 				},
 				{
 					"avoid": "Putting large implementation bodies directly into onInit.",

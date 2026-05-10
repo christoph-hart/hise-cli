@@ -124,7 +124,7 @@ describe("generated agent context", () => {
 
 		expect(help).toContain("COMMON COMMANDS");
 		expect(help).toContain("hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent");
-		expect(help).toContain("Prefer stdin or file inputs for script bodies.");
+		expect(help).toContain("Prefer stdin or file inputs for script bodies; never pass multi-line HiseScript or callback bodies through argv.");
 		expect(help).not.toContain("CALLBACK JSON SHAPE");
 	});
 });
