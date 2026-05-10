@@ -49,9 +49,10 @@ export interface McpCliCommand {
 export type ScriptApiCommand =
 	| { action: "repl"; moduleId: string; source: { type: "stdin" } }
 	| { action: "get"; moduleId: string; callback?: string }
-	| { action: "set"; moduleId: string; callback?: string; source: { type: "stdin" } | { type: "file"; path: string } | { type: "callbacks-json"; path: string }; compile: boolean }
+	| { action: "set"; moduleId: string; callback?: string; source: { type: "stdin" } | { type: "file"; path: string } | { type: "callbacks-json"; path: string }; compile: boolean; rollback: boolean }
 	| { action: "compile"; moduleId: string }
 	| { action: "diagnose"; moduleId: string; filePath?: string; async: boolean }
+	| { action: "add-file"; moduleId: string; relativePath: string }
 	| { action: "show"; moduleId: string; target: "tree" | string; filters: ScriptShowFilters };
 
 const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select", "--target"]);
@@ -236,9 +237,9 @@ function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlag
 
 function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseResult {
 	const action = args[1];
-	if (!action) return { kind: "error", message: "script requires a subcommand: repl | get | set | compile" };
-	if (action !== "repl" && action !== "get" && action !== "set" && action !== "compile" && action !== "diagnose" && action !== "show") {
-		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, compile, diagnose, or show.` };
+	if (!action) return { kind: "error", message: "script requires a subcommand: repl | get | set | add-file | compile" };
+	if (action !== "repl" && action !== "get" && action !== "set" && action !== "add-file" && action !== "compile" && action !== "diagnose" && action !== "show") {
+		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, add-file, compile, diagnose, or show.` };
 	}
 
 	const rest = args.slice(2);
@@ -276,6 +277,24 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 		return { kind: "script-api", command: { action, moduleId, filePath, async: rest.includes("--async") }, useMock, output };
 	}
 
+	if (action === "add-file") {
+		const positional: string[] = [];
+		for (let i = 0; i < rest.length; i++) {
+			const arg = rest[i]!;
+			const eq = arg.indexOf("=");
+			const flagName = eq === -1 ? arg : arg.slice(0, eq);
+			if (commonValueFlags.has(flagName)) {
+				if (eq === -1) i++;
+				continue;
+			}
+			if (commonBooleanFlags.has(arg)) continue;
+			if (arg.startsWith("--")) return { kind: "error", message: `Unexpected argument for script add-file: ${arg}` };
+			positional.push(arg);
+		}
+		if (positional.length !== 1) return { kind: "error", message: "script add-file requires exactly one relative path" };
+		return { kind: "script-api", command: { action, moduleId, relativePath: positional[0]! }, useMock, output };
+	}
+
 	if (action === "show") {
 		return parseScriptShowApiArgs(rest, moduleId, useMock, output);
 	}
@@ -283,7 +302,7 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 	const unexpected = findUnexpectedArgs(
 		rest,
 		new Set([...commonValueFlags, "--callback", "--file", "--callbacks-json"]),
-		new Set([...commonBooleanFlags, "--stdin", "-", "--no-compile"]),
+		new Set([...commonBooleanFlags, "--stdin", "-", "--no-compile", "--no-rollback"]),
 	);
 	if (unexpected) return { kind: "error", message: `Unexpected argument for script set: ${unexpected}` };
 
@@ -298,12 +317,13 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 		return { kind: "error", message: "script set with --stdin or --file requires --callback <name>" };
 	}
 	const compile = !rest.includes("--no-compile");
+	const rollback = compile && !rest.includes("--no-rollback");
 	const source = stdin
 		? { type: "stdin" as const }
 		: file
 			? { type: "file" as const, path: file }
 			: { type: "callbacks-json" as const, path: callbacksJson! };
-	return { kind: "script-api", command: { action, moduleId, callback, source, compile }, useMock, output };
+	return { kind: "script-api", command: { action, moduleId, callback, source, compile, rollback }, useMock, output };
 }
 
 function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliParseResult {

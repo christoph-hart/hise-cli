@@ -77,9 +77,14 @@ Direct script subcommands avoid quoting callback bodies on the command line:
 ```
 hise-cli script repl --module-id Interface --stdin --agent
 hise-cli script get --module-id Interface --callback onInit --agent
+hise-cli script add-file UI/MyFile.js --module-id Interface --agent
 hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
 hise-cli script compile --module-id Interface --agent
 ```
+
+`script set` compiles and snapshots touched HISE callback slots by default. If compile fails, the CLI restores those callback slots and returns the original error with a `rollback` object. This protects callback source stored in HISE, not external script files referenced by `include(...)`. Use `--no-rollback` only when intentionally staging invalid callback source, and run `hise-cli script diagnose --file-path <file> --agent` before compiling larger external-file edits.
+
+`script add-file <relativePath.js>` creates a new namespaced script file under the active project's Scripts folder, appends `include("<relativePath.js>");` to `onInit`, compiles, and returns the absolute path for follow-up edits. The file basename must be a valid namespace identifier, so `UI/MyFile.js` creates `namespace MyFile {}`. The command is idempotent: existing files are not overwritten, existing include lines are not duplicated, and a file that already exists and is already included returns success without recompiling.
 
 `--module-id <id>` already uses the safe separated flag form. Do not use colon-style module-id flags.
 
@@ -302,6 +307,7 @@ Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScr
 | `remove` | `remove <target>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
 | `set` | `set <target>.<field> <value>` |
 | `get` | `get <target>.<field>` (field required) |
+| `connect` | `connect <component> to <processor>.<parameter> [matched]` |
 | `rename` | `rename <target> as "<name>"` |
 | `show` | `show tree` \| `show <target>` \| `show <target>.<prop>` (greedy substring on id/type/path for `show tree` filter) |
 | `cd` / `ls` / `pwd` | navigation |
@@ -310,6 +316,8 @@ Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScr
 Component fields: `bounds [x, y, w, h]`, `position [x, y]`, `size [w, h]`, `x`, `y`, `width`, `height`, `parent`, `index`, `text`, `value`, plus type-specific properties.
 
 `set X.value V` writes the runtime control value via `/api/set_component_value` (separate from the `set_attributes` apply path used for static properties). `set X.parent Y` and `set X.index N` reparent / reorder; both translate to a `move` op on `/api/ui/apply`.
+
+`connect X to Processor.Parameter` links UI controls to module parameters by setting `processorId` and `parameterId`. Compatible pairs are validated against `/api/builder/tree?verbose=true`: `ScriptSlider` ↔ `Slider`, `ScriptComboBox` ↔ `ComboBox`, and `ScriptButton` ↔ `Button`. With `matched`, slider range metadata copies `min`, `max`, `defaultValue`, `mode`, `stepSize`, `middlePosition`, and `unit` as `suffix`; comboboxes copy `items` and `defaultValue`; buttons copy the parameter name to `text` and copy `defaultValue`.
 
 Examples:
 
@@ -323,6 +331,9 @@ set Play.size [100, 40]
 set Play.parent Panel, Play.index 0
 set Play.text "Play Now"
 set Play.x 120, Play.y 220
+connect Cutoff to MainFilter.Frequency matched
+connect Waveform to LFO.WaveformType matched
+connect EnableFilter to MainFilter.Enabled matched
 rename Play as "PlayBtn"
 ```
 

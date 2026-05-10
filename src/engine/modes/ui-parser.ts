@@ -6,7 +6,7 @@
 import { CstParser, type CstNode, type IToken } from "chevrotain";
 import { closest } from "fastest-levenshtein";
 import {
-	Add, Remove, Rename, Show, Set, Get, Cd, Ls, Pwd, Reset,
+	Add, Remove, Rename, Show, Set, Get, Connect, Cd, Ls, Pwd, Reset,
 	To, As, Tree, Types, BooleanLiteral,
 	Identifier, QuotedString, NumberLiteral, PercentLiteral, HexLiteral,
 	Dot, DoubleDot, Comma, LBracket, RBracket,
@@ -100,6 +100,13 @@ export interface UiGetCommand {
 	paths: PathRef[];
 }
 
+export interface UiConnectCommand {
+	type: "connect";
+	component: PathRef;
+	target: PathRef;
+	matched: boolean;
+}
+
 export type UiShowCommand =
 	| { type: "show"; kind: "tree"; filter?: string }
 	| { type: "show"; kind: "target"; target: PathRef };
@@ -116,6 +123,7 @@ export type UiCommand =
 	| UiRenameCommand
 	| UiSetCommand
 	| UiGetCommand
+	| UiConnectCommand
 	| UiShowCommand
 	| UiCdCommand
 	| UiLsCommand
@@ -231,6 +239,16 @@ class UiParser extends CstParser {
 		});
 	});
 
+	public connectCommand = this.RULE("connectCommand", () => {
+		this.CONSUME(Connect);
+		this.SUBRULE(this.pathExpr, { LABEL: "component" });
+		this.CONSUME(To);
+		this.SUBRULE2(this.pathExpr, { LABEL: "target" });
+		this.OPTION(() => {
+			this.CONSUME(Identifier, { LABEL: "matched" });
+		});
+	});
+
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
 		this.OR([
@@ -265,6 +283,7 @@ class UiParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.renameCommand) },
 			{ ALT: () => this.SUBRULE(this.setCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
+			{ ALT: () => this.SUBRULE(this.connectCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
 			{ ALT: () => this.SUBRULE(this.cdCommand) },
 			{ ALT: () => this.SUBRULE(this.lsCommand) },
@@ -431,6 +450,25 @@ function extractGetCommand(node: CstNode): { command: UiGetCommand } | { error: 
 	return { command: { type: "get", paths } };
 }
 
+function extractConnectCommand(node: CstNode): { command: UiConnectCommand } | { error: string } {
+	const component = extractPathExpr(node.children.component![0] as CstNode);
+	if ("error" in component) return { error: component.error };
+	const target = extractPathExpr(node.children.target![0] as CstNode);
+	if ("error" in target) return { error: target.error };
+	if (pathRefSegmentCount(target.ref) < 2) {
+		return { error: "connect: target must be <processor>.<parameter>" };
+	}
+	let matched = false;
+	if (node.children.matched) {
+		const token = node.children.matched[0] as IToken;
+		if (token.image.toLowerCase() !== "matched") {
+			return { error: `connect: unknown option "${token.image}"` };
+		}
+		matched = true;
+	}
+	return { command: { type: "connect", component: component.ref, target: target.ref, matched } };
+}
+
 function extractShowCommand(node: CstNode): { command: UiShowCommand } | { error: string } {
 	const c = node.children;
 	if (c.noun_tree) {
@@ -462,6 +500,7 @@ function extractCommand(cst: CstNode): { command: UiCommand } | { error: string 
 	if (c.renameCommand) return extractRenameCommand(c.renameCommand[0] as CstNode);
 	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
 	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
+	if (c.connectCommand) return extractConnectCommand(c.connectCommand[0] as CstNode);
 	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
 	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
 	if (c.lsCommand) return { command: { type: "ls" } };

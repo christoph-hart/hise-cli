@@ -417,6 +417,7 @@ interface components.
 | \`set <target>.parent <path>\` | Reparent (real \`move\` op) |
 | \`set <target>.index <n>\` | Reorder within current parent |
 | \`set <target>.bypassed <bool>\` / \`set <target>.visible <bool>\` | Property toggles |
+| \`connect <component> to <processor>.<parameter> [matched]\` | Link controls to module parameters |
 | \`get <target>.<prop> [, ...]\` | Read a property value |
 | \`rename <target> as "<name>"\` | Rename a component |
 | \`show tree\` | Display the full component tree |
@@ -435,6 +436,9 @@ ScriptMultipageDialog, ScriptWebView
 
 - **Comma chaining**: \`add ScriptButton as "A", ScriptSlider as "B"\`
   (the verb is written once; every clause still provides full arguments)
+- **Parameter linking**: \`connect Cutoff to MainFilter.Frequency matched\`
+  validates ScriptSlider/ScriptComboBox/ScriptButton against verbose builder
+  parameter metadata and copies compatible matched properties
 - **Tab completion**: component types, IDs, property names
 - **Tree sidebar**: shows component hierarchy, dims invisible components, ★ for saveInPreset`,
 

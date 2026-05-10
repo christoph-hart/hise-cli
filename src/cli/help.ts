@@ -650,6 +650,9 @@ GRAMMAR
       size     → Array2: [w, h]
   - Component value writes go through /api/set_component_value:
       set Knob.value 0.5
+  - connect links ScriptSlider/ScriptComboBox/ScriptButton to matching
+    Slider/ComboBox/Button module parameters. With matched, metadata is
+    copied from /api/builder/tree?verbose=true.
   - Comma chaining: the verb is written once, then inherited by each clause.
     Every clause still provides full arguments and full identifier paths.
 
@@ -666,6 +669,8 @@ COMMANDS
   set <target>.index <n>                        Reorder within current parent
   set <target>.bypassed <bool>                  Property toggle
   set <target>.visible <bool>                   Property toggle
+  connect <component> to <processor>.<parameter> [matched]
+                                                Link UI control to module parameter
   get <target>.<prop> [, ...]                   Read a property value
   show <target>                                 Show all properties
   show tree                                     Component tree view
@@ -688,6 +693,7 @@ EXAMPLES
   hise-cli -ui --target MainPanel --stdin --agent <<'EOF'
   add ScriptSlider as "VolumeKnob"
   set VolumeKnob.value 0.5
+  connect VolumeKnob to MainFilter.Frequency matched
   EOF
   hise-cli -ui "show PlayButton"`,
 

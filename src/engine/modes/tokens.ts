@@ -182,6 +182,12 @@ export const At = createToken({
 	longer_alt: Identifier,
 });
 
+export const Connect = createToken({
+	name: "Connect",
+	pattern: /connect/i,
+	longer_alt: Identifier,
+});
+
 // ── Punctuation ─────────────────────────────────────────────────────
 export const Dot = createToken({
 	name: "Dot",
@@ -275,6 +281,7 @@ export const UI_TOKENS = [
 	Show,
 	Set,
 	Get,
+	Connect,
 	Cd,
 	Ls,
 	Pwd,
@@ -293,7 +300,7 @@ export const UI_TOKENS = [
 ];
 
 export const UI_VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"set", "get", "add", "remove",
+	"set", "get", "add", "remove", "connect",
 ]);
 
 export const uiLexer = new Lexer(UI_TOKENS);
@@ -309,12 +316,6 @@ export const Save = createToken({
 export const Connections = createToken({
 	name: "Connections",
 	pattern: /connections/i,
-	longer_alt: Identifier,
-});
-
-export const Connect = createToken({
-	name: "Connect",
-	pattern: /connect/i,
 	longer_alt: Identifier,
 });
 

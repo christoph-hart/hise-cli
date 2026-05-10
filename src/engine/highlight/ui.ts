@@ -7,7 +7,7 @@ import type { TokenSpan, TokenType } from "./tokens.js";
 import { tokenizeSlash } from "./slash.js";
 
 const UI_KEYWORDS = new Set([
-	"add", "remove", "rename", "set", "get", "show", "reset",
+	"add", "remove", "rename", "set", "get", "connect", "show", "reset",
 	"to", "as", "tree",
 	"cd", "ls", "pwd",
 ]);

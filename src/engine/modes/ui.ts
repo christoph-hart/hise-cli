@@ -42,6 +42,7 @@ export type {
 	UiSetCommand,
 	UiSetClause,
 	UiRenameCommand,
+	UiConnectCommand,
 	UiGetCommand,
 	UiShowCommand,
 	UiCdCommand,
@@ -62,6 +63,7 @@ import type {
 	ComponentPropertyMap,
 	UiCdCommand,
 	UiCommand,
+	UiConnectCommand,
 	UiGetCommand,
 	UiSetCommand,
 	UiShowCommand,
@@ -85,6 +87,157 @@ function componentIdCompletionItems(tree: TreeNode | null): CompletionItem[] {
 		label: id,
 		insertText: id.includes(" ") ? `"${id}"` : id,
 	}));
+}
+
+type UiConnectComponentType = "ScriptSlider" | "ScriptComboBox" | "ScriptButton";
+type BuilderParameterType = "Slider" | "ComboBox" | "Button";
+
+interface BuilderParameterInfo {
+	id: string;
+	type?: string;
+	range?: {
+		min?: number;
+		max?: number;
+		stepSize?: number;
+		middlePosition?: number;
+	};
+	defaultValue?: unknown;
+	mode?: string;
+	unit?: string;
+	items?: string[];
+}
+
+interface BuilderProcessorInfo {
+	id: string;
+	path: string[];
+	parameters: BuilderParameterInfo[];
+}
+
+const UI_TO_PARAMETER_TYPE: Record<UiConnectComponentType, BuilderParameterType> = {
+	ScriptSlider: "Slider",
+	ScriptComboBox: "ComboBox",
+	ScriptButton: "Button",
+};
+
+function isConnectComponentType(value: string | undefined): value is UiConnectComponentType {
+	return value === "ScriptSlider" || value === "ScriptComboBox" || value === "ScriptButton";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function usableDefaultValue(value: unknown): unknown {
+	return value === "dynamic" ? undefined : value;
+}
+
+function parseConnectTarget(ref: PathRef): { processorId: string; parameterId: string } | { error: string } {
+	const segs = pathRefSegments(ref);
+	if (segs.length < 2) return { error: "connect: target must be <processor>.<parameter>" };
+	return {
+		processorId: segs.slice(0, -1).map((seg) => seg.id).join("."),
+		parameterId: segs[segs.length - 1]!.id,
+	};
+}
+
+function collectBuilderProcessors(raw: unknown): BuilderProcessorInfo[] {
+	const out: BuilderProcessorInfo[] = [];
+	const visit = (value: unknown, path: string[]): void => {
+		if (!isRecord(value)) return;
+		const processorId = typeof value.processorId === "string"
+			? value.processorId
+			: typeof value.id === "string" ? value.id : null;
+		const nextPath = processorId ? [...path, processorId] : path;
+		if (processorId) {
+			out.push({ id: processorId, path: nextPath, parameters: parseBuilderParameters(value.parameters) });
+		}
+		for (const key of ["children", "midi", "fx"] as const) {
+			const children = value[key];
+			if (Array.isArray(children)) for (const child of children) visit(child, nextPath);
+		}
+		const modulation = value.modulation;
+		if (Array.isArray(modulation)) {
+			for (const chain of modulation) {
+				if (!isRecord(chain)) continue;
+				const chainPath = typeof chain.id === "string" ? [...nextPath, chain.id] : nextPath;
+				const children = chain.children;
+				if (Array.isArray(children)) for (const child of children) visit(child, chainPath);
+			}
+		}
+	};
+	visit(raw, []);
+	return out;
+}
+
+function parseBuilderParameters(value: unknown): BuilderParameterInfo[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry): BuilderParameterInfo[] => {
+		if (!isRecord(entry) || typeof entry.id !== "string") return [];
+		const range = isRecord(entry.range)
+			? {
+				min: finiteNumber(entry.range.min),
+				max: finiteNumber(entry.range.max),
+				stepSize: finiteNumber(entry.range.stepSize),
+				middlePosition: finiteNumber(entry.range.middlePosition),
+			}
+			: undefined;
+		return [{
+			id: entry.id,
+			type: typeof entry.type === "string" ? entry.type : undefined,
+			range,
+			defaultValue: entry.defaultValue,
+			mode: typeof entry.mode === "string" ? entry.mode : undefined,
+			unit: typeof entry.unit === "string" ? entry.unit : undefined,
+			items: Array.isArray(entry.items) ? entry.items.filter((item): item is string => typeof item === "string") : undefined,
+		}];
+	});
+}
+
+function matchedPropertiesForComponent(
+	componentType: UiConnectComponentType,
+	parameter: BuilderParameterInfo,
+): { properties: Record<string, unknown>; warnings: string[] } {
+	const properties: Record<string, unknown> = {};
+	const warnings: string[] = [];
+	const defaultValue = usableDefaultValue(parameter.defaultValue);
+	if (componentType === "ScriptSlider") {
+		if (!parameter.range) {
+			warnings.push("parameter range metadata unavailable");
+		} else {
+			if (parameter.range.min !== undefined) properties.min = parameter.range.min;
+			if (parameter.range.max !== undefined) properties.max = parameter.range.max;
+			if (parameter.range.stepSize !== undefined) {
+				const stepSize = formatSliderStepSize(parameter.range.stepSize);
+				if (stepSize) properties.stepSize = stepSize;
+				else warnings.push(`unsupported slider stepSize: ${parameter.range.stepSize}`);
+			}
+			if (parameter.range.middlePosition !== undefined) properties.middlePosition = parameter.range.middlePosition;
+		}
+		if (defaultValue !== undefined) properties.defaultValue = defaultValue;
+		if (parameter.mode) properties.mode = parameter.mode;
+		if (parameter.unit) properties.suffix = parameter.unit;
+		return { properties, warnings };
+	}
+	if (componentType === "ScriptComboBox") {
+		if (parameter.items && parameter.items.length > 0) properties.items = parameter.items.join("\n");
+		else warnings.push("parameter item metadata unavailable");
+		if (defaultValue !== undefined) properties.defaultValue = defaultValue;
+		return { properties, warnings };
+	}
+	properties.text = parameter.id;
+	if (defaultValue !== undefined) properties.defaultValue = defaultValue;
+	return { properties, warnings };
+}
+
+function formatSliderStepSize(value: number): string | undefined {
+	if (value === 0) return "0.0";
+	if (value === 1) return "1.0";
+	const text = String(value);
+	return /^0\.0*1$/.test(text) ? text : undefined;
 }
 
 // ── UI mode class ────────────────────────────────────────────────
@@ -152,7 +305,7 @@ export class UiMode implements Mode {
 
 		if (tokens.length === 0 || (tokens.length === 1 && !trailingSpace)) {
 			const prefix = tokens.length > 0 ? tokens[0].image.toLowerCase() : "";
-			const keywords = ["add", "remove", "set", "get", "rename", "show", "cd", "ls", "pwd", "reset"];
+			const keywords = ["add", "remove", "set", "get", "connect", "rename", "show", "cd", "ls", "pwd", "reset"];
 			const items: CompletionItem[] = keywords
 				.filter((k) => k.startsWith(prefix))
 				.map((k) => ({ label: k }));
@@ -170,6 +323,7 @@ export class UiMode implements Mode {
 		const componentItems = componentIdCompletionItems(this.treeRoot);
 
 		if (verb === "add") return this.completeAdd(tokens, trailingSpace, offset, inputLength, segment);
+		if (verb === "connect") return this.completeTarget(tokens, trailingSpace, offset, inputLength, segment, componentItems, "Components");
 
 		if (verb === "set" || verb === "get") {
 			return this.completeSet(tokens, trailingSpace, offset, inputLength, segment, componentItems);
@@ -478,6 +632,7 @@ export class UiMode implements Mode {
 		}
 
 		if (!session.connection) return this.localFallback(cmd);
+		if (cmd.type === "connect") return this.handleConnect(cmd, session.connection);
 
 		const opsResult = commandToOps(cmd, this.treeRoot, this.currentPath);
 		if ("error" in opsResult) return errorResult(opsResult.error);
@@ -655,6 +810,85 @@ export class UiMode implements Mode {
 		return textResult(String(prop.value));
 	}
 
+	private async handleConnect(
+		cmd: UiConnectCommand,
+		connection: import("../hise.js").HiseConnection,
+	): Promise<CommandResult> {
+		const component = this.resolveRefForRead(cmd.component);
+		if ("error" in component) return errorResult(component.error);
+		const componentNode = this.findComponentNode(component.id);
+		if (!componentNode) return errorResult(`Component "${component.id}" not found`);
+		if (!isConnectComponentType(componentNode.type)) {
+			return errorResult(`connect requires ScriptSlider, ScriptComboBox, or ScriptButton; "${component.id}" is ${componentNode.type ?? "unknown"}`);
+		}
+
+		const target = parseConnectTarget(cmd.target);
+		if ("error" in target) return errorResult(target.error);
+
+		const metadata = await this.fetchBuilderParameterInfo(connection, target.processorId, target.parameterId);
+		if ("error" in metadata) return errorResult(metadata.error);
+
+		const expectedType = UI_TO_PARAMETER_TYPE[componentNode.type];
+		if (metadata.parameter.type !== expectedType) {
+			return errorResult(`Cannot connect ${componentNode.type} to ${metadata.processor.id}.${metadata.parameter.id}: parameter type is ${metadata.parameter.type ?? "unknown"}, expected ${expectedType}`);
+		}
+
+		const properties: Record<string, unknown> = {
+			processorId: metadata.processor.id,
+			parameterId: metadata.parameter.id,
+		};
+		const warnings: string[] = [];
+
+		if (cmd.matched) {
+			const matched = matchedPropertiesForComponent(componentNode.type, metadata.parameter);
+			Object.assign(properties, matched.properties);
+			warnings.push(...matched.warnings);
+		}
+
+		const result = await this.executeOps([{ op: "set", target: component.id, properties }], connection);
+		if (result.type === "error") return result;
+		if (result.type !== "text") return result;
+		const suffix = cmd.matched ? " matched" : "";
+		const warningText = warnings.length > 0 ? ` (${warnings.join("; ")})` : "";
+		return { ...result, content: `connected ${component.id} to ${metadata.processor.id}.${metadata.parameter.id}${suffix}${warningText}` };
+	}
+
+	private findComponentNode(id: string): TreeNode | null {
+		if (!this.treeRoot) return null;
+		const lower = id.toLowerCase();
+		const visit = (node: TreeNode): TreeNode | null => {
+			if ((node.id ?? node.label).toLowerCase() === lower) return node;
+			for (const child of node.children ?? []) {
+				const found = visit(child);
+				if (found) return found;
+			}
+			return null;
+		};
+		return visit(this.treeRoot);
+	}
+
+	private async fetchBuilderParameterInfo(
+		connection: import("../hise.js").HiseConnection,
+		processorId: string,
+		parameterId: string,
+	): Promise<{ processor: BuilderProcessorInfo; parameter: BuilderParameterInfo } | { error: string }> {
+		const response = await connection.get("/api/builder/tree?verbose=true");
+		if (isErrorResponse(response)) return { error: response.message };
+		if (!isEnvelopeResponse(response) || !response.success || !response.result) {
+			return { error: "Could not fetch verbose builder tree" };
+		}
+		const matches = collectBuilderProcessors(response.result)
+			.filter((processor) => processor.id.toLowerCase() === processorId.toLowerCase());
+		if (matches.length === 0) return { error: `Processor "${processorId}" not found` };
+		if (matches.length > 1) {
+			return { error: `ambiguous processor id "${processorId}": ${matches.map((m) => m.path.join(".")).join(", ")}` };
+		}
+		const processor = matches[0]!;
+		const parameter = processor.parameters.find((param) => param.id.toLowerCase() === parameterId.toLowerCase());
+		if (!parameter) return { error: `Parameter "${parameterId}" not found on "${processor.id}"` };
+		return { processor, parameter };
+	}
+
 	private async echoSetClause(
 		clause: { path: PathRef; value: unknown },
 		connection: import("../hise.js").HiseConnection,
@@ -697,6 +931,8 @@ export class UiMode implements Mode {
 				return textResult(`set ${cmd.clauses.map((c) => pathRefToString(c.path)).join(", ")} (no HISE connection)`);
 			case "rename":
 				return textResult(`rename ${pathRefToString(cmd.target)} as "${cmd.name}" (no HISE connection)`);
+			case "connect":
+				return textResult(`connect ${pathRefToString(cmd.component)} to ${pathRefToString(cmd.target)}${cmd.matched ? " matched" : ""} (no HISE connection)`);
 			case "get":
 				return textResult(`get ${cmd.paths.map(pathRefToString).join(", ")} (no HISE connection)`);
 			default:

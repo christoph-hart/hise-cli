@@ -16,8 +16,8 @@ import type { WizardHandlerRegistry } from "../engine/wizard/handler-registry.js
 import { createNodePhaseExecutor } from "../tui/nodePhaseExecutor.js";
 import { registerUpdateHandlers } from "../tui/wizard-handlers/index.js";
 import { isAbsolutePath, isExplicitRelative } from "../engine/session.js";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, dirname, extname, isAbsolute, normalize, relative, resolve, sep } from "node:path";
 import { watch } from "node:fs";
 import type { ModeId } from "../engine/modes/mode.js";
 
@@ -604,6 +604,11 @@ async function executeScriptApiCommand(
 			return finalizeJsonPayload(serializeDiagnoseEnvelope(response), output);
 		}
 
+		if (command.action === "add-file") {
+			const response = await addScriptFile(connection, command.moduleId, command.relativePath);
+			return finalizeJsonPayload(response, output);
+		}
+
 		if (command.action === "show") {
 			const api = await dataLoader.loadScriptingApi().catch(() => null);
 			const showCommand = command.target === "tree"
@@ -615,6 +620,10 @@ async function executeScriptApiCommand(
 
 		const callbacks = await readScriptCallbacks(command);
 		if ("error" in callbacks) return finalizeJsonPayload(cliError("execution_error", callbacks.error), output);
+		if (command.rollback) {
+			const response = await setScriptWithRollback(connection, command.moduleId, callbacks.callbacks);
+			return finalizeJsonPayload(response, output);
+		}
 		const response = await connection.post("/api/set_script", {
 			moduleId: command.moduleId,
 			callbacks: callbacks.callbacks,
@@ -624,6 +633,223 @@ async function executeScriptApiCommand(
 	} finally {
 		if (!opts.connectionOverride) connection.destroy();
 	}
+}
+
+interface ScriptRollbackStatus {
+	attempted: boolean;
+	ok: boolean;
+	restoredCallbacks: string[];
+	state?: "new_invalid_source_may_be_persisted";
+	error?: string;
+}
+
+async function setScriptWithRollback(
+	connection: HiseConnection,
+	moduleId: string,
+	callbacks: Record<string, string>,
+): Promise<CliOutputPayload> {
+	const callbackNames = Object.keys(callbacks);
+	const snapshot = await snapshotScriptCallbacks(connection, moduleId, callbackNames);
+	if ("error" in snapshot) return cliError("hise_api_error", `Failed to snapshot callbacks before script set: ${snapshot.error}`);
+
+	const response = await connection.post("/api/set_script", { moduleId, callbacks, compile: true });
+	if (isSuccessfulHiseEnvelope(response)) return serializeHiseEnvelope(response);
+
+	const rollbackResponse = await connection.post("/api/set_script", {
+		moduleId,
+		callbacks: snapshot.callbacks,
+		compile: true,
+	});
+	const rollback: ScriptRollbackStatus = isSuccessfulHiseEnvelope(rollbackResponse)
+		? { attempted: true, ok: true, restoredCallbacks: callbackNames }
+		: {
+			attempted: true,
+			ok: false,
+			restoredCallbacks: [],
+			state: "new_invalid_source_may_be_persisted",
+			error: hiseErrorText(rollbackResponse),
+		};
+
+	const payload = serializeHiseEnvelope(response) as CliOutputPayload & { rollback?: ScriptRollbackStatus };
+	if (!payload.ok) payload.rollback = rollback;
+	return payload;
+}
+
+async function snapshotScriptCallbacks(
+	connection: HiseConnection,
+	moduleId: string,
+	callbackNames: string[],
+): Promise<{ callbacks: Record<string, string> } | { error: string }> {
+	const params = new URLSearchParams({ moduleId });
+	const response = await connection.get(`/api/get_script?${params.toString()}`);
+	if (isErrorResponse(response) || !isEnvelopeResponse(response) || !response.success || response.errors.length > 0) {
+		return { error: hiseErrorText(response) };
+	}
+	const source = isRecord(response.callbacks) ? response.callbacks : {};
+	const callbacks: Record<string, string> = {};
+	for (const name of callbackNames) {
+		const value = source[name];
+		callbacks[name] = typeof value === "string" ? value : "";
+	}
+	return { callbacks };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isSuccessfulHiseEnvelope(response: import("../engine/hise.js").HiseResponse): boolean {
+	return isEnvelopeResponse(response) && response.success && response.errors.length === 0;
+}
+
+async function addScriptFile(
+	connection: HiseConnection,
+	moduleId: string,
+	relativePathInput: string,
+): Promise<CliOutputPayload> {
+	const resolved = await resolveScriptFilePath(connection, relativePathInput);
+	if ("error" in resolved) return cliError("usage_error", resolved.error);
+
+	const namespace = namespaceFromScriptPath(resolved.relativePath);
+	if ("error" in namespace) return cliError("usage_error", namespace.error);
+
+	const fileResult = await ensureScriptFile(resolved.absolutePath, namespace.name);
+	if ("error" in fileResult) return cliError("execution_error", fileResult.error);
+
+	const snapshot = await snapshotScriptCallbacks(connection, moduleId, ["onInit"]);
+	if ("error" in snapshot) return cliError("hise_api_error", `Failed to read onInit before adding include: ${snapshot.error}`);
+
+	const includeLine = `include("${resolved.relativePath}");`;
+	const previousOnInit = snapshot.callbacks.onInit ?? "";
+	const nextOnInit = appendIncludeLine(previousOnInit, includeLine);
+	const includeAdded = nextOnInit !== previousOnInit;
+	const shouldCompile = fileResult.created || includeAdded;
+	const compileResult = shouldCompile
+		? includeAdded
+			? await setScriptWithRollback(connection, moduleId, { onInit: nextOnInit })
+			: serializeHiseEnvelope(await connection.post("/api/recompile", { moduleId }))
+		: null;
+	if (compileResult && !compileResult.ok) {
+		const existingValue = "value" in compileResult ? compileResult.value : undefined;
+		return {
+			...compileResult,
+			value: {
+				...(isRecord(existingValue) ? existingValue : {}),
+				absolutePath: resolved.absolutePath,
+				relativePath: resolved.relativePath,
+				namespace: namespace.name,
+				include: includeLine,
+				created: fileResult.created,
+				includeAdded,
+				compiled: shouldCompile,
+				...(fileResult.warnings.length > 0 ? { warnings: fileResult.warnings } : {}),
+			},
+		} as CliOutputPayload;
+	}
+
+	return {
+		ok: true,
+		value: {
+			moduleId,
+			absolutePath: resolved.absolutePath,
+			relativePath: resolved.relativePath,
+			namespace: namespace.name,
+			include: includeLine,
+			callback: "onInit",
+			created: fileResult.created,
+			includeAdded,
+			compiled: shouldCompile,
+			...(fileResult.warnings.length > 0 ? { warnings: fileResult.warnings } : {}),
+		},
+	};
+}
+
+async function ensureScriptFile(
+	absolutePath: string,
+	namespace: string,
+): Promise<{ created: boolean; warnings: string[] } | { error: string }> {
+	try {
+		const existing = await readFile(absolutePath, "utf-8");
+		const namespacePattern = new RegExp(`\\bnamespace\\s+${escapeRegExp(namespace)}\\b`);
+		return {
+			created: false,
+			warnings: namespacePattern.test(existing)
+				? []
+				: [`existing file was not modified; expected namespace ${namespace} was not verified`],
+		};
+	} catch (err) {
+		if (!isNotFoundError(err)) {
+			return { error: `Failed to inspect script file: ${err instanceof Error ? err.message : String(err)}` };
+		}
+	}
+
+	try {
+		await mkdir(dirname(absolutePath), { recursive: true });
+		await writeFile(absolutePath, `namespace ${namespace}\n{\n\n}\n`, { encoding: "utf-8", flag: "wx" });
+		return { created: true, warnings: [] };
+	} catch (err) {
+		return { error: `Failed to create script file: ${err instanceof Error ? err.message : String(err)}` };
+	}
+}
+
+function isNotFoundError(err: unknown): boolean {
+	return isRecord(err) && err.code === "ENOENT";
+}
+
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function resolveScriptFilePath(
+	connection: HiseConnection,
+	relativePathInput: string,
+): Promise<{ scriptsFolder: string; relativePath: string; absolutePath: string } | { error: string }> {
+	const relativePath = normalizeScriptRelativePath(relativePathInput);
+	if ("error" in relativePath) return relativePath;
+
+	const status = await connection.get("/api/status");
+	if (isErrorResponse(status) || !isEnvelopeResponse(status) || !isRecord(status.project)) {
+		return { error: `Failed to resolve scripts folder from /api/status: ${hiseErrorText(status)}` };
+	}
+	const project = status.project;
+	const scriptsFolder = typeof project.scriptsFolder === "string"
+		? project.scriptsFolder
+		: typeof project.projectFolder === "string" ? resolve(project.projectFolder, "Scripts") : null;
+	if (!scriptsFolder) return { error: "/api/status did not report project.scriptsFolder or project.projectFolder" };
+
+	const absolutePath = resolve(scriptsFolder, relativePath.path);
+	const relativeToScripts = relative(scriptsFolder, absolutePath);
+	if (relativeToScripts.startsWith("..") || isAbsolute(relativeToScripts)) {
+		return { error: "script add-file path must stay inside the project Scripts folder" };
+	}
+	return {
+		scriptsFolder,
+		relativePath: relativeToScripts.split(sep).join("/"),
+		absolutePath,
+	};
+}
+
+function normalizeScriptRelativePath(input: string): { path: string } | { error: string } {
+	const path = input.replace(/\\/g, "/").trim();
+	if (!path) return { error: "script add-file path is empty" };
+	if (isAbsolute(path) || /^[A-Za-z]:\//.test(path)) return { error: "script add-file requires a relative path inside the Scripts folder" };
+	if (path.split("/").some((part) => part === "..")) return { error: "script add-file path must not contain .. segments" };
+	if (extname(path) !== ".js") return { error: "script add-file currently requires a .js file path" };
+	return { path: normalize(path) };
+}
+
+function namespaceFromScriptPath(scriptPath: string): { name: string } | { error: string } {
+	const name = basename(scriptPath, extname(scriptPath));
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+		return { error: `script add-file requires a file basename that is a valid namespace identifier: ${name}` };
+	}
+	return { name };
+}
+
+function appendIncludeLine(source: string, includeLine: string): string {
+	if (source.split(/\r?\n/).some((line) => line.trim() === includeLine)) return source;
+	const trimmed = source.trimEnd();
+	return trimmed ? `${trimmed}\n${includeLine}` : includeLine;
 }
 
 async function readScriptCallbacks(
@@ -690,14 +916,19 @@ function serializeHiseEnvelope(response: import("../engine/hise.js").HiseRespons
 	if (isErrorResponse(response)) return cliError(classifyTransportError(response.message), response.message);
 	if (!isEnvelopeResponse(response)) return cliError("hise_api_error", "Unexpected response from HISE");
 	if (!response.success || response.errors.length > 0) {
-		const error = response.errors.length > 0
-			? response.errors.map((e) => e.callstack.length > 0 ? `${e.errorMessage}\n${e.callstack.join("\n")}` : e.errorMessage).join("\n")
-			: String(response.result ?? "HISE request failed");
-		return cliError("hise_api_error", error);
+		return cliError("hise_api_error", hiseErrorText(response));
 	}
 
 	const { success: _success, logs, errors: _errors, ...value } = response;
 	const payload: { ok: true; value: Record<string, unknown>; logs?: string[] } = { ok: true, value };
 	if (logs.length > 0) payload.logs = logs;
 	return payload as CliOutputPayload;
+}
+
+function hiseErrorText(response: import("../engine/hise.js").HiseResponse): string {
+	if (isErrorResponse(response)) return response.message;
+	if (!isEnvelopeResponse(response)) return "Unexpected response from HISE";
+	return response.errors.length > 0
+		? response.errors.map((e) => e.callstack.length > 0 ? `${e.errorMessage}\n${e.callstack.join("\n")}` : e.errorMessage).join("\n")
+		: String(response.result ?? "HISE request failed");
 }

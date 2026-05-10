@@ -6,10 +6,11 @@ mode:
   invocation:
     - argv: [hise-cli, script, repl, --module-id, Interface, --stdin, --agent]
     - argv: [hise-cli, script, get, --module-id, Interface, --callback, onInit, --agent]
+    - argv: [hise-cli, script, add-file, UI/MyFile.js, --module-id, Interface, --agent]
     - argv: [hise-cli, script, set, --module-id, Interface, --callback, onInit, --file, ./onInit.js, --agent]
   notes:
     - Prefer stdin or file inputs for script bodies; never pass multi-line HiseScript or callback bodies through argv.
-    - script set compiles by default; use --no-compile to skip compilation.
+    - script set compiles by default and rolls back touched HISE callback slots if compilation fails; use --no-compile to skip compilation or --no-rollback to intentionally preserve invalid callback source.
     - --module-id defaults to Interface.
     - REPL evaluation cannot create persistent declarations in the script engine. Do not use it to add variables, functions, callbacks, includes, or other durable script source.
     - Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.
@@ -17,6 +18,8 @@ mode:
     - If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.
     - For multi-step workflows that need to switch modes, use hise-cli --run with a .hsc script instead of multiline mode stdin.
     - Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.
+    - Prefer script add-file for new external script files. It creates a one-namespace stub, adds the HISE include line to onInit, compiles, and returns the absolute path for editing.
+    - Rollback protects callback slots stored in HISE only. It cannot restore external script files referenced by include(...); diagnose those files before compiling.
     - Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher. HISE requires f to be an inline function reference with signature (component, value).
   antiPatterns:
     - avoid: Passing callback bodies as inline shell arguments.
@@ -28,11 +31,13 @@ mode:
     - avoid: Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.
       prefer: hise-cli -ui --stdin --agent
     - avoid: Putting large implementation bodies directly into onInit.
-      prefer: Keep onInit small and include external script files that can be edited and diagnosed separately with script diagnose.
+      prefer: Use hise-cli script add-file UI/MyFile.js --agent, then edit the returned path and run script diagnose.
     - avoid: Building a large global onControl dispatcher or passing an anonymous regular function to setControlCallback.
       prefer: Define an inline function f(component, value) and assign it with Component.setControlCallback(f).
     - avoid: Repeatedly compiling external script edits to discover one error at a time.
       prefer: Run hise-cli script diagnose --file-path Scripts/UI.js --agent before compiling.
+    - avoid: Relying on script set rollback to undo edits to external script files.
+      prefer: Use source control or editor undo for files, and use rollback only as protection for HISE callback slots.
 capabilities:
   - id: script.repl.stdin
     title: Evaluate REPL expression from stdin
@@ -107,9 +112,36 @@ capabilities:
       - set callback body
     notes:
       - Use --no-compile when staging callback changes without recompilation.
+      - By default, compile failures restore the previous HISE callback slot and return rollback status.
+      - Use --no-rollback only when intentionally preserving invalid callback source in HISE.
     help:
       visibility: common
       order: 40
+  - id: script.add-file
+    title: Add external script file
+    purpose: Create a namespaced external script file under the active project's Scripts folder, include it from onInit, compile, and return the absolute path.
+    command:
+      argv: [hise-cli, script, add-file, UI/MyFile.js, --module-id, Interface, --agent]
+    examples:
+      - title: Add a UI namespace file
+        argv: [hise-cli, script, add-file, UI/MyFile.js, --module-id, Interface, --agent]
+    tags: [script, file, include, namespace, organization]
+    aliases:
+      - create external script file
+      - add include file
+      - add namespaced script file
+      - create script namespace
+    notes:
+      - The path is relative to the active project's Scripts folder and must end in .js.
+      - The file basename must be a valid namespace identifier; UI/MyFile.js creates namespace MyFile.
+      - The command does not overwrite existing files.
+      - The command is idempotent: if the file already exists and onInit already includes it, it returns the path with created=false, includeAdded=false, and compiled=false.
+      - If the file exists but is not included, it preserves the file, appends the include, compiles, and may warn if the expected namespace was not found.
+      - After editing the returned absolutePath, run script diagnose --file-path <absolutePath> --agent before compiling further changes.
+      - This command updates onInit with callback-slot rollback, but it does not rollback file edits.
+    help:
+      visibility: common
+      order: 45
   - id: script.set.callback.file
     title: Set script callback from file
     purpose: Update one callback from a file and compile by default.
@@ -125,6 +157,8 @@ capabilities:
       - load callback file
     notes:
       - This is the preferred path for multi-line callback edits.
+      - Rollback restores the HISE callback slot if compilation fails, but it does not modify the source file.
+      - For callbacks that include external files, diagnose those external files before compiling.
     help:
       visibility: common
       order: 50
@@ -141,6 +175,9 @@ capabilities:
       - update multiple callbacks
       - set callbacks json
       - load callbacks from json
+    notes:
+      - Rollback snapshots only the callbacks present in the JSON object.
+      - Use --no-rollback only when intentionally preserving invalid callback source in HISE.
     help:
       visibility: common
       order: 60

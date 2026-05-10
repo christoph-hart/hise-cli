@@ -473,6 +473,19 @@ export const GENERATED_AGENT_CONTEXT = {
 					"argv": [
 						"hise-cli",
 						"script",
+						"add-file",
+						"UI/MyFile.js",
+						"--module-id",
+						"Interface",
+						"--agent"
+					],
+					"display": "hise-cli script add-file UI/MyFile.js --module-id Interface --agent"
+				},
+				{
+					"title": "Invocation 4",
+					"argv": [
+						"hise-cli",
+						"script",
 						"set",
 						"--module-id",
 						"Interface",
@@ -487,7 +500,7 @@ export const GENERATED_AGENT_CONTEXT = {
 			],
 			"notes": [
 				"Prefer stdin or file inputs for script bodies; never pass multi-line HiseScript or callback bodies through argv.",
-				"script set compiles by default; use --no-compile to skip compilation.",
+				"script set compiles by default and rolls back touched HISE callback slots if compilation fails; use --no-compile to skip compilation or --no-rollback to intentionally preserve invalid callback source.",
 				"--module-id defaults to Interface.",
 				"REPL evaluation cannot create persistent declarations in the script engine. Do not use it to add variables, functions, callbacks, includes, or other durable script source.",
 				"Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.",
@@ -495,6 +508,8 @@ export const GENERATED_AGENT_CONTEXT = {
 				"If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.",
 				"For multi-step workflows that need to switch modes, use hise-cli --run with a .hsc script instead of multiline mode stdin.",
 				"Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.",
+				"Prefer script add-file for new external script files. It creates a one-namespace stub, adds the HISE include line to onInit, compiles, and returns the absolute path for editing.",
+				"Rollback protects callback slots stored in HISE only. It cannot restore external script files referenced by include(...); diagnose those files before compiling.",
 				"Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher. HISE requires f to be an inline function reference with signature (component, value)."
 			],
 			"antiPatterns": [
@@ -516,7 +531,7 @@ export const GENERATED_AGENT_CONTEXT = {
 				},
 				{
 					"avoid": "Putting large implementation bodies directly into onInit.",
-					"prefer": "Keep onInit small and include external script files that can be edited and diagnosed separately with script diagnose."
+					"prefer": "Use hise-cli script add-file UI/MyFile.js --agent, then edit the returned path and run script diagnose."
 				},
 				{
 					"avoid": "Building a large global onControl dispatcher or passing an anonymous regular function to setControlCallback.",
@@ -525,6 +540,10 @@ export const GENERATED_AGENT_CONTEXT = {
 				{
 					"avoid": "Repeatedly compiling external script edits to discover one error at a time.",
 					"prefer": "Run hise-cli script diagnose --file-path Scripts/UI.js --agent before compiling."
+				},
+				{
+					"avoid": "Relying on script set rollback to undo edits to external script files.",
+					"prefer": "Use source control or editor undo for files, and use rollback only as protection for HISE callback slots."
 				}
 			],
 			"capabilities": [
@@ -743,7 +762,67 @@ export const GENERATED_AGENT_CONTEXT = {
 						}
 					],
 					"notes": [
-						"Use --no-compile when staging callback changes without recompilation."
+						"Use --no-compile when staging callback changes without recompilation.",
+						"By default, compile failures restore the previous HISE callback slot and return rollback status.",
+						"Use --no-rollback only when intentionally preserving invalid callback source in HISE."
+					]
+				},
+				{
+					"id": "script.add-file",
+					"title": "Add external script file",
+					"purpose": "Create a namespaced external script file under the active project's Scripts folder, include it from onInit, compile, and return the absolute path.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"add-file",
+							"UI/MyFile.js",
+							"--module-id",
+							"Interface",
+							"--agent"
+						],
+						"display": "hise-cli script add-file UI/MyFile.js --module-id Interface --agent"
+					},
+					"tags": [
+						"script",
+						"file",
+						"include",
+						"namespace",
+						"organization"
+					],
+					"aliases": [
+						"create external script file",
+						"add include file",
+						"add namespaced script file",
+						"create script namespace"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 45
+					},
+					"examples": [
+						{
+							"title": "Add a UI namespace file",
+							"argv": [
+								"hise-cli",
+								"script",
+								"add-file",
+								"UI/MyFile.js",
+								"--module-id",
+								"Interface",
+								"--agent"
+							],
+							"display": "hise-cli script add-file UI/MyFile.js --module-id Interface --agent"
+						}
+					],
+					"notes": [
+						"The path is relative to the active project's Scripts folder and must end in .js.",
+						"The file basename must be a valid namespace identifier; UI/MyFile.js creates namespace MyFile.",
+						"The command does not overwrite existing files.",
+						"[object Object]",
+						"If the file exists but is not included, it preserves the file, appends the include, compiles, and may warn if the expected namespace was not found.",
+						"After editing the returned absolutePath, run script diagnose --file-path <absolutePath> --agent before compiling further changes.",
+						"This command updates onInit with callback-slot rollback, but it does not rollback file edits."
 					]
 				},
 				{
@@ -800,7 +879,9 @@ export const GENERATED_AGENT_CONTEXT = {
 						}
 					],
 					"notes": [
-						"This is the preferred path for multi-line callback edits."
+						"This is the preferred path for multi-line callback edits.",
+						"Rollback restores the HISE callback slot if compilation fails, but it does not modify the source file.",
+						"For callbacks that include external files, diagnose those external files before compiling."
 					]
 				},
 				{
@@ -851,6 +932,10 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli script set --module-id Interface --callbacks-json ./callbacks.json --agent"
 						}
+					],
+					"notes": [
+						"Rollback snapshots only the callbacks present in the JSON object.",
+						"Use --no-rollback only when intentionally preserving invalid callback source in HISE."
 					]
 				},
 				{
@@ -1119,6 +1204,168 @@ export const GENERATED_AGENT_CONTEXT = {
 					},
 					"notes": [
 						"Accepted for short expressions, but stdin is preferred for agent workflows."
+					]
+				}
+			]
+		},
+		{
+			"id": "ui",
+			"title": "UI component editing and parameter linking",
+			"summary": "Add, inspect, configure, and link HISE ScriptComponents without shell-quoting UI mutations.",
+			"invocation": [
+				{
+					"title": "Invocation 1",
+					"argv": [
+						"hise-cli",
+						"-ui",
+						"show",
+						"tree",
+						"--agent"
+					],
+					"display": "hise-cli -ui show tree --agent"
+				},
+				{
+					"title": "Invocation 2",
+					"argv": [
+						"hise-cli",
+						"-ui",
+						"--stdin",
+						"--agent"
+					],
+					"display": "hise-cli -ui --stdin --agent"
+				}
+			],
+			"notes": [
+				"Use --stdin by default for UI mutations, especially quoted names, array values, comma chains, and multi-step edits.",
+				"Multiline stdin runs each non-empty line serially in UI mode only; use hise-cli --run for workflows that need to switch modes.",
+				"connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component."
+			],
+			"antiPatterns": [
+				{
+					"avoid": "Passing multi-step UI mutations as quoted argv strings.",
+					"prefer": "hise-cli -ui --stdin --agent"
+				},
+				{
+					"avoid": "Manually setting processorId and parameterId without matching control metadata.",
+					"prefer": "hise-cli -ui --stdin --agent"
+				}
+			],
+			"capabilities": [
+				{
+					"id": "ui.show.tree",
+					"title": "Show UI component tree",
+					"purpose": "Inspect the current ScriptComponent hierarchy.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-ui",
+							"show",
+							"tree",
+							"--agent"
+						],
+						"display": "hise-cli -ui show tree --agent"
+					},
+					"tags": [
+						"ui",
+						"tree",
+						"inspect"
+					],
+					"aliases": [
+						"show ui tree",
+						"inspect components",
+						"list ui controls"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 10
+					},
+					"examples": [
+						{
+							"title": "Show UI tree",
+							"argv": [
+								"hise-cli",
+								"-ui",
+								"show",
+								"tree",
+								"--agent"
+							],
+							"display": "hise-cli -ui show tree --agent"
+						}
+					]
+				},
+				{
+					"id": "ui.connect.control",
+					"title": "Connect UI control to module parameter",
+					"purpose": "Link a ScriptSlider, ScriptComboBox, or ScriptButton to a matching module parameter and optionally copy matching metadata.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-ui",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -ui --stdin --agent"
+					},
+					"tags": [
+						"ui",
+						"connect",
+						"slider",
+						"combobox",
+						"button",
+						"parameter",
+						"matched"
+					],
+					"aliases": [
+						"connect ui control",
+						"link slider to parameter",
+						"link combobox to parameter",
+						"link button to parameter",
+						"match ui control range"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 20
+					},
+					"examples": [
+						{
+							"title": "Connect a slider and match range",
+							"argv": [
+								"hise-cli",
+								"-ui",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -ui --stdin --agent",
+							"stdin": "connect Cutoff to MainFilter.Frequency matched"
+						},
+						{
+							"title": "Connect a combobox and copy items",
+							"argv": [
+								"hise-cli",
+								"-ui",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -ui --stdin --agent",
+							"stdin": "connect Waveform to LFO.WaveformType matched"
+						},
+						{
+							"title": "Connect a button and copy label/default",
+							"argv": [
+								"hise-cli",
+								"-ui",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -ui --stdin --agent",
+							"stdin": "connect EnableFilter to MainFilter.Enabled matched"
+						}
+					],
+					"notes": [
+						"ScriptSlider requires a builder parameter with type Slider.",
+						"ScriptComboBox requires a builder parameter with type ComboBox and matched copies newline-separated items.",
+						"ScriptButton requires a builder parameter with type Button and matched copies the parameter id into text plus defaultValue.",
+						"matched uses /api/builder/tree?verbose=true metadata."
 					]
 				}
 			]

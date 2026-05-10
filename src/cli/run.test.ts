@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { executeCliCommand } from "./run.js";
 import { createSession } from "../session-bootstrap.js";
 import { MockHiseConnection } from "../engine/hise.js";
@@ -16,6 +19,15 @@ afterEach(() => {
 	vi.restoreAllMocks();
 	Object.defineProperty(process, "stdin", { value: ORIGINAL_STDIN, configurable: true });
 });
+
+async function withTempDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+	const dir = await mkdtemp(join(tmpdir(), "hise-cli-test-"));
+	try {
+		return await fn(dir);
+	} finally {
+		await rm(dir, { recursive: true, force: true });
+	}
+}
 
 function mockObserverFetch() {
 	return vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
@@ -787,6 +799,13 @@ describe("executeCliCommand", () => {
 
 		const connection = new MockHiseConnection()
 			.setProbeResult(true)
+			.onGet("/api/get_script", () => ({
+				success: true,
+				moduleId: "Interface",
+				callbacks: { onInit: "Console.print(1);" },
+				logs: [],
+				errors: [],
+			}))
 			.onPost("/api/set_script", () => ({
 				success: true,
 				result: "Compiled OK",
@@ -814,6 +833,356 @@ describe("executeCliCommand", () => {
 			moduleId: "Interface",
 			callbacks: { onInit: "Console.print(123);" },
 			compile: true,
+		});
+	});
+
+	it("rolls back direct script set when compile fails", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end("Console.print(;\n");
+		let postCount = 0;
+
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onGet("/api/get_script", () => ({
+				success: true,
+				moduleId: "Interface",
+				callbacks: { onInit: "Console.print(1);", onNoteOn: "Console.print(Message.getNoteNumber());" },
+				logs: [],
+				errors: [],
+			}))
+			.onPost("/api/set_script", () => {
+				postCount++;
+				return postCount === 1
+					? { success: false, result: "Unexpected token", logs: [], errors: [] }
+					: { success: true, result: "Restored OK", logs: [], errors: [] };
+			});
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: false,
+				code: "hise_api_error",
+				error: "Unexpected token",
+				rollback: { attempted: true, ok: true, restoredCallbacks: ["onInit"] },
+			});
+		}
+		expect(connection.calls.filter((call) => call.method === "POST" && call.endpoint === "/api/set_script").map((call) => call.body)).toEqual([
+			{ moduleId: "Interface", callbacks: { onInit: "Console.print(;" }, compile: true },
+			{ moduleId: "Interface", callbacks: { onInit: "Console.print(1);" }, compile: true },
+		]);
+	});
+
+	it("does not roll back direct script set with --no-rollback", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end("Console.print(;\n");
+
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/set_script", () => ({ success: false, result: "Unexpected token", logs: [], errors: [] }));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin", "--no-rollback", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: false, code: "hise_api_error", error: "Unexpected token" });
+		}
+		expect(connection.calls.some((call) => call.method === "GET")).toBe(false);
+		expect(connection.calls.filter((call) => call.endpoint === "/api/set_script")).toHaveLength(1);
+	});
+
+	it("rolls back all touched callbacks from callbacks JSON", async () => {
+		await withTempDir(async (dir) => {
+			mockObserverFetch();
+			const callbacksPath = join(dir, "callbacks.json");
+			await writeFile(callbacksPath, JSON.stringify({ onInit: "broken", onNoteOn: "also broken" }), "utf-8");
+			let postCount = 0;
+
+			const connection = new MockHiseConnection()
+				.setProbeResult(true)
+				.onGet("/api/get_script", () => ({
+					success: true,
+					moduleId: "Interface",
+					callbacks: { onInit: "old init", onNoteOn: "old note", onControl: "untouched" },
+					logs: [],
+					errors: [],
+				}))
+				.onPost("/api/set_script", () => {
+					postCount++;
+					return postCount === 1
+						? { success: false, result: "Compile failed", logs: [], errors: [] }
+						: { success: true, result: "Restored OK", logs: [], errors: [] };
+				});
+
+			const result = await executeCliCommand(
+				["node", "hise-cli", "script", "set", "--callbacks-json", callbacksPath, "--agent"],
+				getCliCommands(),
+				createDataLoader(),
+				connection,
+			);
+
+			expect(result.kind).toBe("json");
+			if (result.kind === "json") {
+				expect(result.payload).toMatchObject({
+					ok: false,
+					code: "hise_api_error",
+					error: "Compile failed",
+					rollback: { attempted: true, ok: true, restoredCallbacks: ["onInit", "onNoteOn"] },
+				});
+			}
+			expect(connection.calls.filter((call) => call.endpoint === "/api/set_script").map((call) => call.body)).toEqual([
+				{ moduleId: "Interface", callbacks: { onInit: "broken", onNoteOn: "also broken" }, compile: true },
+				{ moduleId: "Interface", callbacks: { onInit: "old init", onNoteOn: "old note" }, compile: true },
+			]);
+		});
+	});
+
+	it("reports loud state when script set rollback fails", async () => {
+		mockObserverFetch();
+		const stdin = new PassThrough();
+		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
+		stdin.end("Console.print(;\n");
+		let postCount = 0;
+
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onGet("/api/get_script", () => ({ success: true, callbacks: { onInit: "old" }, logs: [], errors: [] }))
+			.onPost("/api/set_script", () => {
+				postCount++;
+				return postCount === 1
+					? { success: false, result: "New source failed", logs: [], errors: [] }
+					: { success: false, result: "Restore failed", logs: [], errors: [] };
+			});
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: false,
+				code: "hise_api_error",
+				error: "New source failed",
+				rollback: {
+					attempted: true,
+					ok: false,
+					restoredCallbacks: [],
+					state: "new_invalid_source_may_be_persisted",
+					error: "Restore failed",
+				},
+			});
+		}
+	});
+
+	it("creates a namespaced external script file and includes it in onInit", async () => {
+		await withTempDir(async (dir) => {
+			mockObserverFetch();
+			const scriptsFolder = join(dir, "Scripts");
+			let postCount = 0;
+
+			const connection = new MockHiseConnection()
+				.setProbeResult(true)
+				.onGet("/api/status", () => ({
+					success: true,
+					project: { name: "Test", projectFolder: dir, scriptsFolder },
+					logs: [],
+					errors: [],
+				}))
+				.onGet("/api/get_script", () => ({
+					success: true,
+					moduleId: "Interface",
+					callbacks: { onInit: "Content.makeFrontInterface(600, 600);" },
+					logs: [],
+					errors: [],
+				}))
+				.onPost("/api/set_script", () => {
+					postCount++;
+					return { success: true, result: "Compiled OK", updatedCallbacks: ["onInit"], logs: [], errors: [] };
+				});
+
+			const result = await executeCliCommand(
+				["node", "hise-cli", "script", "add-file", "UI/MyFile.js", "--agent"],
+				getCliCommands(),
+				createDataLoader(),
+				connection,
+			);
+
+			expect(result.kind).toBe("json");
+			const absolutePath = join(scriptsFolder, "UI", "MyFile.js");
+			if (result.kind === "json") {
+				expect(result.payload).toEqual({
+					ok: true,
+					value: {
+						moduleId: "Interface",
+						absolutePath,
+						relativePath: "UI/MyFile.js",
+						namespace: "MyFile",
+						include: 'include("UI/MyFile.js");',
+						callback: "onInit",
+						created: true,
+						includeAdded: true,
+						compiled: true,
+					},
+				});
+			}
+			expect(await readFile(absolutePath, "utf-8")).toBe("namespace MyFile\n{\n\n}\n");
+			expect(postCount).toBe(1);
+			expect(connection.calls.filter((call) => call.endpoint === "/api/set_script").map((call) => call.body)).toEqual([
+				{
+					moduleId: "Interface",
+					callbacks: { onInit: 'Content.makeFrontInterface(600, 600);\ninclude("UI/MyFile.js");' },
+					compile: true,
+				},
+			]);
+		});
+	});
+
+	it("includes an existing external script file without overwriting it", async () => {
+		await withTempDir(async (dir) => {
+			mockObserverFetch();
+			const scriptsFolder = join(dir, "Scripts");
+			const absolutePath = join(scriptsFolder, "UI", "ExistingFile.js");
+			await mkdir(join(scriptsFolder, "UI"), { recursive: true });
+			await writeFile(absolutePath, "namespace Different\n{\n}\n", "utf-8");
+
+			const connection = new MockHiseConnection()
+				.setProbeResult(true)
+				.onGet("/api/status", () => ({ success: true, project: { name: "Test", projectFolder: dir, scriptsFolder }, logs: [], errors: [] }))
+				.onGet("/api/get_script", () => ({ success: true, callbacks: { onInit: "" }, logs: [], errors: [] }))
+				.onPost("/api/set_script", () => ({ success: true, result: "Compiled OK", logs: [], errors: [] }));
+
+			const result = await executeCliCommand(
+				["node", "hise-cli", "script", "add-file", "UI/ExistingFile.js", "--agent"],
+				getCliCommands(),
+				createDataLoader(),
+				connection,
+			);
+
+			expect(result.kind).toBe("json");
+			if (result.kind === "json") {
+				expect(result.payload).toEqual({
+					ok: true,
+					value: {
+						moduleId: "Interface",
+						absolutePath,
+						relativePath: "UI/ExistingFile.js",
+						namespace: "ExistingFile",
+						include: 'include("UI/ExistingFile.js");',
+						callback: "onInit",
+						created: false,
+						includeAdded: true,
+						compiled: true,
+						warnings: ["existing file was not modified; expected namespace ExistingFile was not verified"],
+					},
+				});
+			}
+			expect(await readFile(absolutePath, "utf-8")).toBe("namespace Different\n{\n}\n");
+			expect(connection.calls.filter((call) => call.endpoint === "/api/set_script").map((call) => call.body)).toEqual([
+				{ moduleId: "Interface", callbacks: { onInit: 'include("UI/ExistingFile.js");' }, compile: true },
+			]);
+		});
+	});
+
+	it("returns an existing included script file without recompiling", async () => {
+		await withTempDir(async (dir) => {
+			mockObserverFetch();
+			const scriptsFolder = join(dir, "Scripts");
+			const absolutePath = join(scriptsFolder, "UI", "AlreadyIncluded.js");
+			await mkdir(join(scriptsFolder, "UI"), { recursive: true });
+			await writeFile(absolutePath, "namespace AlreadyIncluded\n{\n}\n", "utf-8");
+
+			const connection = new MockHiseConnection()
+				.setProbeResult(true)
+				.onGet("/api/status", () => ({ success: true, project: { name: "Test", projectFolder: dir, scriptsFolder }, logs: [], errors: [] }))
+				.onGet("/api/get_script", () => ({ success: true, callbacks: { onInit: 'include("UI/AlreadyIncluded.js");' }, logs: [], errors: [] }))
+				.onPost("/api/set_script", () => ({ success: true, result: "should not happen", logs: [], errors: [] }))
+				.onPost("/api/recompile", () => ({ success: true, result: "should not happen", logs: [], errors: [] }));
+
+			const result = await executeCliCommand(
+				["node", "hise-cli", "script", "add-file", "UI/AlreadyIncluded.js", "--agent"],
+				getCliCommands(),
+				createDataLoader(),
+				connection,
+			);
+
+			expect(result.kind).toBe("json");
+			if (result.kind === "json") {
+				expect(result.payload).toMatchObject({
+					ok: true,
+					value: {
+						absolutePath,
+						relativePath: "UI/AlreadyIncluded.js",
+						namespace: "AlreadyIncluded",
+						created: false,
+						includeAdded: false,
+						compiled: false,
+					},
+				});
+			}
+			expect(connection.calls.filter((call) => call.method === "POST")).toEqual([]);
+		});
+	});
+
+	it("rejects script add-file paths outside the scripts folder", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection().setProbeResult(true);
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "add-file", "../Outside.js", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({ ok: false, code: "usage_error", error: "script add-file path must not contain .. segments" });
+		}
+		expect(connection.calls).toEqual([]);
+	});
+
+	it("rejects script add-file basenames that are not valid namespaces", async () => {
+		await withTempDir(async (dir) => {
+			mockObserverFetch();
+			const scriptsFolder = join(dir, "Scripts");
+			const connection = new MockHiseConnection()
+				.setProbeResult(true)
+				.onGet("/api/status", () => ({ success: true, project: { name: "Test", projectFolder: dir, scriptsFolder }, logs: [], errors: [] }));
+
+			const result = await executeCliCommand(
+				["node", "hise-cli", "script", "add-file", "UI/my-file.js", "--agent"],
+				getCliCommands(),
+				createDataLoader(),
+				connection,
+			);
+
+			expect(result.kind).toBe("json");
+			if (result.kind === "json") {
+				expect(result.payload).toEqual({
+					ok: false,
+					code: "usage_error",
+					error: "script add-file requires a file basename that is a valid namespace identifier: my-file",
+				});
+			}
 		});
 	});
 

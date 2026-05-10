@@ -5,6 +5,7 @@ import {
 	type UiAddCommand,
 	type UiAddChainCommand,
 	type UiCdCommand,
+	type UiConnectCommand,
 	type UiCommand,
 	type UiGetCommand,
 	type UiRemoveCommand,
@@ -151,6 +152,27 @@ describe("ui parser — get", () => {
 	it("supports comma chaining", () => {
 		const cmd = parseOk<UiGetCommand>("get Play.x, Play.y");
 		expect(cmd.paths).toHaveLength(2);
+	});
+});
+
+// ── connect ─────────────────────────────────────────────────────────
+
+describe("ui parser — connect", () => {
+	it("parses connect to processor parameter", () => {
+		const cmd = parseOk<UiConnectCommand>("connect Cutoff to MainFilter.Frequency");
+		expect(cmd.type).toBe("connect");
+		expect(cmd.component.kind).toBe("bare");
+		expect(cmd.target.kind).toBe("dotted");
+		expect(cmd.matched).toBe(false);
+	});
+
+	it("parses matched connect", () => {
+		const cmd = parseOk<UiConnectCommand>("connect Cutoff to MainFilter.Frequency matched");
+		expect(cmd.matched).toBe(true);
+	});
+
+	it("rejects unknown connect option", () => {
+		expect(parseErr("connect Cutoff to MainFilter.Frequency normalized")).toMatch(/unknown option/);
 	});
 });
 

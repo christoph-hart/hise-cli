@@ -1,0 +1,64 @@
+schemaVersion: 1
+mode:
+  id: ui
+  title: UI component editing and parameter linking
+  summary: Add, inspect, configure, and link HISE ScriptComponents without shell-quoting UI mutations.
+  invocation:
+    - argv: [hise-cli, -ui, show, tree, --agent]
+    - argv: [hise-cli, -ui, --stdin, --agent]
+  notes:
+    - Use --stdin by default for UI mutations, especially quoted names, array values, comma chains, and multi-step edits.
+    - Multiline stdin runs each non-empty line serially in UI mode only; use hise-cli --run for workflows that need to switch modes.
+    - connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component.
+  antiPatterns:
+    - avoid: Passing multi-step UI mutations as quoted argv strings.
+      prefer: hise-cli -ui --stdin --agent
+    - avoid: Manually setting processorId and parameterId without matching control metadata.
+      prefer: hise-cli -ui --stdin --agent
+capabilities:
+  - id: ui.show.tree
+    title: Show UI component tree
+    purpose: Inspect the current ScriptComponent hierarchy.
+    command:
+      argv: [hise-cli, -ui, show, tree, --agent]
+    examples:
+      - title: Show UI tree
+        argv: [hise-cli, -ui, show, tree, --agent]
+    tags: [ui, tree, inspect]
+    aliases:
+      - show ui tree
+      - inspect components
+      - list ui controls
+    help:
+      visibility: common
+      order: 10
+  - id: ui.connect.control
+    title: Connect UI control to module parameter
+    purpose: Link a ScriptSlider, ScriptComboBox, or ScriptButton to a matching module parameter and optionally copy matching metadata.
+    command:
+      argv: [hise-cli, -ui, --stdin, --agent]
+    examples:
+      - title: Connect a slider and match range
+        argv: [hise-cli, -ui, --stdin, --agent]
+        stdin: connect Cutoff to MainFilter.Frequency matched
+      - title: Connect a combobox and copy items
+        argv: [hise-cli, -ui, --stdin, --agent]
+        stdin: connect Waveform to LFO.WaveformType matched
+      - title: Connect a button and copy label/default
+        argv: [hise-cli, -ui, --stdin, --agent]
+        stdin: connect EnableFilter to MainFilter.Enabled matched
+    tags: [ui, connect, slider, combobox, button, parameter, matched]
+    aliases:
+      - connect ui control
+      - link slider to parameter
+      - link combobox to parameter
+      - link button to parameter
+      - match ui control range
+    notes:
+      - ScriptSlider requires a builder parameter with type Slider.
+      - ScriptComboBox requires a builder parameter with type ComboBox and matched copies newline-separated items.
+      - ScriptButton requires a builder parameter with type Button and matched copies the parameter id into text plus defaultValue.
+      - matched uses /api/builder/tree?verbose=true metadata.
+    help:
+      visibility: common
+      order: 20

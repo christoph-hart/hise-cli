@@ -144,6 +144,8 @@ export function commandToOps(
 			return translateRename(cmd, treeRoot, currentPath);
 		case "set":
 			return translateSet(cmd.clauses, treeRoot, currentPath);
+		case "connect":
+			return { error: "handled dynamically" };
 		case "get":
 		case "show":
 		case "cd":

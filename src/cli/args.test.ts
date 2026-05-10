@@ -332,6 +332,7 @@ describe("script direct subcommands", () => {
 		expect(result.kind).toBe("script-api");
 		if (result.kind === "script-api" && result.command.action === "set") {
 			expect(result.command.compile).toBe(true);
+			expect(result.command.rollback).toBe(true);
 			expect(result.command.source).toEqual({ type: "stdin" });
 		}
 	});
@@ -341,7 +342,17 @@ describe("script direct subcommands", () => {
 		expect(result.kind).toBe("script-api");
 		if (result.kind === "script-api" && result.command.action === "set") {
 			expect(result.command.compile).toBe(false);
+			expect(result.command.rollback).toBe(false);
 			expect(result.command.source).toEqual({ type: "file", path: "onInit.js" });
+		}
+	});
+
+	it("parses script set with --no-rollback", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "set", "--callback", "onInit", "--stdin", "--no-rollback"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api" && result.command.action === "set") {
+			expect(result.command.compile).toBe(true);
+			expect(result.command.rollback).toBe(false);
 		}
 	});
 
@@ -351,6 +362,19 @@ describe("script direct subcommands", () => {
 		if (result.kind === "script-api") {
 			expect(result.command).toEqual({ action: "diagnose", moduleId: "Interface", filePath: "Scripts/UI.js", async: true });
 		}
+	});
+
+	it("parses script add-file", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "add-file", "relativePath/MyFile.js", "--module-id", "Interface"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api") {
+			expect(result.command).toEqual({ action: "add-file", moduleId: "Interface", relativePath: "relativePath/MyFile.js" });
+		}
+	});
+
+	it("rejects script add-file without one path", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "add-file"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "script add-file requires exactly one relative path" });
 	});
 
 	it("parses script show tree filters", () => {

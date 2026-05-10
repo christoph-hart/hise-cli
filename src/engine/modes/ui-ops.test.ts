@@ -157,4 +157,8 @@ describe("ui-ops — local-only commands", () => {
 			expect(opsErr(input)).toBe("handled locally");
 		});
 	}
+
+	it("connect is dynamic because it needs builder metadata", () => {
+		expect(opsErr("connect Cutoff to MainFilter.Frequency matched")).toBe("handled dynamically");
+	});
 });
