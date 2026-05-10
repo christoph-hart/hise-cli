@@ -13,6 +13,8 @@ export interface CliErrorPayload {
 	ok: false;
 	error: string;
 	code?: CliErrorCode;
+	value?: unknown;
+	logs?: string[];
 }
 
 export const CLI_ERROR_EXIT_CODES = {

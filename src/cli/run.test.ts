@@ -404,6 +404,22 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("executes which queries without HISE", async () => {
+		mockObserverFetch();
+		const result = await executeCliCommand(
+			["node", "hise-cli", "which", "edit onInit from file", "--agent", "--limit", "1"],
+			getCliCommands(),
+			createDataLoader(),
+			new MockHiseConnection().setProbeResult(false),
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload.ok).toBe(true);
+			expect((result.payload as { value: Array<{ id: string }> }).value[0]?.id).toBe("script.set.callback.file");
+		}
+	});
+
 	it("flattens evaluation-failed script envelopes into a compact error payload", async () => {
 		mockObserverFetch();
 		const connection = new MockHiseConnection()
@@ -640,6 +656,109 @@ describe("executeCliCommand", () => {
 		expect(result.kind).toBe("json");
 		if (result.kind === "json") expect(result.payload).toEqual({ ok: true, value: { result: "Recompiled OK" } });
 		expect(connection.calls.find((call) => call.endpoint === "/api/recompile")?.body).toEqual({ moduleId: "Interface" });
+	});
+
+	it("script diagnose returns validation_error for diagnostic errors", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onPost("/api/diagnose_script", () => ({
+				success: true,
+				apiVersion: "0.6.1",
+				moduleId: "Interface",
+				filePath: "Scripts/UI.js",
+				diagnostics: [{ line: 2, column: 4, severity: "error", source: "api-validation", message: "Function not found" }],
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "diagnose", "--module-id", "Interface", "--file-path", "Scripts/UI.js", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toEqual({
+				ok: false,
+				code: "validation_error",
+				error: "Script diagnostics found errors",
+				value: {
+					apiVersion: "0.6.1",
+					moduleId: "Interface",
+					filePath: "Scripts/UI.js",
+					diagnostics: [{ line: 2, column: 4, severity: "error", source: "api-validation", message: "Function not found" }],
+				},
+			});
+		}
+		expect(connection.calls.find((call) => call.endpoint === "/api/diagnose_script")?.body).toEqual({ moduleId: "Interface", filePath: "Scripts/UI.js", async: false });
+	});
+
+	it("script show tree passes filters to script tree endpoint", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onGet("/api/script/tree", () => ({
+				success: true,
+				moduleId: "Interface",
+				format: "flat",
+				compact: true,
+				totalMatches: 1,
+				returned: 1,
+				truncated: false,
+				tree: [{ id: "Knob1", type: "const var", expression: "Components.Knob1", dataType: "ScriptSlider", children: [] }],
+				logs: [],
+				errors: [],
+			}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "show", "tree", "Knob", "--symbols-only", "--format", "flat", "--limit", "20", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") expect(result.payload).toMatchObject({ ok: true, value: { moduleId: "Interface", compact: true } });
+		expect(connection.calls.find((call) => call.endpoint.startsWith("/api/script/tree"))?.endpoint).toBe("/api/script/tree?moduleId=Interface&search=Knob&format=flat&compact=true&limit=20");
+	});
+
+	it("script show symbol enriches API methods", async () => {
+		mockObserverFetch();
+		const connection = new MockHiseConnection()
+			.setProbeResult(true)
+			.onGet("/api/script/tree", () => ({
+				success: true,
+				moduleId: "Interface",
+				namespace: "Components.Knob1",
+				format: "tree",
+				compact: false,
+				totalMatches: 1,
+				returned: 1,
+				truncated: false,
+				tree: [{ id: "Knob1", type: "const var", expression: "Components.Knob1", dataType: "ScriptSlider", value: "0.0", children: [] }],
+				logs: [],
+				errors: [],
+			}));
+		const dataLoader = createDataLoader();
+		dataLoader.loadScriptingApi = async () => ({
+			version: "test",
+			generated: "now",
+			enrichedClasses: [],
+			classes: { ScriptSlider: { description: "Slider component", category: "component", methods: [{ name: "set", returnType: "undefined", description: "Set property", parameters: [] }] } },
+		});
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "script", "show", "Components.Knob1", "--agent"],
+			getCliCommands(),
+			dataLoader,
+			connection,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") expect(result.payload).toMatchObject({ ok: true, value: { api: { class: "ScriptSlider", methods: ["ScriptSlider.set"] } } });
 	});
 
 	it("classifies direct HISE API envelope failures", async () => {

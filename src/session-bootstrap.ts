@@ -74,7 +74,7 @@ export function createSession({
 	session.cwd = cwd ?? (typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null);
 	if (getModuleList) session.getModuleList = getModuleList;
 	if (getComponentProperties) session.getComponentProperties = getComponentProperties;
-	session.registerMode("script", (ctx) => new ScriptMode(ctx, completionEngine));
+	session.registerMode("script", (ctx) => new ScriptMode(ctx, completionEngine, getScriptingApi?.() ?? null));
 	session.registerMode("inspect", () => new InspectMode(completionEngine));
 	session.registerMode(
 		"project",

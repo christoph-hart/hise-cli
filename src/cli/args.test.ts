@@ -73,6 +73,16 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses which queries as JSON output", () => {
+		const result = parseCliArgs(["node", "hise-cli", "which", "edit", "onInit", "from", "file", "--limit", "1"], getCliCommands());
+		expect(result.kind).toBe("which");
+		if (result.kind === "which") {
+			expect(result.query).toBe("edit onInit from file");
+			expect(result.limit).toBe(1);
+			expect(result.output.json).toBe(true);
+		}
+	});
+
 	it("parses select as JSON output", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-status", "--select", "value.connected"], getCliCommands());
 		expect(result.kind).toBe("status");
@@ -241,6 +251,27 @@ describe("script direct subcommands", () => {
 			expect(result.command.compile).toBe(false);
 			expect(result.command.source).toEqual({ type: "file", path: "onInit.js" });
 		}
+	});
+
+	it("parses script diagnose", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "diagnose", "--module-id", "Interface", "--file-path", "Scripts/UI.js", "--async"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api") {
+			expect(result.command).toEqual({ action: "diagnose", moduleId: "Interface", filePath: "Scripts/UI.js", async: true });
+		}
+	});
+
+	it("parses script show tree filters", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "show", "tree", "Knob", "--symbols-only", "--format", "flat", "--limit", "20"], getCliCommands());
+		expect(result.kind).toBe("script-api");
+		if (result.kind === "script-api") {
+			expect(result.command).toEqual({ action: "show", moduleId: "Interface", target: "tree", filters: { symbolsOnly: true, search: "Knob", format: "flat", limit: 20 } });
+		}
+	});
+
+	it("rejects script show tree positional and explicit search", () => {
+		const result = parseCliArgs(["node", "hise-cli", "script", "show", "tree", "Knob", "--search", "Slider"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "script show tree accepts either a positional search or --search, not both" });
 	});
 
 	it("rejects script set without exactly one source", () => {

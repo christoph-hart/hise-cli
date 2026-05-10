@@ -10,6 +10,9 @@ import { tokenizeSlash } from "../highlight/slash.js";
 import type { CompletionResult, Mode, SessionContext } from "./mode.js";
 import { MODE_ACCENTS } from "./mode.js";
 import type { CompletionEngine } from "../completion/engine.js";
+import type { ScriptingApi } from "../data.js";
+import type { TreeNode } from "../result.js";
+import { defaultScriptShowFilters, executeScriptShow, fetchScriptTree, parseScriptShowTokens, scriptTreeToTreeNode, splitScriptShowInput } from "./script-symbols.js";
 
 const MIDI_PROCESSOR_CALLBACKS = [
 	"onNoteOn",
@@ -25,10 +28,13 @@ export class ScriptMode implements Mode {
 	readonly accent = MODE_ACCENTS.script;
 	private processorIdValue: string;
 	private readonly completionEngine: CompletionEngine | null;
+ 	private readonly scriptingApi: ScriptingApi | null;
+ 	private symbolTreeRoot: TreeNode | null = null;
 
-	constructor(processorId = "Interface", completionEngine?: CompletionEngine) {
+	constructor(processorId = "Interface", completionEngine?: CompletionEngine, scriptingApi?: ScriptingApi | null) {
 		this.processorIdValue = processorId;
 		this.completionEngine = completionEngine ?? null;
+		this.scriptingApi = scriptingApi ?? null;
 	}
 
 	get processorId(): string {
@@ -45,9 +51,22 @@ export class ScriptMode implements Mode {
 		this.processorIdValue = path || "Interface";
 	}
 
+	getTree(): TreeNode | null {
+		return this.symbolTreeRoot ? structuredClone(this.symbolTreeRoot) : null;
+	}
+
+	invalidateTree(): void { this.symbolTreeRoot = null; }
+
+	async refreshSymbolTree(session: SessionContext): Promise<void> {
+		if (!session.connection) return;
+		const response = await fetchScriptTree(session.connection, this.processorId, { ...defaultScriptShowFilters(), symbolsOnly: true });
+		this.symbolTreeRoot = "value" in response ? scriptTreeToTreeNode(this.processorId, response.value.tree ?? []) : null;
+	}
+
 	async onEnter(session: SessionContext): Promise<void> {
 		session.clearAllScriptCompilerState?.();
 		session.clearAllCaptureBuffers?.();
+		await this.refreshSymbolTree(session);
 	}
 
 	onExit(session: SessionContext): void {
@@ -66,6 +85,16 @@ export class ScriptMode implements Mode {
 		}
 
 		const activeCallback = session.getActiveScriptCallback?.(this.processorId) ?? null;
+		const trimmed = input.trim();
+		if (!activeCallback && /^show(?:\s|$)/.test(trimmed)) {
+			const parsedShow = parseScriptShowTokens(splitScriptShowInput(trimmed));
+			if ("error" in parsedShow) return errorResult(parsedShow.error);
+			return executeScriptShow(session.connection, this.processorId, parsedShow, {
+				forLlm: session.forLlm,
+				api: this.scriptingApi,
+				updateTree: (tree) => { this.symbolTreeRoot = tree; },
+			});
+		}
 		if (activeCallback) {
 			if (/^function\s+[A-Za-z_]\w*\s*\(/.test(input.trim())) {
 				return errorResult(

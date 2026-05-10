@@ -62,8 +62,8 @@ export const GENERATED_AGENT_CONTEXT = {
 				"Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.",
 				"For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.",
 				"If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.",
-				"Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations.",
-				"Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher."
+				"Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.",
+				"Prefer component-specific control callbacks using Component.setControlCallback(f) over a large global onControl dispatcher. HISE requires f to be an inline function reference with signature (component, value)."
 			],
 			"antiPatterns": [
 				{
@@ -84,11 +84,15 @@ export const GENERATED_AGENT_CONTEXT = {
 				},
 				{
 					"avoid": "Putting large implementation bodies directly into onInit.",
-					"prefer": "Keep onInit small and include external script files that can be edited and diagnosed separately."
+					"prefer": "Keep onInit small and include external script files that can be edited and diagnosed separately with script diagnose."
 				},
 				{
-					"avoid": "Building a large global onControl dispatcher.",
-					"prefer": "Assign component-specific callbacks with Component.setControlCallback(f)."
+					"avoid": "Building a large global onControl dispatcher or passing an anonymous regular function to setControlCallback.",
+					"prefer": "Define an inline function f(component, value) and assign it with Component.setControlCallback(f)."
+				},
+				{
+					"avoid": "Repeatedly compiling external script edits to discover one error at a time.",
+					"prefer": "Run hise-cli script diagnose --file-path Scripts/UI.js --agent before compiling."
 				}
 			],
 			"capabilities": [
@@ -459,6 +463,200 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli script compile --module-id Interface --agent"
 						}
+					]
+				},
+				{
+					"id": "script.diagnose",
+					"title": "Diagnose script source",
+					"purpose": "Run HISE shadow-parser diagnostics without recompiling or executing script code.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"diagnose",
+							"--module-id",
+							"Interface",
+							"--agent"
+						],
+						"display": "hise-cli script diagnose --module-id Interface --agent"
+					},
+					"tags": [
+						"script",
+						"diagnose",
+						"diagnostics",
+						"validation",
+						"shadow-parser"
+					],
+					"aliases": [
+						"shadow parse script",
+						"multi error diagnostics",
+						"validate script file",
+						"diagnose onInit"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 80
+					},
+					"examples": [
+						{
+							"title": "Diagnose Interface script processor",
+							"argv": [
+								"hise-cli",
+								"script",
+								"diagnose",
+								"--module-id",
+								"Interface",
+								"--agent"
+							],
+							"display": "hise-cli script diagnose --module-id Interface --agent"
+						},
+						{
+							"title": "Diagnose an external script file",
+							"argv": [
+								"hise-cli",
+								"script",
+								"diagnose",
+								"--file-path",
+								"Scripts/UI.js",
+								"--agent"
+							],
+							"display": "hise-cli script diagnose --file-path Scripts/UI.js --agent"
+						}
+					],
+					"notes": [
+						"Requires at least one prior successful compile.",
+						"Always reads the file from disk; save pending edits before calling.",
+						"Diagnostics with severity error return validation_error and exit code 5.",
+						"When editing external script files, run script diagnose before compiling unless the edit is small and you are confident it compiles.",
+						"The normal HISE compiler is fail-fast; diagnose can report multiple errors at once and can catch issues that would otherwise surface only at runtime."
+					]
+				},
+				{
+					"id": "script.show.tree",
+					"title": "Show compiled script symbol tree",
+					"purpose": "Inspect the currently compiled script symbol hierarchy with server-side filtering options.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"show",
+							"tree",
+							"--module-id",
+							"Interface",
+							"--symbols-only",
+							"--agent"
+						],
+						"display": "hise-cli script show tree --module-id Interface --symbols-only --agent"
+					},
+					"tags": [
+						"script",
+						"symbols",
+						"tree",
+						"inspect",
+						"compiled"
+					],
+					"aliases": [
+						"show script tree",
+						"inspect script symbols",
+						"list script variables",
+						"compiled symbol tree"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 90
+					},
+					"examples": [
+						{
+							"title": "Show a cheap symbol overview",
+							"argv": [
+								"hise-cli",
+								"script",
+								"show",
+								"tree",
+								"--module-id",
+								"Interface",
+								"--symbols-only",
+								"--agent"
+							],
+							"display": "hise-cli script show tree --module-id Interface --symbols-only --agent"
+						},
+						{
+							"title": "Search symbols server-side",
+							"argv": [
+								"hise-cli",
+								"script",
+								"show",
+								"tree",
+								"Knob",
+								"--module-id",
+								"Interface",
+								"--format",
+								"flat",
+								"--limit",
+								"20",
+								"--agent"
+							],
+							"display": "hise-cli script show tree Knob --module-id Interface --format flat --limit 20 --agent"
+						}
+					],
+					"notes": [
+						"The symbol tree reflects the last compiled script model; compile after source edits before relying on it.",
+						"Use --symbols-only for first-pass discovery. It preserves expression and dataType while omitting value and location.",
+						"Use positional search or --search to filter on the HISE side and avoid large JSON responses."
+					]
+				},
+				{
+					"id": "script.show.symbol",
+					"title": "Show one script symbol",
+					"purpose": "Inspect one compiled script symbol and include available API methods for its data type when known.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"show",
+							"Components.Knob1",
+							"--module-id",
+							"Interface",
+							"--agent"
+						],
+						"display": "hise-cli script show Components.Knob1 --module-id Interface --agent"
+					},
+					"tags": [
+						"script",
+						"symbols",
+						"inspect",
+						"methods",
+						"api"
+					],
+					"aliases": [
+						"show available methods on knob",
+						"inspect script variable",
+						"show symbol methods",
+						"inspect component reference"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 100
+					},
+					"examples": [
+						{
+							"title": "Inspect a component reference",
+							"argv": [
+								"hise-cli",
+								"script",
+								"show",
+								"Components.Knob1",
+								"--module-id",
+								"Interface",
+								"--agent"
+							],
+							"display": "hise-cli script show Components.Knob1 --module-id Interface --agent"
+						}
+					],
+					"notes": [
+						"Discover expressions first with script show tree --symbols-only.",
+						"API method enrichment uses the symbol dataType from the compiled script model.",
+						"The api.methods list contains fully qualified API expressions such as ScriptSlider.setControlCallback; pass one to hise-cli -api for full method documentation."
 					]
 				},
 				{

@@ -1006,6 +1006,8 @@ async function handleCompileCallbacks(
 	}
 
 	if (outcome.cleared) session.clearScriptCompilerState?.(outcome.processorId);
+	const scriptMode = session.getOrCreateMode("script");
+	if (scriptMode instanceof ScriptMode) await scriptMode.refreshSymbolTree(session);
 	session.markProjectTreeDirty?.();
 	const updated = outcome.updatedCallbacks.length > 0
 		? ` (${outcome.updatedCallbacks.join(", ")})`

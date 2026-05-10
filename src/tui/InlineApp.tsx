@@ -1213,6 +1213,8 @@ function InlineAppInner({ session, connection, scheme }: InnerProps): React.Reac
 			const ctxLabel = mode.contextLabel ?? "";
 			const moduleId = ctxLabel.split("/")[0] ?? "";
 			prefix = `DspNetwork Tree (${moduleId}.${tree.label})`;
+		} else if (mode.id === "script") {
+			prefix = `Script Symbol Tree (${tree.label})`;
 		} else {
 			prefix = "Tree";
 		}

@@ -9,6 +9,7 @@ import { CapturingHiseConnection } from "./capture.js";
 import { processCliOutputPayload, serializeCliOutput, type CliOutputPayload } from "./output.js";
 import { classifyTransportError, cliError } from "./errors.js";
 import { buildAgentContext } from "./agentContext.js";
+import { executeWhich } from "./which.js";
 import { createSession, loadSessionDatasets } from "../session-bootstrap.js";
 import { createDefaultMockRuntime } from "../mock/runtime.js";
 import type { WizardHandlerRegistry } from "../engine/wizard/handler-registry.js";
@@ -47,6 +48,7 @@ import { readFile as fsReadFile } from "node:fs/promises";
 import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js";
 import { extractStatusPayload } from "../engine/modes/inspect.js";
 import { isEnvelopeResponse, isErrorResponse, isSuccessResponse } from "../engine/hise.js";
+import { executeScriptShow } from "../engine/modes/script-symbols.js";
 
 export interface CliCommandOptions {
 	connectionOverride?: HiseConnection;
@@ -70,7 +72,7 @@ export async function executeCliCommand(
 		return executeRunCommand(parsed, dataLoader, opts);
 	}
 	if (parsed.kind === "script-api") {
-		return executeScriptApiCommand(parsed.command, parsed.useMock, parsed.output, opts);
+		return executeScriptApiCommand(parsed.command, parsed.useMock, parsed.output, opts, dataLoader);
 	}
 	if (parsed.kind === "version") {
 		return finalizeJsonPayload({ ok: true, value: { version: cliVersion() } }, parsed.output);
@@ -80,6 +82,9 @@ export async function executeCliCommand(
 	}
 	if (parsed.kind === "agent-context") {
 		return finalizeJsonPayload({ ok: true, value: buildAgentContext() }, parsed.output);
+	}
+	if (parsed.kind === "which") {
+		return finalizeJsonPayload(executeWhich(parsed.query, parsed.limit), parsed.output);
 	}
 	if (parsed.kind !== "execute") return parsed;
 
@@ -485,6 +490,7 @@ async function executeScriptApiCommand(
 	useMock: boolean,
 	output: import("./args.js").CliOutputOptions,
 	opts: CliCommandOptions,
+	dataLoader: DataLoader,
 ): Promise<{ kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
 	const mockRuntime = !opts.connectionOverride && useMock ? createDefaultMockRuntime() : null;
 	const connection = opts.connectionOverride ?? mockRuntime?.connection ?? new HttpHiseConnection();
@@ -506,6 +512,22 @@ async function executeScriptApiCommand(
 		if (command.action === "compile") {
 			const response = await connection.post("/api/recompile", { moduleId: command.moduleId });
 			return finalizeJsonPayload(serializeHiseEnvelope(response), output);
+		}
+
+		if (command.action === "diagnose") {
+			const body: Record<string, unknown> = { moduleId: command.moduleId, async: command.async };
+			if (command.filePath) body.filePath = command.filePath;
+			const response = await connection.post("/api/diagnose_script", body);
+			return finalizeJsonPayload(serializeDiagnoseEnvelope(response), output);
+		}
+
+		if (command.action === "show") {
+			const api = await dataLoader.loadScriptingApi().catch(() => null);
+			const showCommand = command.target === "tree"
+				? { kind: "tree" as const, filters: command.filters }
+				: { kind: "symbol" as const, expression: command.target };
+			const result = await executeScriptShow(connection, command.moduleId, showCommand, { forLlm: true, api });
+			return finalizeJsonPayload(serializeCliOutput("script", result), output);
 		}
 
 		const callbacks = await readScriptCallbacks(command);
@@ -551,6 +573,34 @@ async function readScriptCallbacks(
 	} catch (err) {
 		return { error: `Failed to read script source: ${err instanceof Error ? err.message : String(err)}` };
 	}
+}
+
+function serializeDiagnoseEnvelope(response: import("../engine/hise.js").HiseResponse): CliOutputPayload {
+	if (isErrorResponse(response)) return cliError(classifyTransportError(response.message), response.message);
+	if (!isEnvelopeResponse(response)) return cliError("hise_api_error", "Unexpected response from HISE");
+	if (!response.success || response.errors.length > 0) {
+		const error = response.errors.length > 0
+			? response.errors.map((e) => e.callstack.length > 0 ? `${e.errorMessage}\n${e.callstack.join("\n")}` : e.errorMessage).join("\n")
+			: String(response.result ?? "diagnose_script failed");
+		return cliError("hise_api_error", error);
+	}
+
+	const { success: _success, logs, errors: _errors, ...value } = response as typeof response & { diagnostics?: Array<{ severity?: string }> };
+	const diagnostics = Array.isArray(value.diagnostics) ? value.diagnostics : [];
+	const hasErrors = diagnostics.some((diagnostic) => diagnostic && typeof diagnostic === "object" && "severity" in diagnostic && diagnostic.severity === "error");
+	if (hasErrors) {
+		return {
+			ok: false,
+			code: "validation_error",
+			error: "Script diagnostics found errors",
+			value,
+			...(logs.length > 0 ? { logs } : {}),
+		};
+	}
+
+	const payload: { ok: true; value: Record<string, unknown>; logs?: string[] } = { ok: true, value };
+	if (logs.length > 0) payload.logs = logs;
+	return payload as CliOutputPayload;
 }
 
 function serializeHiseEnvelope(response: import("../engine/hise.js").HiseResponse): CliOutputPayload {

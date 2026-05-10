@@ -24,6 +24,7 @@ USAGE
   hise-cli -wizard <subcommand>             Wizard operations
   hise-cli diagnose <filepath>              Diagnose HiseScript file
   hise-cli agent-context [--pretty]         Emit structured CLI context for agents
+  hise-cli which "<intent>"                  Find the command for a capability
   hise-cli update [--check]                 Self-update to latest GitHub release
   hise-cli -version                         Print the CLI version
   hise-cli -status                          Print CLI + HISE status
@@ -464,6 +465,22 @@ DESCRIPTION
   Emits JSON describing agent-safe flags, error exit codes, and authored
   capability recipes generated from docs/agent-context/*.yaml. This command
   does not require a running HISE instance.`,
+
+	which: `hise-cli which — find commands by capability
+
+SYNTAX
+  hise-cli which "<intent>" [--limit N]
+  hise-cli which [--limit N]
+
+DESCRIPTION
+  Searches the generated agent capability index using deterministic local
+  matching over titles, aliases, tags, purposes, and command tokens. It does
+  not call an AI service and does not require a running HISE instance.
+
+EXAMPLES
+  hise-cli which "edit onInit from file" --agent
+  hise-cli which "compile script" --limit 1 --agent
+  hise-cli which "evaluate expression from stdin" --agent`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 

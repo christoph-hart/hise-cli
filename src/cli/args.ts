@@ -1,4 +1,5 @@
 import type { CommandEntry } from "../engine/commands/registry.js";
+import type { ScriptShowFilters } from "../engine/modes/script-symbols.js";
 
 export type CliParseResult =
 	| { kind: "tui"; args: string[] }
@@ -11,6 +12,7 @@ export type CliParseResult =
 	| { kind: "version"; output: CliOutputOptions }
 	| { kind: "status"; output: CliOutputOptions }
 	| { kind: "agent-context"; output: CliOutputOptions }
+	| { kind: "which"; query: string; limit: number; output: CliOutputOptions }
 	| {
 		kind: "execute";
 		entry: CommandEntry;
@@ -33,7 +35,9 @@ export type ScriptApiCommand =
 	| { action: "repl"; moduleId: string; source: { type: "stdin" } }
 	| { action: "get"; moduleId: string; callback?: string }
 	| { action: "set"; moduleId: string; callback?: string; source: { type: "stdin" } | { type: "file"; path: string } | { type: "callbacks-json"; path: string }; compile: boolean }
-	| { action: "compile"; moduleId: string };
+	| { action: "compile"; moduleId: string }
+	| { action: "diagnose"; moduleId: string; filePath?: string; async: boolean }
+	| { action: "show"; moduleId: string; target: "tree" | string; filters: ScriptShowFilters };
 
 const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select", "--target"]);
 
@@ -218,8 +222,8 @@ function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlag
 function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseResult {
 	const action = args[1];
 	if (!action) return { kind: "error", message: "script requires a subcommand: repl | get | set | compile" };
-	if (action !== "repl" && action !== "get" && action !== "set" && action !== "compile") {
-		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, or compile.` };
+	if (action !== "repl" && action !== "get" && action !== "set" && action !== "compile" && action !== "diagnose" && action !== "show") {
+		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, compile, diagnose, or show.` };
 	}
 
 	const rest = args.slice(2);
@@ -250,6 +254,17 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 		return { kind: "script-api", command: { action, moduleId }, useMock, output };
 	}
 
+	if (action === "diagnose") {
+		const unexpected = findUnexpectedArgs(rest, new Set([...commonValueFlags, "--file-path"]), new Set([...commonBooleanFlags, "--async"]));
+		if (unexpected) return { kind: "error", message: `Unexpected argument for script diagnose: ${unexpected}` };
+		const filePath = readFlagValue(rest, "--file-path");
+		return { kind: "script-api", command: { action, moduleId, filePath, async: rest.includes("--async") }, useMock, output };
+	}
+
+	if (action === "show") {
+		return parseScriptShowApiArgs(rest, moduleId, useMock, output);
+	}
+
 	const unexpected = findUnexpectedArgs(
 		rest,
 		new Set([...commonValueFlags, "--callback", "--file", "--callbacks-json"]),
@@ -274,6 +289,65 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 			? { type: "file" as const, path: file }
 			: { type: "callbacks-json" as const, path: callbacksJson! };
 	return { kind: "script-api", command: { action, moduleId, callback, source, compile }, useMock, output };
+}
+
+function parseScriptShowApiArgs(rest: string[], moduleId: string, useMock: boolean, output: CliOutputOptions): CliParseResult {
+	const positional: Array<{ value: string; index: number }> = [];
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i]!;
+		if (arg === "--module-id" || arg === "--namespace" || arg === "--search" || arg === "--type" || arg === "--data-type" || arg === "--format" || arg === "--max-depth" || arg === "--limit") { i++; continue; }
+		if (arg.startsWith("--module-id=")) continue;
+		if (!arg.startsWith("--")) positional.push({ value: arg, index: i });
+	}
+	const target = positional[0]?.value ?? "";
+	if (!target) return { kind: "error", message: "script show requires tree or an expression" };
+	const targetIndex = positional[0]!.index;
+	const args = rest.filter((_, index) => index !== targetIndex);
+	const filters: ScriptShowFilters = { symbolsOnly: false };
+	let positionalSearch: string | undefined;
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (arg === "--module-id" || arg.startsWith("--module-id=")) {
+			if (arg === "--module-id") i++;
+			continue;
+		}
+		if (arg === "--mock") continue;
+		if (arg === "--symbols-only") { filters.symbolsOnly = true; continue; }
+		if (arg === "--namespace" || arg === "--search" || arg === "--type" || arg === "--data-type" || arg === "--format" || arg === "--max-depth" || arg === "--limit") {
+			const value = args[i + 1];
+			if (!value || value.startsWith("--")) return { kind: "error", message: `${arg} requires a value` };
+			const err = assignScriptShowFilter(filters, arg, value);
+			if (err) return { kind: "error", message: err };
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--")) return { kind: "error", message: `Unexpected argument for script show: ${arg}` };
+		if (target === "tree") positionalSearch = positionalSearch ? `${positionalSearch} ${arg}` : arg;
+		else return { kind: "error", message: `Unexpected argument for script show ${target}: ${arg}` };
+	}
+	if (positionalSearch && filters.search) return { kind: "error", message: "script show tree accepts either a positional search or --search, not both" };
+	if (positionalSearch) filters.search = positionalSearch;
+	return { kind: "script-api", command: { action: "show", moduleId, target, filters }, useMock, output };
+}
+
+function assignScriptShowFilter(filters: ScriptShowFilters, flag: string, value: string): string | null {
+	if (flag === "--namespace") filters.namespace = value;
+	else if (flag === "--search") filters.search = value;
+	else if (flag === "--type") filters.type = value;
+	else if (flag === "--data-type") filters.dataType = value;
+	else if (flag === "--format") {
+		if (value !== "tree" && value !== "flat") return "--format must be tree or flat";
+		filters.format = value;
+	} else if (flag === "--max-depth") {
+		const n = Number(value);
+		if (!Number.isInteger(n) || n < 0) return "--max-depth must be a non-negative integer";
+		filters.maxDepth = n;
+	} else if (flag === "--limit") {
+		const n = Number(value);
+		if (!Number.isInteger(n) || n < 1) return "--limit must be a positive integer";
+		filters.limit = n;
+	}
+	return null;
 }
 
 export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParseResult {
@@ -304,6 +378,30 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 
 	if (first === "agent-context") {
 		return { kind: "agent-context", output: { ...output, json: true } };
+	}
+
+	if (first === "which") {
+		const rest = args.slice(1);
+		let limit = 3;
+		const queryParts: string[] = [];
+		for (let i = 0; i < rest.length; i++) {
+			const arg = rest[i]!;
+			if (arg === "--limit") {
+				const value = rest[i + 1];
+				if (!value || value.startsWith("--")) return { kind: "error", message: "--limit requires a number" };
+				limit = Number(value);
+				if (!Number.isInteger(limit) || limit < 1) return { kind: "error", message: "--limit must be a positive integer" };
+				i++;
+				continue;
+			}
+			if (arg.startsWith("--limit=")) {
+				limit = Number(arg.slice("--limit=".length));
+				if (!Number.isInteger(limit) || limit < 1) return { kind: "error", message: "--limit must be a positive integer" };
+				continue;
+			}
+			queryParts.push(stripMatchedOuterQuotes(arg));
+		}
+		return { kind: "which", query: queryParts.join(" ").trim(), limit, output: { ...output, json: true } };
 	}
 
 	if (first === "script") {
@@ -422,7 +520,7 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	// (e.g. hise-cli -script --compile → /script /compile).
 	const tail = tailParts.map((p) => {
 		const stripped = stripMatchedOuterQuotes(p);
-		if (stripped.startsWith("--") && !stripped.includes("=") && entry.kind === "mode") {
+		if (stripped.startsWith("--") && !stripped.includes("=") && entry.kind === "mode" && !(entry.name === "script" && tailParts[0] === "show")) {
 			return "/" + stripped.slice(2);
 		}
 		return stripped;
