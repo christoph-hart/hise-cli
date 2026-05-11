@@ -563,8 +563,8 @@ describe("executeCliCommand", () => {
 		expect(result.kind).toBe("json");
 		if (result.kind === "json") {
 			expect(result.payload.ok).toBe(true);
-			expect((result.payload as { value: { modes: Array<{ id: string }>; capabilities: Array<{ id: string; examples?: unknown }> } }).value.modes.some((mode) => mode.id === "script")).toBe(true);
-			expect((result.payload as { value: { capabilities: Array<{ id: string; examples?: unknown }> } }).value.capabilities.find((capability) => capability.id === "script.compile")?.examples).toBeUndefined();
+			expect((result.payload as { value: { modes: Array<{ id: string }>; commands: Array<{ id: string; examples?: unknown }> } }).value.modes.some((mode) => mode.id === "script")).toBe(true);
+			expect((result.payload as { value: { commands: Array<{ id: string; examples?: unknown }> } }).value.commands.find((command) => command.id === "script.compile")?.examples).toBeUndefined();
 		}
 	});
 
@@ -582,9 +582,9 @@ describe("executeCliCommand", () => {
 		}
 	});
 
-	it("executes scoped agent-context capability queries with select", async () => {
+	it("executes scoped agent-context command queries with select", async () => {
 		const result = await executeCliCommand(
-			["node", "hise-cli", "agent-context", "--capability", "script.compile", "--select", "value.command.display"],
+			["node", "hise-cli", "agent-context", "--command", "script.compile", "--select", "value.command.display"],
 			getCliCommands(),
 			createDataLoader(),
 			new MockHiseConnection().setProbeResult(false),

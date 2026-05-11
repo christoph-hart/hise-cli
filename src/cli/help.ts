@@ -24,7 +24,7 @@ USAGE
   hise-cli -wizard <subcommand>             Wizard operations
   hise-cli diagnose <filepath>              Diagnose HiseScript file
   hise-cli agent-context [scope]            Emit structured CLI context for agents
-  hise-cli which "<intent>"                  Find the command for a capability
+  hise-cli which "<intent>"                  Find the command for an intent
   hise-cli mcp <tool-or-method>             Call the HISE MCP docs server
   hise-cli update [--check]                 Self-update to latest GitHub release
   hise-cli -version                         Print the CLI version
@@ -112,9 +112,16 @@ QUICK START
     - Prefer --stdin for mutations. Multiline stdin runs serially in builder
       mode and cannot switch modes.
     - "as <name>" is mandatory on add — every module gets an explicit alias.
+    - Explicit add IDs are exact. hise-cli never silently accepts HISE
+      auto-renaming for add ... as "Name"; duplicate IDs fail before mutation.
+      Use clone <target> <count> to create auto-renamed copies.
+    - Sound-producing SoundGenerators get a HISE-created SimpleEnvelope child
+      named DefaultEnvelope, DefaultEnvelope2, etc. Container-only generators
+      are exempt.
     - Without "to", add lands at the current cd context (root by default).
-    - Chain (.fx/.gain/...) is auto-resolved from the module's category;
-      only Modulators require explicit chain (e.g. "to Master.gain").
+    - Chain (.fx/...) is auto-resolved from the module's category;
+      only Modulators require explicit quoted chain names (e.g.
+      "to \"Master Chain\".\"Gain Modulation\"").
 
 MODULE TREE CONCEPTS
   HISE organises audio processing as a tree of modules. Every project has
@@ -124,8 +131,8 @@ MODULE TREE CONCEPTS
     children   Sound generators and containers (the main signal path)
     fx         Effect processors (filters, reverbs, delays)
     midi       MIDI processors (arpeggiators, scripts, transposes)
-    gain       Gain modulators (LFOs, envelopes on volume)
-    pitch      Pitch modulators (vibrato, glide)
+    "Gain Modulation"    Gain modulators (LFOs, envelopes on volume)
+    "Pitch Modulation"   Pitch modulators (vibrato, glide)
 
   Each module type can only be added to a compatible chain. The builder
   validates this locally using constrainer rules from the module database.
@@ -149,10 +156,14 @@ COMMANDS
       SoundGenerator types  → parent.children
       Effect types          → parent.fx
       MidiProcessor types   → parent.midi
-      Modulator types       → requires explicit .chain (e.g. .gain, .pitch)
+      Modulator types       → requires explicit chain (e.g. "Gain Modulation")
     Modules are appended to the end of the chain. Reordering is not
     supported via builder yet (set X.index is a stub — see PROPERTY WRITES).
-    Name collisions are auto-suffixed (e.g. "LFO", "LFO2", "LFO3").
+    Duplicate explicit IDs fail before mutation with duplicate_id and
+    candidate paths. Use clone <target> <count> for auto-renamed copies.
+    HISE automatically adds a SimpleEnvelope named DefaultEnvelope* to new
+    sound-producing SoundGenerators. To add LFOs to synth-specific chains, use
+    quoted chain paths, e.g. add LFO as "GainLFO" to Lead."Gain Modulation".
     Chained add disallows "to" — every clause lands at the cwd:
       "add SineSynth as \"L\", SineSynth as \"R\""
 
@@ -248,7 +259,7 @@ PROPERTY WRITES vs PARAMETER WRITES
 
 CONTEXT TARGET
   --target sets an implicit parent without entering the mode:
-    hise-cli -builder --target Master "add LFO as \"Shape\" to gain"
+    hise-cli -builder --target "Master Chain" "add LFO as \"Shape\" to \"Gain Modulation\""
 
 RESPONSE FORMAT
   Successful mutations return a diff summary: { ok: true, result: "+ModuleId" }
@@ -274,8 +285,8 @@ CHAIN TYPES (exhaustive list)
   children   Main signal path (sound generators, containers)
   fx         Effect processors
   midi       MIDI processors
-  gain       Gain/volume modulators
-  pitch      Pitch modulators
+  "Gain Modulation"    Gain/volume modulators
+  "Pitch Modulation"   Pitch modulators
 
 EXAMPLES
   hise-cli -builder "show tree"
@@ -283,7 +294,7 @@ EXAMPLES
   hise-cli -builder "show types Envelope"
   hise-cli -builder "show \"Master Chain\".Volume"      # parameter detail
   hise-cli -builder "add SimpleGain as \"Drive\" to Master Chain"
-  hise-cli -builder "add AHDSR as \"VolEnv\" to Drive.gain"
+  hise-cli -builder "add AHDSR as \"VolEnv\" to Drive.\"Gain Modulation\""
   hise-cli -builder "set \"Master Chain\".Volume -6"
   hise-cli -builder "set Drive.bypassed true"
   hise-cli -builder "set \"Script FX1\".network \"my_dsp\""
@@ -292,7 +303,7 @@ EXAMPLES
   hise-cli -builder "clone Drive 2"
   hise-cli -builder "remove Drive2, Drive3"
   hise-cli -builder "show \"Master Chain\""
-  hise-cli -builder --target Master "add LFO as \"Shape\" to gain, set Shape.Frequency 4.0"
+  hise-cli -builder "add LFO as \"Shape\" to \"Master Chain\".\"Gain Modulation\", set Shape.Frequency 4.0"
   hise-cli -builder "reset"`,
 
 	dsp: `hise-cli -dsp — scriptnode graph editor
@@ -362,7 +373,8 @@ GRAPH EDITING
   add <factory>.<node> as "<id>" [to <parent>]
     Add a node. Factory paths use dot notation (core.oscillator, filters.svf,
     control.pma). "as <id>" is mandatory. Without "to", adds to the current
-    cd path. Chained add lands all clauses at the cwd:
+    cd path. Duplicate explicit IDs fail before mutation with duplicate_id.
+    Chained add lands all clauses at the cwd:
       add core.gain as "L", core.gain as "R"
 
   remove <nodeId> [, ...]
@@ -463,32 +475,32 @@ EXAMPLES
 SYNTAX
   hise-cli agent-context
   hise-cli agent-context <mode>
-  hise-cli agent-context --capability <id>
-  hise-cli agent-context --list-capabilities
+  hise-cli agent-context --command <id>
+  hise-cli agent-context --list-commands
   hise-cli agent-context --pretty
 
 DESCRIPTION
 	Emits JSON describing agent-safe flags, error exit codes, and authored
-	capability recipes generated from docs/agent-context/*.yaml. This command
+	command recipes generated from docs/agent-context/*.yaml. This command
 	does not require a running HISE instance.
 
-	The default output is a compact manifest. Use a mode or capability query for
+	The default output is a compact manifest. Use a mode or command query for
 	full details when needed.
 
 EXAMPLES
   hise-cli agent-context --agent
   hise-cli agent-context script --agent
-  hise-cli agent-context --capability script.compile --agent
-  hise-cli agent-context --list-capabilities --select value[0].id`,
+  hise-cli agent-context --command script.compile --agent
+  hise-cli agent-context --list-commands --select value[0].id`,
 
-	which: `hise-cli which — find commands by capability
+	which: `hise-cli which — find commands by intent
 
 SYNTAX
   hise-cli which "<intent>" [--limit N]
   hise-cli which [--limit N]
 
 DESCRIPTION
-  Searches the generated agent capability index using deterministic local
+  Searches the generated agent command index using deterministic local
   matching over titles, aliases, tags, purposes, and command tokens. It does
   not call an AI service and does not require a running HISE instance.
 
@@ -642,6 +654,8 @@ GRAMMAR
   - Prefer --stdin for mutations. Multiline stdin runs serially in ui mode
     and cannot switch modes.
   - "as <name>" is mandatory on add (no positional names).
+  - Explicit add IDs are exact. Duplicate component IDs fail before mutation
+    with duplicate_id and candidate paths.
   - Reparent / reorder via property writes: set X.parent <path>,
     set X.index <n>. Both are real /api/ui/apply move ops.
   - Position / size as numeric arrays, not bare numbers:

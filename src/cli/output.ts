@@ -50,6 +50,12 @@ export function serializeCliOutput(
 			: { ok: true, value: result.value };
 	}
 
+	if (result.type === "error" && result.code) {
+		const payload = cliError(result.code, formatCommandError(result));
+		if (result.candidates) payload.candidates = result.candidates;
+		return payload;
+	}
+
 	const logs = "logs" in result && result.logs && result.logs.length > 0 ? result.logs : undefined;
 
 	return {
@@ -91,7 +97,9 @@ function serializeScriptOutput(
 	}
 
 	if (result.type === "error") {
-		return cliError("execution_error", formatCommandError(result));
+		const payload = cliError(result.code ?? "execution_error", formatCommandError(result));
+		if (result.candidates) payload.candidates = result.candidates;
+		return payload;
 	}
 
 	return null;

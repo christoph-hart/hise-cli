@@ -3,8 +3,1309 @@
 import type { AgentContextData } from "./agentContextTypes.js";
 
 export const GENERATED_AGENT_CONTEXT = {
-	"schemaVersion": 1,
+	"schemaVersion": 2,
+	"common": {
+		"syntax": [
+			{
+				"form": "hise-cli -<mode> \"<command>\"",
+				"purpose": "One-shot mode command for simple or read-only operations."
+			},
+			{
+				"form": "hise-cli -<mode> --stdin < commands.txt",
+				"purpose": "Preferred for non-trivial builder, UI, and DSP mutations; non-empty lines execute serially in the selected mode only."
+			},
+			{
+				"form": "hise-cli -<mode> --target <path> \"<command>\"",
+				"purpose": "Run a command with an implicit mode context. Prefer separated target syntax, especially for paths with spaces."
+			},
+			{
+				"form": "hise-cli agent-context <mode>",
+				"purpose": "Inspect structured agent-facing context for one mode."
+			},
+			{
+				"form": "hise-cli which \"<intent>\"",
+				"purpose": "Resolve a task description to a local command entry without AI or network lookup."
+			}
+		],
+		"grammar": {
+			"paths": [
+				"Bare IDs are resolved in the current mode context when supported by that mode.",
+				"Dotted paths address nested objects, chains, parameters, properties, or fields.",
+				"Quote path segments with spaces or reserved words."
+			],
+			"values": [
+				"Numbers support int, float, percent forms such as 50%, and strict 8-digit hex colors such as 0xAARRGGBB where accepted by the mode.",
+				"Booleans are true or false.",
+				"Arrays use bracket syntax, for example [0, 1, -1, -1]."
+			],
+			"chaining": [
+				"Comma chaining writes the verb once and inherits it across clauses.",
+				"Every clause still provides full arguments and full identifier paths."
+			],
+			"stdin": [
+				"For builder, UI, and DSP, multiline stdin executes non-empty lines serially in the same mode.",
+				"Use hise-cli --run for workflows that need to switch modes."
+			]
+		},
+		"inputPatterns": [
+			{
+				"pattern": "stdin",
+				"purpose": "Use for non-trivial builder/UI/DSP mutations and shell-sensitive values."
+			},
+			{
+				"pattern": "file",
+				"purpose": "Use for multi-line source edits such as script callbacks."
+			},
+			{
+				"pattern": "json-file",
+				"purpose": "Use for nested or structured payloads that would be hard to quote in argv."
+			},
+			{
+				"pattern": "argv",
+				"purpose": "Use for simple read-only commands and short scalar mutations."
+			}
+		],
+		"output": [
+			{
+				"flag": "--agent",
+				"purpose": "Implies JSON and compact output, and guarantees coded errors for agent callers."
+			},
+			{
+				"flag": "--select <path>",
+				"purpose": "Selects a payload field while preserving the JSON envelope."
+			},
+			{
+				"flag": "--compact",
+				"purpose": "Compacts the final output payload only; it does not change command behavior."
+			},
+			{
+				"flag": "--json",
+				"purpose": "Emits structured JSON output."
+			}
+		]
+	},
 	"modes": [
+		{
+			"id": "builder",
+			"title": "Builder module tree editor",
+			"summary": "Add, inspect, configure, clone, and remove HISE builder modules.",
+			"invocation": [
+				{
+					"title": "Invocation 1",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"show",
+						"tree",
+						"--agent"
+					],
+					"display": "hise-cli -builder show tree --agent"
+				},
+				{
+					"title": "Invocation 2",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"--stdin",
+						"--agent"
+					],
+					"display": "hise-cli -builder --stdin --agent"
+				},
+				{
+					"title": "Invocation 3",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"--target",
+						"Master",
+						"--stdin",
+						"--agent"
+					],
+					"display": "hise-cli -builder --target Master --stdin --agent"
+				}
+			],
+			"notes": [
+				"Prefer --stdin for mutations. Multiline stdin runs serially in builder mode and cannot switch modes.",
+				"add requires as <name>; every module gets an explicit alias.",
+				"Explicit add IDs are exact. hise-cli never silently accepts HISE auto-renaming for add ... as \"Name\"; duplicate IDs fail before mutation.",
+				"Use clone <target> <count> when you want HISE-style auto-renamed copies.",
+				"Without to, add lands at the current cd context, root by default."
+			],
+			"antiPatterns": [
+				{
+					"avoid": "Passing comma chains or quoted module paths through one long shell argument when stdin is available.",
+					"prefer": "hise-cli -builder --stdin --agent"
+				},
+				{
+					"avoid": "Assuming HISE-created DefaultEnvelope modules were added by hise-cli or need manual cleanup.",
+					"prefer": "Treat DefaultEnvelope* as HISE's automatic voice envelope for sound-producing generators."
+				},
+				{
+					"avoid": "Adding a modulator without an explicit modulation chain.",
+					"prefer": "Use a full target chain path such as Lead.\"Gain Modulation\" or Lead.\"Pitch Modulation\"."
+				}
+			],
+			"quickStart": [
+				{
+					"title": "Inspect the module tree",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"show",
+						"tree",
+						"--agent"
+					],
+					"display": "hise-cli -builder show tree --agent"
+				},
+				{
+					"title": "Search module types",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"show",
+						"types",
+						"script",
+						"--agent"
+					],
+					"display": "hise-cli -builder show types script --agent"
+				},
+				{
+					"title": "Add and configure an effect from stdin",
+					"argv": [
+						"hise-cli",
+						"-builder",
+						"--stdin",
+						"--agent"
+					],
+					"display": "hise-cli -builder --stdin --agent",
+					"stdin": "add SimpleGain as \"Drive\"\nset Drive.Gain -6"
+				}
+			],
+			"concepts": [
+				{
+					"id": "module-tree",
+					"title": "Module tree concepts",
+					"body": [
+						"HISE organises audio processing as a tree of modules.",
+						"Every project has a root SoundGenerator, typically \"Master Chain\", with child modules nested inside typed chains.",
+						"children is the main signal path for sound generators and containers.",
+						"fx holds effect processors such as filters, reverbs, delays, and ScriptFX.",
+						"midi holds MIDI processors such as scripts, transposers, arpeggiators, and MIDI players.",
+						"gain and pitch hold modulators for volume and pitch.",
+						"Each module type can only be added to a compatible chain; builder validates this locally using constrainer rules from the module database."
+					]
+				},
+				{
+					"id": "chain-resolution",
+					"title": "Chain auto-resolution",
+					"body": [
+						"SoundGenerator types resolve to parent.children.",
+						"Effect types resolve to parent.fx.",
+						"MidiProcessor types resolve to parent.midi.",
+						"Modulator types require an explicit chain, for example to \"Master Chain\".\"Gain Modulation\" or to Lead.\"Pitch Modulation\".",
+						"Modules are appended to the end of the chain.",
+						"Chained add disallows to; every clause lands at the current context."
+					]
+				},
+				{
+					"id": "automatic-envelope",
+					"title": "HISE automatic envelopes",
+					"body": [
+						"HISE automatically adds a SimpleEnvelope named DefaultEnvelope, DefaultEnvelope2, and so on to new sound-producing SoundGenerators.",
+						"Container-only generators are exempt.",
+						"Do not treat DefaultEnvelope* as user-authored hise-cli additions that need cleanup."
+					]
+				},
+				{
+					"id": "property-dispatch",
+					"title": "Property and parameter writes",
+					"body": [
+						"set <target>.bypassed maps to a set_bypassed operation.",
+						"set <target>.parent and set <target>.index map to move operations.",
+						"set <target>.samplemap maps to set_attributes with samplemap.",
+						"set <target>.effect maps to set_effect.",
+						"set <target>.network maps to DSP network initialization rather than builder apply.",
+						"set <target>.routing and set <target>.routing.send map to routing operations.",
+						"Other parameter tails map to set_attributes with coerced values."
+					]
+				},
+				{
+					"id": "network-provisioning",
+					"title": "DSP network provisioning",
+					"body": [
+						"Networks are created or loaded from builder mode with set <target>.network.",
+						"Bare names create a new network and fail if <name>.xml already exists.",
+						"Names ending in .xml load an existing network and fail if the file is missing.",
+						"Use the .xml form when you want to attach an existing network without accidentally creating a new one."
+					]
+				},
+				{
+					"id": "response-semantics",
+					"title": "Response semantics",
+					"body": [
+						"Successful mutations return a compact diff summary such as +ModuleId, -ModuleId, or *ModuleId.Param.",
+						"show <target> returns a compact module summary for LLM output and does not include parameter values.",
+						"Use show <target>.<param> or get <target>.<param> when range, default, or value are needed before setting."
+					]
+				}
+			],
+			"commands": [
+				{
+					"id": "builder.show.tree",
+					"title": "Show module tree",
+					"purpose": "Inspect the full module tree with types, IDs, and chain structure.",
+					"syntax": "show tree",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"show",
+							"tree",
+							"--agent"
+						],
+						"display": "hise-cli -builder show tree --agent"
+					},
+					"tags": [
+						"builder",
+						"show",
+						"tree",
+						"inspect",
+						"read-only"
+					],
+					"aliases": [
+						"show builder tree",
+						"inspect module tree",
+						"list modules"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 10
+					},
+					"examples": [
+						{
+							"title": "Inspect current modules",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"show",
+								"tree",
+								"--agent"
+							],
+							"display": "hise-cli -builder show tree --agent"
+						}
+					]
+				},
+				{
+					"id": "builder.show.types",
+					"title": "Show module types",
+					"purpose": "List available module types, optionally filtered by case-insensitive substring across module ID, type, and subtype.",
+					"syntax": "show types [<filter>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"show",
+							"types",
+							"--agent"
+						],
+						"display": "hise-cli -builder show types --agent"
+					},
+					"tags": [
+						"builder",
+						"show",
+						"types",
+						"inspect",
+						"read-only"
+					],
+					"aliases": [
+						"list module types",
+						"find module type",
+						"search builder types"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 20
+					},
+					"examples": [
+						{
+							"title": "Show all module types",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"show",
+								"types",
+								"--agent"
+							],
+							"display": "hise-cli -builder show types --agent"
+						},
+						{
+							"title": "Filter module types",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"show",
+								"types",
+								"Envelope",
+								"--agent"
+							],
+							"display": "hise-cli -builder show types Envelope --agent"
+						}
+					]
+				},
+				{
+					"id": "builder.show.module",
+					"title": "Show module summary",
+					"purpose": "Inspect one module instance with parameter IDs and modulation chains.",
+					"syntax": "show <target>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"show",
+							"Drive",
+							"--agent"
+						],
+						"display": "hise-cli -builder show Drive --agent"
+					},
+					"tags": [
+						"builder",
+						"show",
+						"module",
+						"inspect",
+						"read-only"
+					],
+					"aliases": [
+						"inspect module",
+						"show module",
+						"module parameters"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 30
+					},
+					"examples": [
+						{
+							"title": "Inspect a module with spaces in its path",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"show",
+								"Master Chain",
+								"--agent"
+							],
+							"display": "hise-cli -builder show \"Master Chain\" --agent"
+						}
+					],
+					"notes": [
+						"For LLM output this returns a compact summary; parameter values are not included.",
+						"Use show <target>.<param> or get <target>.<param> for values and ranges."
+					]
+				},
+				{
+					"id": "builder.show.parameter",
+					"title": "Show parameter detail",
+					"purpose": "Inspect parameter range, default value, current value, valueAsString, and items when available.",
+					"syntax": "show <target>.<param>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"show",
+							"Drive.Gain",
+							"--agent"
+						],
+						"display": "hise-cli -builder show Drive.Gain --agent"
+					},
+					"tags": [
+						"builder",
+						"show",
+						"parameter",
+						"range",
+						"default",
+						"read-only"
+					],
+					"aliases": [
+						"inspect parameter",
+						"show parameter range",
+						"get parameter metadata"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 40
+					},
+					"examples": [
+						{
+							"title": "Inspect gain parameter detail",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"show",
+								"Drive.Gain",
+								"--agent"
+							],
+							"display": "hise-cli -builder show Drive.Gain --agent"
+						}
+					],
+					"notes": [
+						"Use this before set when range or default behavior is unknown.",
+						"show only goes one level deep; sub-fields such as .range or .min belong to set logic, not show."
+					]
+				},
+				{
+					"id": "builder.add.module",
+					"title": "Add module",
+					"purpose": "Add a module with an exact explicit ID, optionally under a specific parent or chain.",
+					"syntax": "add <type> as \"<name>\" [to <parent>[.<chain>]]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"add",
+						"module",
+						"mutation",
+						"stdin"
+					],
+					"aliases": [
+						"add module",
+						"add synth",
+						"add effect",
+						"add lfo",
+						"create module"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 50
+					},
+					"examples": [
+						{
+							"title": "Add an effect",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "add SimpleGain as \"Drive\""
+						},
+						{
+							"title": "Add a synth and gain LFO",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "add SineSynth as \"Lead\"\nadd LFO as \"LeadGainLFO\" to Lead.\"Gain Modulation\""
+						}
+					],
+					"notes": [
+						"as <name> is mandatory.",
+						"Explicit IDs are exact; duplicate IDs fail before mutation with duplicate_id and candidate paths.",
+						"Sound-producing SoundGenerators get an automatic DefaultEnvelope* child from HISE.",
+						"Modulators require an explicit gain or pitch chain.",
+						"Chained add disallows to; every clause lands at the current context."
+					]
+				},
+				{
+					"id": "builder.set.parameter",
+					"title": "Set module parameter",
+					"purpose": "Set a module parameter or generic attribute value.",
+					"syntax": "set <target>.<param> <value>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"set",
+						"parameter",
+						"mutation"
+					],
+					"aliases": [
+						"set parameter",
+						"change module value",
+						"update parameter"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 60
+					},
+					"examples": [
+						{
+							"title": "Set gain",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Drive.Gain -6"
+						},
+						{
+							"title": "Set multiple full paths with comma chaining",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Lead.Volume -6, Lead.Pan 10"
+						}
+					],
+					"notes": [
+						"No to preposition; the value follows the path directly.",
+						"Inspect with show <target>.<param> first when range/default is unknown."
+					]
+				},
+				{
+					"id": "builder.set.bypassed",
+					"title": "Toggle module bypass",
+					"purpose": "Toggle a module bypass property through a builder property write.",
+					"syntax": "set <target>.bypassed <bool>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"set",
+						"bypassed",
+						"property",
+						"mutation"
+					],
+					"aliases": [
+						"bypass module",
+						"enable module",
+						"disable module"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 70
+					},
+					"examples": [
+						{
+							"title": "Bypass an effect",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Drive.bypassed true"
+						}
+					],
+					"notes": [
+						"Emits a set_bypassed operation, not a generic parameter write."
+					]
+				},
+				{
+					"id": "builder.set.routing",
+					"title": "Set module routing",
+					"purpose": "Configure a module routing matrix or routing preset.",
+					"syntax": "set <target>.routing <value>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"set",
+						"routing",
+						"channels",
+						"mutation"
+					],
+					"aliases": [
+						"set routing matrix",
+						"route channels",
+						"set stereo routing"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 80
+					},
+					"examples": [
+						{
+							"title": "Set explicit routing",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Synth1.routing [0, 1, -1, -1]"
+						},
+						{
+							"title": "Set routing preset",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Synth1.routing \"stereo\""
+						}
+					],
+					"notes": [
+						"Value may be an integer array such as [0, 1, -1, -1].",
+						"Array length must match the module source channel count; each entry is a destination channel index or -1.",
+						"Presets include stereo, stereo_2, stereo_3, all, and all_to_stereo.",
+						"set <target>.routing.send <array> writes the send-channel matrix."
+					]
+				},
+				{
+					"id": "builder.set.network",
+					"title": "Create or load DSP network",
+					"purpose": "Initialize a DspNetwork on a ScriptFX, ScriptSynth, or ScriptModulator host.",
+					"syntax": "set <target>.network \"<name>[.xml]\"",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"dsp",
+						"network",
+						"scriptnode",
+						"mutation"
+					],
+					"aliases": [
+						"create dsp network",
+						"load dsp network",
+						"attach scriptnode network",
+						"initialize dsp network"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 90
+					},
+					"examples": [
+						{
+							"title": "Create a new DSP network",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set \"Script FX1\".network \"my_dsp\""
+						},
+						{
+							"title": "Load an existing DSP network",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set \"Script FX1\".network \"my_dsp.xml\""
+						}
+					],
+					"notes": [
+						"Bare name creates a network and fails if <name>.xml already exists.",
+						".xml form loads an existing network and fails if missing.",
+						"Use .xml when attaching an existing network to avoid accidental creation."
+					]
+				},
+				{
+					"id": "builder.move.parent",
+					"title": "Reparent module",
+					"purpose": "Move a module to another parent or chain.",
+					"syntax": "set <target>.parent <path>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"move",
+						"parent",
+						"reparent",
+						"mutation"
+					],
+					"aliases": [
+						"move module",
+						"reparent module",
+						"change parent"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 100
+					},
+					"examples": [
+						{
+							"title": "Move effect to a chain",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Drive.parent \"Master Chain\".fx"
+						}
+					],
+					"notes": [
+						"Emits a move operation with target, parent, and optional chain.",
+						"The path can be a module ID, dotted path, or quoted string; chain index is auto-resolved from the path tail."
+					]
+				},
+				{
+					"id": "builder.move.index",
+					"title": "Reorder module",
+					"purpose": "Reorder a module within its current parent and chain.",
+					"syntax": "set <target>.index <n>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"--stdin",
+							"--agent"
+						],
+						"display": "hise-cli -builder --stdin --agent"
+					},
+					"tags": [
+						"builder",
+						"move",
+						"index",
+						"reorder",
+						"mutation"
+					],
+					"aliases": [
+						"reorder module",
+						"move index",
+						"change module order"
+					],
+					"contexts": [
+						"cli",
+						"stdin",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 110
+					},
+					"examples": [
+						{
+							"title": "Move a module to the front of its chain",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"--stdin",
+								"--agent"
+							],
+							"display": "hise-cli -builder --stdin --agent",
+							"stdin": "set Drive.index 0"
+						}
+					],
+					"notes": [
+						"HISE keeps the existing parent and chain when only index is specified."
+					]
+				},
+				{
+					"id": "builder.get.parameter",
+					"title": "Get parameter value",
+					"purpose": "Read one or more parameter or property values.",
+					"syntax": "get <target>.<param> [, ...]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"get",
+							"Drive.Gain",
+							"--agent"
+						],
+						"display": "hise-cli -builder get Drive.Gain --agent"
+					},
+					"tags": [
+						"builder",
+						"get",
+						"parameter",
+						"property",
+						"read-only"
+					],
+					"aliases": [
+						"get parameter",
+						"read parameter value",
+						"read module property"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 120
+					},
+					"examples": [
+						{
+							"title": "Read gain value",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"get",
+								"Drive.Gain",
+								"--agent"
+							],
+							"display": "hise-cli -builder get Drive.Gain --agent"
+						}
+					]
+				},
+				{
+					"id": "builder.clone.module",
+					"title": "Clone module",
+					"purpose": "Duplicate a module with children and parameters using HISE-style auto-renamed copies.",
+					"syntax": "clone <target> <count>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"clone",
+							"Drive",
+							"2",
+							"--agent"
+						],
+						"display": "hise-cli -builder clone Drive 2 --agent"
+					},
+					"tags": [
+						"builder",
+						"clone",
+						"duplicate",
+						"mutation"
+					],
+					"aliases": [
+						"clone module",
+						"duplicate module",
+						"create auto-renamed copies"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 130
+					},
+					"examples": [
+						{
+							"title": "Clone an effect twice",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"clone",
+								"Drive",
+								"2",
+								"--agent"
+							],
+							"display": "hise-cli -builder clone Drive 2 --agent"
+						}
+					],
+					"notes": [
+						"Count is a plain integer with no x-prefix.",
+						"clone Lead 3 creates three copies.",
+						"Use clone when you want auto-renamed copies; use add ... as \"Name\" when the ID must be exact."
+					]
+				},
+				{
+					"id": "builder.rename.module",
+					"title": "Rename module",
+					"purpose": "Change a module display name.",
+					"syntax": "rename <target> as \"<name>\"",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"rename",
+							"Drive",
+							"as",
+							"Drive2",
+							"--agent"
+						],
+						"display": "hise-cli -builder rename Drive as Drive2 --agent"
+					},
+					"tags": [
+						"builder",
+						"rename",
+						"mutation"
+					],
+					"aliases": [
+						"rename module",
+						"change module name"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 140
+					},
+					"examples": [
+						{
+							"title": "Rename a module",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"rename",
+								"Drive",
+								"as",
+								"Drive2",
+								"--agent"
+							],
+							"display": "hise-cli -builder rename Drive as Drive2 --agent"
+						}
+					],
+					"notes": [
+						"The preposition is as, not to."
+					]
+				},
+				{
+					"id": "builder.remove.module",
+					"title": "Remove module",
+					"purpose": "Remove modules and all their children.",
+					"syntax": "remove <target> [, <target>...]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"remove",
+							"Drive",
+							"--agent"
+						],
+						"display": "hise-cli -builder remove Drive --agent"
+					},
+					"tags": [
+						"builder",
+						"remove",
+						"delete",
+						"mutation"
+					],
+					"aliases": [
+						"remove module",
+						"delete module"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "high",
+					"danger": true,
+					"help": {
+						"visibility": "common",
+						"order": 150
+					},
+					"examples": [
+						{
+							"title": "Remove cloned modules",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"remove",
+								"Drive2",
+								"Drive3",
+								"--agent"
+							],
+							"display": "hise-cli -builder remove Drive2 Drive3 --agent"
+						}
+					],
+					"notes": [
+						"Chained remove expects every clause to be a full path.",
+						"Removing a module removes all its children."
+					]
+				},
+				{
+					"id": "builder.navigate",
+					"title": "Navigate builder context",
+					"purpose": "Navigate the builder tree in TUI or run scripts.",
+					"syntax": "cd <path> / ls / pwd",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"pwd",
+							"--agent"
+						],
+						"display": "hise-cli -builder pwd --agent"
+					},
+					"tags": [
+						"builder",
+						"navigation",
+						"tui",
+						"run"
+					],
+					"aliases": [
+						"cd builder tree",
+						"list current module",
+						"print builder path"
+					],
+					"contexts": [
+						"tui",
+						"run"
+					],
+					"agentRelevance": "low",
+					"danger": false,
+					"help": {
+						"visibility": "hidden",
+						"order": 900
+					},
+					"examples": [
+						{
+							"title": "Print current builder path",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"pwd",
+								"--agent"
+							],
+							"display": "hise-cli -builder pwd --agent"
+						}
+					],
+					"notes": [
+						"cd Master Chain sets context so subsequent commands target that module.",
+						"cd .. steps out; cd / jumps to root; ls lists children; pwd shows current path.",
+						"One-shot agents should usually prefer explicit paths or --target instead of navigation state."
+					]
+				},
+				{
+					"id": "builder.reset",
+					"title": "Reset module tree",
+					"purpose": "Wipe the entire module tree and clear undo history.",
+					"syntax": "reset",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"-builder",
+							"reset",
+							"--agent"
+						],
+						"display": "hise-cli -builder reset --agent"
+					},
+					"tags": [
+						"builder",
+						"reset",
+						"destructive",
+						"mutation"
+					],
+					"aliases": [
+						"reset builder tree",
+						"clear module tree",
+						"new module tree"
+					],
+					"contexts": [
+						"cli",
+						"tui",
+						"run"
+					],
+					"agentRelevance": "low",
+					"danger": true,
+					"help": {
+						"visibility": "hidden",
+						"order": 910
+					},
+					"examples": [
+						{
+							"title": "Reset the module tree",
+							"argv": [
+								"hise-cli",
+								"-builder",
+								"reset",
+								"--agent"
+							],
+							"display": "hise-cli -builder reset --agent"
+						}
+					],
+					"notes": [
+						"Irreversible from the CLI perspective; only run when explicitly requested."
+					]
+				}
+			],
+			"types": {
+				"chainTypes": {
+					"children": "Main signal path for sound generators and containers.",
+					"fx": "Effect processor chain.",
+					"midi": "MIDI processor chain.",
+					"Gain Modulation": "Gain or volume modulator chain.",
+					"Pitch Modulation": "Pitch modulator chain."
+				},
+				"commonModuleTypes": {
+					"SoundGenerators": [
+						"SineSynth",
+						"WaveSynth",
+						"Noise",
+						"StreamingSampler",
+						"SynthGroup",
+						"GlobalModulatorContainer",
+						"SilentSynth"
+					],
+					"Effects": [
+						"SimpleGain",
+						"SimpleReverb",
+						"HardcodedMasterFX",
+						"PolyphonicFilter",
+						"Convolution",
+						"StereoFX",
+						"Dynamics",
+						"Saturator",
+						"Delay",
+						"ShapeFX",
+						"ScriptFX"
+					],
+					"MidiProcessors": [
+						"ScriptProcessor",
+						"Transposer",
+						"Arpeggiator",
+						"MidiPlayer"
+					],
+					"Modulators": [
+						"LFO",
+						"AHDSR",
+						"Velocity",
+						"TableEnvelope",
+						"Constant",
+						"Random",
+						"SimpleEnvelope",
+						"MidiController",
+						"KeyNumber"
+					]
+				},
+				"routingPresets": [
+					"stereo",
+					"stereo_2",
+					"stereo_3",
+					"all",
+					"all_to_stereo"
+				]
+			}
+		},
 		{
 			"id": "mcp",
 			"title": "HISE MCP documentation bridge",
@@ -68,7 +1369,9 @@ export const GENERATED_AGENT_CONTEXT = {
 					"prefer": "hise-cli mcp <tool> --args-stdin --agent"
 				}
 			],
-			"capabilities": [
+			"quickStart": [],
+			"concepts": [],
+			"commands": [
 				{
 					"id": "mcp.tool.fields",
 					"title": "Call an MCP tool with field flags",
@@ -128,7 +1431,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli mcp explore_hise --query sampler --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.tool.json",
@@ -172,7 +1481,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							"display": "hise-cli mcp explore_hise --args-stdin --agent",
 							"stdin": "{\"query\":\"sampler\",\"source\":\"docs\"}"
 						}
-					]
+					],
+					"syntax": "hise-cli mcp explore_hise --args-stdin --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.raw.method",
@@ -227,7 +1542,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.search.docs",
@@ -280,7 +1601,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.explore.semantic",
@@ -340,7 +1667,13 @@ export const GENERATED_AGENT_CONTEXT = {
 					],
 					"notes": [
 						"The first semantic call can be slower if the MCP server is warming up an embedding model."
-					]
+					],
+					"syntax": "hise-cli mcp explore_hise --query \"create slider callback\" --domain ui --source docs --timeout 180 --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.query.api",
@@ -385,7 +1718,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "mcp.tui.mode",
@@ -432,9 +1771,16 @@ export const GENERATED_AGENT_CONTEXT = {
 					"notes": [
 						"In TUI mode, autocomplete and syntax highlighting apply only to the first token.",
 						"Text and resource responses render as markdown for humans."
-					]
+					],
+					"syntax": "hise-cli -mcp explore_hise sampler --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				}
-			]
+			],
+			"types": {}
 		},
 		{
 			"id": "script",
@@ -546,7 +1892,9 @@ export const GENERATED_AGENT_CONTEXT = {
 					"prefer": "Use source control or editor undo for files, and use rollback only as protection for HISE callback slots."
 				}
 			],
-			"capabilities": [
+			"quickStart": [],
+			"concepts": [],
+			"commands": [
 				{
 					"id": "script.repl.stdin",
 					"title": "Evaluate REPL expression from stdin",
@@ -598,7 +1946,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"REPL evaluation cannot create persistent declarations in the script engine.",
 						"Use REPL for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.",
 						"Prefer dedicated hise-cli modes for UI, builder, DSP, project, or asset changes when available."
-					]
+					],
+					"syntax": "hise-cli script repl --module-id Interface --stdin --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.get.callback",
@@ -661,7 +2015,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli script get --module-id Interface --callback onControl --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli script get --module-id Interface --callback onInit --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.get.all",
@@ -707,7 +2067,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli script get --module-id Interface --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli script get --module-id Interface --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.set.callback.stdin",
@@ -765,7 +2131,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"Use --no-compile when staging callback changes without recompilation.",
 						"By default, compile failures restore the previous HISE callback slot and return rollback status.",
 						"Use --no-rollback only when intentionally preserving invalid callback source in HISE."
-					]
+					],
+					"syntax": "hise-cli script set --module-id Interface --callback onInit --stdin --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.add-file",
@@ -823,7 +2195,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"If the file exists but is not included, it preserves the file, appends the include, compiles, and may warn if the expected namespace was not found.",
 						"After editing the returned absolutePath, run script diagnose --file-path <absolutePath> --agent before compiling further changes.",
 						"This command updates onInit with callback-slot rollback, but it does not rollback file edits."
-					]
+					],
+					"syntax": "hise-cli script add-file UI/MyFile.js --module-id Interface --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.set.callback.file",
@@ -882,7 +2260,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"This is the preferred path for multi-line callback edits.",
 						"Rollback restores the HISE callback slot if compilation fails, but it does not modify the source file.",
 						"For callbacks that include external files, diagnose those external files before compiling."
-					]
+					],
+					"syntax": "hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.set.callbacks-json",
@@ -936,7 +2320,13 @@ export const GENERATED_AGENT_CONTEXT = {
 					"notes": [
 						"Rollback snapshots only the callbacks present in the JSON object.",
 						"Use --no-rollback only when intentionally preserving invalid callback source in HISE."
-					]
+					],
+					"syntax": "hise-cli script set --module-id Interface --callbacks-json ./callbacks.json --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.compile",
@@ -980,7 +2370,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli script compile --module-id Interface --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli script compile --module-id Interface --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.diagnose",
@@ -1046,7 +2442,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"Diagnostics with severity error return validation_error and exit code 5.",
 						"When editing external script files, run script diagnose before compiling unless the edit is small and you are confident it compiles.",
 						"The normal HISE compiler is fail-fast; diagnose can report multiple errors at once and can catch issues that would otherwise surface only at runtime."
-					]
+					],
+					"syntax": "hise-cli script diagnose --module-id Interface --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.show.tree",
@@ -1120,7 +2522,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"The symbol tree reflects the last compiled script model; compile after source edits before relying on it.",
 						"Use --symbols-only for first-pass discovery. It preserves expression and dataType while omitting value and location.",
 						"Use positional search or --search to filter on the HISE side and avoid large JSON responses."
-					]
+					],
+					"syntax": "hise-cli script show tree --module-id Interface --symbols-only --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.show.symbol",
@@ -1174,7 +2582,13 @@ export const GENERATED_AGENT_CONTEXT = {
 						"Discover expressions first with script show tree --symbols-only.",
 						"API method enrichment uses the symbol dataType from the compiled script model.",
 						"The api.methods list contains fully qualified API expressions such as ScriptSlider.setControlCallback; pass one to hise-cli -api for full method documentation."
-					]
+					],
+					"syntax": "hise-cli script show Components.Knob1 --module-id Interface --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "script.legacy.repl",
@@ -1204,9 +2618,16 @@ export const GENERATED_AGENT_CONTEXT = {
 					},
 					"notes": [
 						"Accepted for short expressions, but stdin is preferred for agent workflows."
-					]
+					],
+					"syntax": "hise-cli -script \"Engine.getSampleRate()\" --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				}
-			]
+			],
+			"types": {}
 		},
 		{
 			"id": "ui",
@@ -1238,6 +2659,7 @@ export const GENERATED_AGENT_CONTEXT = {
 			"notes": [
 				"Use --stdin by default for UI mutations, especially quoted names, array values, comma chains, and multi-step edits.",
 				"Multiline stdin runs each non-empty line serially in UI mode only; use hise-cli --run for workflows that need to switch modes.",
+				"add ... as \"Name\" creates exactly Name or fails before mutation with duplicate_id and candidate paths; hise-cli never silently accepts auto-renaming for explicit IDs.",
 				"connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component."
 			],
 			"antiPatterns": [
@@ -1250,7 +2672,9 @@ export const GENERATED_AGENT_CONTEXT = {
 					"prefer": "hise-cli -ui --stdin --agent"
 				}
 			],
-			"capabilities": [
+			"quickStart": [],
+			"concepts": [],
+			"commands": [
 				{
 					"id": "ui.show.tree",
 					"title": "Show UI component tree",
@@ -1291,7 +2715,13 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli -ui show tree --agent"
 						}
-					]
+					],
+					"syntax": "hise-cli -ui show tree --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				},
 				{
 					"id": "ui.connect.control",
@@ -1366,9 +2796,16 @@ export const GENERATED_AGENT_CONTEXT = {
 						"ScriptComboBox requires a builder parameter with type ComboBox and matched copies newline-separated items.",
 						"ScriptButton requires a builder parameter with type Button and matched copies the parameter id into text plus defaultValue.",
 						"matched uses /api/builder/tree?verbose=true metadata."
-					]
+					],
+					"syntax": "hise-cli -ui --stdin --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				}
-			]
+			],
+			"types": {}
 		}
 	]
 } as const satisfies AgentContextData;

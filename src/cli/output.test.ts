@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { processCliOutputPayload } from "./output.js";
+import { processCliOutputPayload, serializeCliOutput } from "./output.js";
 import { cliError, exitCodeForPayload } from "./errors.js";
 
 describe("processCliOutputPayload", () => {
@@ -48,6 +48,22 @@ describe("processCliOutputPayload", () => {
 		expect(result).toEqual({ ok: false, code: "execution_error", error: "Something failed" });
 	});
 
+	it("serializes structured command error metadata", () => {
+		const result = serializeCliOutput("builder", {
+			type: "error",
+			code: "duplicate_id",
+			message: "ID already exists: Lead",
+			candidates: ["Master.Lead"],
+		});
+
+		expect(result).toEqual({
+			ok: false,
+			code: "duplicate_id",
+			error: "ID already exists: Lead",
+			candidates: ["Master.Lead"],
+		});
+	});
+
 	it("maps typed error payloads to process exit codes", () => {
 		expect(exitCodeForPayload({ ok: true, value: "ok" })).toBe(0);
 		expect(exitCodeForPayload(cliError("execution_error", "failed"))).toBe(1);
@@ -56,6 +72,7 @@ describe("processCliOutputPayload", () => {
 		expect(exitCodeForPayload(cliError("hise_unavailable", "offline"))).toBe(3);
 		expect(exitCodeForPayload(cliError("hise_api_error", "api failed"))).toBe(4);
 		expect(exitCodeForPayload(cliError("validation_error", "invalid"))).toBe(5);
+		expect(exitCodeForPayload(cliError("duplicate_id", "duplicate"))).toBe(2);
 		expect(exitCodeForPayload(cliError("expectation_failed", "expected"))).toBe(6);
 	});
 });

@@ -36,7 +36,25 @@ describe("executeWhich", () => {
 		expect(result).toEqual({
 			ok: false,
 			code: "usage_error",
-			error: "No matching hise-cli capability found for: flurb blarg nonsense",
+			error: "No matching hise-cli command found for: flurb blarg nonsense",
 		});
+	});
+
+	it("finds builder network provisioning", () => {
+		const result = executeWhich("create dsp network on script fx", 1);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value[0]?.id).toBe("builder.set.network");
+		}
+	});
+
+	it("finds builder routing matrix commands", () => {
+		const result = executeWhich("routing matrix", 1);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value[0]?.id).toBe("builder.set.routing");
+		}
 	});
 });

@@ -181,7 +181,7 @@ Module tree editor — add, configure, and inspect the HISE module tree.
 ## Features
 
 - **Comma chaining**: \`set Lead.Volume -6, Lead.Pan 10\` (every clause gives its full path)
-- **Chain auto-resolution**: SoundGenerators→children, Effects→fx, Midi→midi
+- **Chain auto-resolution**: SoundGenerators→children, Effects→fx, Midi→midi; Modulators require explicit quoted chain names such as "Gain Modulation" or "Pitch Modulation"
 - **Tab completion**: module types, instance IDs, parameter names, value enums
 - **Tree sidebar**: Ctrl+B to toggle visual module tree`,
 

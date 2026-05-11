@@ -35,6 +35,30 @@ describe("builder-ops — add", () => {
 		expect(ops[0]!.type).toBe("SineSynth");
 		expect(ops[0]!.name).toBe("Lead");
 	});
+
+	it("uses the owner of an explicitly addressed nested chain", () => {
+		const tree: TreeNode = {
+			id: "Master Chain",
+			label: "Master Chain",
+			nodeKind: "module",
+			type: "SynthChain",
+			children: [
+				{ id: "Gain Modulation", label: "Gain Modulation", nodeKind: "chain", children: [] },
+				{
+					id: "Lead",
+					label: "Lead",
+					nodeKind: "module",
+					type: "SineSynth",
+					children: [{ id: "Gain Modulation", label: "Gain Modulation", nodeKind: "chain", children: [] }],
+				},
+			],
+		};
+		const cmd = parseOk('add LFO as "L" to Lead."Gain Modulation"');
+		const result = commandToOps(cmd, tree, NULL_MODULES, []);
+
+		if ("error" in result) throw new Error(result.error);
+		expect(result.ops[0]).toMatchObject({ op: "add", parent: "Lead", name: "L" });
+	});
 });
 
 describe("builder-ops — remove", () => {

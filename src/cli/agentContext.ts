@@ -1,24 +1,25 @@
 import { GENERATED_AGENT_CONTEXT } from "./generated-agent-context.js";
 import { CLI_ERROR_EXIT_CODES, cliError, type CliErrorPayload } from "./errors.js";
 import type { AgentContextQuery } from "./args.js";
-import type { AgentCapability, AgentContextMode } from "./agentContextTypes.js";
+import type { AgentCommand, AgentContextMode } from "./agentContextTypes.js";
 
 export function buildAgentContext(query: AgentContextQuery = { type: "manifest" }): { ok: true; value: object } | CliErrorPayload {
 	if (query.type === "manifest") return { ok: true, value: buildAgentContextManifest() };
-	if (query.type === "capability-index") return { ok: true, value: buildAgentCapabilityIndex() };
+	if (query.type === "command-index") return { ok: true, value: buildAgentCommandIndex() };
 	if (query.type === "mode") {
 		const mode = getAgentContextMode(query.modeId);
 		if (!mode) return cliError("usage_error", `Unknown agent-context mode: ${query.modeId}`);
 		return { ok: true, value: mode };
 	}
-	const capability = getAgentCapability(query.id);
-	if (!capability) return cliError("usage_error", `Unknown agent-context capability: ${query.id}`);
-	return { ok: true, value: capability };
+	const command = getAgentCommand(query.id);
+	if (!command) return cliError("usage_error", `Unknown agent-context command: ${query.id}`);
+	return { ok: true, value: command };
 }
 
 export function buildAgentContextManifest(): object {
 	return {
 		schemaVersion: GENERATED_AGENT_CONTEXT.schemaVersion,
+		common: GENERATED_AGENT_CONTEXT.common,
 		cli: cliInfo(),
 		globalFlags: globalFlags(),
 		inputPatterns: inputPatterns(),
@@ -27,26 +28,26 @@ export function buildAgentContextManifest(): object {
 			id: mode.id,
 			title: mode.title,
 			summary: mode.summary,
-			capabilityCount: mode.capabilities.length,
+			commandCount: mode.commands.length,
 		})),
-		capabilities: buildAgentCapabilityIndex(),
+		commands: buildAgentCommandIndex(),
 		lookup: {
 			mode: "hise-cli agent-context <mode>",
-			capability: "hise-cli agent-context --capability <id>",
-			capabilityIndex: "hise-cli agent-context --list-capabilities",
+			command: "hise-cli agent-context --command <id>",
+			commandIndex: "hise-cli agent-context --list-commands",
 			intent: "hise-cli which \"<intent>\"",
 		},
 	};
 }
 
-export function buildAgentCapabilityIndex(): object[] {
-	return GENERATED_AGENT_CONTEXT.modes.flatMap((mode) => mode.capabilities.map((capability) => ({
-		id: capability.id,
+export function buildAgentCommandIndex(): object[] {
+	return GENERATED_AGENT_CONTEXT.modes.flatMap((mode) => mode.commands.map((command) => ({
+		id: command.id,
 		mode: mode.id,
-		title: capability.title,
-		purpose: capability.purpose,
-		command: capability.command,
-		tags: capability.tags,
+		title: command.title,
+		purpose: command.purpose,
+		command: command.command,
+		tags: command.tags,
 	}))).sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -54,10 +55,10 @@ export function getAgentContextMode(modeId: string): AgentContextMode | undefine
 	return GENERATED_AGENT_CONTEXT.modes.find((mode) => mode.id === modeId);
 }
 
-export function getAgentCapability(id: string): AgentCapability | undefined {
+export function getAgentCommand(id: string): AgentCommand | undefined {
 	for (const mode of GENERATED_AGENT_CONTEXT.modes) {
-		const capability = mode.capabilities.find((entry) => entry.id === id);
-		if (capability) return capability;
+		const command = mode.commands.find((entry) => entry.id === id);
+		if (command) return command;
 	}
 	return undefined;
 }
@@ -65,8 +66,8 @@ export function getAgentCapability(id: string): AgentCapability | undefined {
 export function renderAgentModeHelp(modeId: string): string | null {
 	const mode = getAgentContextMode(modeId);
 	if (!mode) return null;
-	const visible = [...mode.capabilities]
-		.filter((capability) => capability.help.visibility !== "hidden")
+	const visible = [...mode.commands]
+		.filter((command) => command.help.visibility !== "hidden")
 		.sort((a, b) => a.help.order - b.help.order || a.id.localeCompare(b.id));
 
 	const lines: string[] = [];
@@ -75,11 +76,11 @@ export function renderAgentModeHelp(modeId: string): string | null {
 	lines.push(mode.summary);
 	lines.push("");
 	lines.push("COMMON COMMANDS");
-	for (const capability of visible) {
-		lines.push(`  ${capability.command.display}`);
-		lines.push(`    ${capability.purpose}`);
+	for (const command of visible) {
+		lines.push(`  ${command.command.display}`);
+		lines.push(`    ${command.purpose}`);
 	}
-	const examples = visible.flatMap((capability) => renderExamples(capability)).slice(0, 8);
+	const examples = visible.flatMap((command) => renderExamples(command)).slice(0, 8);
 	if (examples.length > 0) {
 		lines.push("");
 		lines.push("EXAMPLES");
@@ -101,8 +102,8 @@ export function renderAgentModeHelp(modeId: string): string | null {
 	return lines.join("\n");
 }
 
-function renderExamples(capability: AgentCapability): string[] {
-	return (capability.examples ?? []).map((example) => {
+function renderExamples(command: AgentCommand): string[] {
+	return (command.examples ?? []).map((example) => {
 		if (example.stdin?.includes("\n")) return `${example.display} < onInit.js`;
 		if (example.stdin) return `echo ${quoteShell(example.stdin)} | ${example.display}`;
 		return example.display;

@@ -2,6 +2,7 @@
 
 import type { CommandResult } from "../result.js";
 import {
+	duplicateIdErrorResult,
 	errorResult,
 	jsonResult,
 	preformattedResult,
@@ -112,6 +113,7 @@ import {
 	compactTree,
 	renderTreeBox,
 } from "./builder-ops.js";
+import { duplicateAliasesInRequest, duplicateIdCandidates } from "./duplicate-id.js";
 
 // ── Chain color constants (FX and MIDI are always fixed) ────────────
 
@@ -719,6 +721,9 @@ export class BuilderMode implements Mode {
 			}
 		}
 
+		const duplicate = this.findDuplicateAddId(cmd);
+		if (duplicate) return duplicateIdErrorResult(duplicate.id, duplicate.candidates);
+
 		if (!session.connection) {
 			return this.localFallback(cmd);
 		}
@@ -740,6 +745,20 @@ export class BuilderMode implements Mode {
 		}
 
 		return result;
+	}
+
+	private findDuplicateAddId(cmd: BuilderCommand): { id: string; candidates: string[] } | null {
+		const aliases = cmd.type === "add"
+			? [cmd.alias]
+			: cmd.type === "addChain" ? cmd.clauses.map((cl) => cl.alias) : [];
+		if (aliases.length === 0) return null;
+		const repeated = duplicateAliasesInRequest(aliases);
+		if (repeated) return { id: repeated, candidates: [repeated] };
+		for (const alias of aliases) {
+			const candidates = duplicateIdCandidates(this.treeRoot, alias);
+			if (candidates.length > 0) return { id: alias, candidates };
+		}
+		return null;
 	}
 
 	/** Execute mixed apply / init_network ops. Apply ops batch into one

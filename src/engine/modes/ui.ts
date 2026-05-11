@@ -1,7 +1,7 @@
 // ── UI mode — main class + barrel re-exports ─────────────────────────
 
 import type { CommandResult, TreeNode } from "../result.js";
-import { errorResult, jsonResult, preformattedResult, tableResult, textResult } from "../result.js";
+import { duplicateIdErrorResult, errorResult, jsonResult, preformattedResult, tableResult, textResult } from "../result.js";
 import type { TokenSpan } from "../highlight/tokens.js";
 import { tokenizeUi } from "../highlight/ui.js";
 import type { CompletionItem, CompletionResult, Mode, ModeId, SessionContext } from "./mode.js";
@@ -77,6 +77,7 @@ import {
 } from "./ui-parser.js";
 import type { UiOp } from "./ui-ops.js";
 import { commandToOps } from "./ui-ops.js";
+import { duplicateAliasesInRequest, duplicateIdCandidates } from "./duplicate-id.js";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -630,6 +631,8 @@ export class UiMode implements Mode {
 				if (typeError) return errorResult(typeError);
 			}
 		}
+		const duplicate = this.findDuplicateAddId(cmd);
+		if (duplicate) return duplicateIdErrorResult(duplicate.id, duplicate.candidates);
 
 		if (!session.connection) return this.localFallback(cmd);
 		if (cmd.type === "connect") return this.handleConnect(cmd, session.connection);
@@ -647,6 +650,20 @@ export class UiMode implements Mode {
 		}
 
 		return result;
+	}
+
+	private findDuplicateAddId(cmd: UiCommand): { id: string; candidates: string[] } | null {
+		const aliases = cmd.type === "add"
+			? [cmd.alias]
+			: cmd.type === "addChain" ? cmd.clauses.map((cl) => cl.alias) : [];
+		if (aliases.length === 0) return null;
+		const repeated = duplicateAliasesInRequest(aliases);
+		if (repeated) return { id: repeated, candidates: [repeated] };
+		for (const alias of aliases) {
+			const candidates = duplicateIdCandidates(this.treeRoot, alias);
+			if (candidates.length > 0) return { id: alias, candidates };
+		}
+		return null;
 	}
 
 	/** Execute mixed apply / set_value ops. */

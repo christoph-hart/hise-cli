@@ -155,7 +155,9 @@ Per-mode hierarchy and landing on mode entry:
 
 1. **Prepositions have one global role.** `to` = destination (parent slot or wire target). `as` = name. `file`, `scale` = labeled roles for multi-slot verbs.
 
-2. **`add` creates an entity in the current container, or at an explicit parent via `to <parent>`.** Signature: `add <type> as "<name>" [to <parent>]`. Without `to`, the cwd is the parent. **The `to` clause is forbidden in comma-chained `add` statements** — chained adds use cwd only. To add multiple entities at a non-cwd parent, `cd` to that parent first.
+2. **`add` creates an entity in the current container, or at an explicit parent via `to <parent>`.** Signature: `add <type> as "<name>" [to <parent>]`. Without `to`, the cwd is the parent. Explicit add aliases are exact: hise-cli never silently accepts HISE auto-renaming for `add ... as "Name"`. If the requested ID already exists, the command fails before mutation with `duplicate_id` and candidate paths. In builder mode, use `clone <target> <count>` to create auto-renamed copies. **The `to` clause is forbidden in comma-chained `add` statements** — chained adds use cwd only. To add multiple entities at a non-cwd parent, `cd` to that parent first.
+
+Builder-specific `add` note: HISE automatically adds a `SimpleEnvelope` named `DefaultEnvelope`, `DefaultEnvelope2`, etc. to every new sound-producing `SoundGenerator`; container-only generators are exempt. For nested modulation chains, quote the chain segment, e.g. `add LFO as "LeadGainLFO" to Lead."Gain Modulation"`.
 
 3. **Coordinates and bounds are JS arrays.** `[a, b, c, d]`. Commas required.
 

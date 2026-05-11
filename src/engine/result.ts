@@ -42,7 +42,7 @@ export interface TreeNode {
 
 export type CommandResult =
 	| { type: "text"; content: string; logs?: string[]; accent?: string }
-	| { type: "error"; message: string; detail?: string; accent?: string }
+	| { type: "error"; message: string; detail?: string; code?: "duplicate_id" | "ambiguous_path"; candidates?: string[]; accent?: string }
 	| { type: "code"; content: string; language?: string; accent?: string }
 	| { type: "table"; headers: string[]; rows: string[][]; accent?: string }
 	| { type: "markdown"; content: string; accent?: string }
@@ -63,6 +63,15 @@ export function errorResult(
 	detail?: string,
 ): CommandResult {
 	return { type: "error", message, detail };
+}
+
+export function duplicateIdErrorResult(id: string, candidates: string[]): CommandResult {
+	return {
+		type: "error",
+		code: "duplicate_id",
+		message: `ID already exists: ${id}`,
+		candidates,
+	};
 }
 
 export function codeResult(

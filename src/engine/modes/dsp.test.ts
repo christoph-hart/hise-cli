@@ -87,6 +87,34 @@ async function bootstrapNetwork(ctx: SessionContext, name: string): Promise<void
 }
 
 describe("DspMode — integration", () => {
+	it("rejects duplicate add IDs before mutation", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "DupDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+		await mode.parse('add core.oscillator as "Osc1"', ctx);
+
+		const result = await mode.parse('add core.oscillator as "Osc1"', ctx);
+
+		expect(result).toMatchObject({
+			type: "error",
+			code: "duplicate_id",
+			message: "ID already exists: Osc1",
+			candidates: ["DupDSP.Osc1"],
+		});
+	});
+
+	it("rejects duplicate aliases in chained add before mutation", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "ChainDupDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+
+		const result = await mode.parse('add core.oscillator as "A", core.oscillator as "A"', ctx);
+
+		expect(result).toMatchObject({ type: "error", code: "duplicate_id", candidates: ["A"] });
+	});
+
 	it("round-trips a minimal graph (add → connect → set → get → save)", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");

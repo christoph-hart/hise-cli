@@ -101,6 +101,33 @@ describe("BuilderMode — with mock connection", () => {
 		expect(ops[0]!.name).toBe("Lead2");
 	});
 
+	it("rejects duplicate add IDs before mutation", async () => {
+		const tree = makeTree();
+		const { mock, session } = makeMock(tree);
+		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
+
+		const result = await mode.parse('add SineSynth as "Lead"', session);
+
+		expect(result).toMatchObject({
+			type: "error",
+			code: "duplicate_id",
+			message: "ID already exists: Lead",
+			candidates: ["Master.Lead"],
+		});
+		expect(mock.calls.some((c) => c.endpoint === "/api/builder/apply")).toBe(false);
+	});
+
+	it("rejects duplicate aliases in chained add before mutation", async () => {
+		const tree = makeTree();
+		const { mock, session } = makeMock(tree);
+		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
+
+		const result = await mode.parse('add SineSynth as "A", SineSynth as "A"', session);
+
+		expect(result).toMatchObject({ type: "error", code: "duplicate_id", candidates: ["A"] });
+		expect(mock.calls.some((c) => c.endpoint === "/api/builder/apply")).toBe(false);
+	});
+
 	it("set bypassed dispatches set_bypassed op", async () => {
 		const tree = makeTree();
 		const { mock, session } = makeMock(tree);

@@ -1,6 +1,14 @@
 export interface AgentContextData {
-	schemaVersion: 1;
+	schemaVersion: 2;
+	common: AgentContextCommon;
 	modes: AgentContextMode[];
+}
+
+export interface AgentContextCommon {
+	syntax: Array<{ form: string; purpose: string }>;
+	grammar: Record<string, unknown>;
+	inputPatterns: Array<{ pattern: string; purpose: string }>;
+	output: Array<{ flag: string; purpose: string }>;
 }
 
 export interface AgentContextMode {
@@ -10,17 +18,30 @@ export interface AgentContextMode {
 	invocation: AgentContextRecipe[];
 	notes: string[];
 	antiPatterns: Array<{ avoid: string; prefer: string }>;
-	capabilities: AgentCapability[];
+	quickStart: AgentContextRecipe[];
+	concepts: AgentContextConcept[];
+	commands: AgentCommand[];
+	types: Record<string, unknown>;
 }
 
-export interface AgentCapability {
+export interface AgentContextConcept {
+	id: string;
+	title: string;
+	body: string[];
+}
+
+export interface AgentCommand {
 	id: string;
 	title: string;
 	purpose: string;
+	syntax: string;
 	command: AgentContextCommand;
 	examples?: AgentContextRecipe[];
 	tags: string[];
 	aliases: string[];
+	contexts: string[];
+	agentRelevance: string;
+	danger: boolean;
 	notes?: string[];
 	help: {
 		visibility: string;

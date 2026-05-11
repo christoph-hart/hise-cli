@@ -9,6 +9,7 @@ mode:
   notes:
     - Use --stdin by default for UI mutations, especially quoted names, array values, comma chains, and multi-step edits.
     - Multiline stdin runs each non-empty line serially in UI mode only; use hise-cli --run for workflows that need to switch modes.
+    - add ... as "Name" creates exactly Name or fails before mutation with duplicate_id and candidate paths; hise-cli never silently accepts auto-renaming for explicit IDs.
     - connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component.
   antiPatterns:
     - avoid: Passing multi-step UI mutations as quoted argv strings.

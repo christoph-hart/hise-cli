@@ -95,6 +95,31 @@ function lastApplyOps(mock: MockHiseConnection): Array<{ op: string; target: str
 }
 
 describe("UiMode connect", () => {
+	it("rejects duplicate add IDs before mutation", async () => {
+		const { mock, session } = makeSession(builderTree());
+		const mode = new UiMode();
+
+		const result = await mode.parse('add ScriptPanel as "Header"', session);
+
+		expect(result).toMatchObject({
+			type: "error",
+			code: "duplicate_id",
+			message: "ID already exists: Header",
+			candidates: ["Content.Header"],
+		});
+		expect(mock.calls.some((call) => call.endpoint === "/api/ui/apply")).toBe(false);
+	});
+
+	it("rejects duplicate aliases in chained add before mutation", async () => {
+		const { mock, session } = makeSession(builderTree());
+		const mode = new UiMode();
+
+		const result = await mode.parse('add ScriptButton as "A", ScriptButton as "A"', session);
+
+		expect(result).toMatchObject({ type: "error", code: "duplicate_id", candidates: ["A"] });
+		expect(mock.calls.some((call) => call.endpoint === "/api/ui/apply")).toBe(false);
+	});
+
 	for (const [parameterId, expected] of [
 		["Gain", { min: 0, max: 1, defaultValue: 0.25, mode: "NormalizedPercentage", suffix: "%" }],
 		["Frequency", { min: 20, max: 20000, defaultValue: 1000, mode: "Frequency", suffix: "Hz", middlePosition: 1000 }],

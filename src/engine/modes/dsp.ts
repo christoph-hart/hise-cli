@@ -2,6 +2,7 @@
 
 import type { CommandResult } from "../result.js";
 import {
+	duplicateIdErrorResult,
 	errorResult,
 	jsonResult,
 	preformattedResult,
@@ -57,6 +58,7 @@ import {
 	pathRefToString,
 	type PathRef,
 } from "../grammar/path-parser.js";
+import { duplicateAliasesInRequest } from "./duplicate-id.js";
 
 // ── Re-exports ────────────────────────────────────────────────────
 
@@ -563,6 +565,8 @@ export class DspMode implements Mode {
 			const v = validateCreateParameterCommand(cmd, this.scriptnodeList, this.rawTree);
 			if (!v.valid) return errorResult(v.errors.join("\n"));
 		}
+		const duplicate = this.findDuplicateAddId(cmd);
+		if (duplicate) return duplicateIdErrorResult(duplicate.id, duplicate.candidates);
 
 		const opsResult = commandToDspOps(cmd, this.rawTree, this.treeRoot, this.currentPath);
 		if ("error" in opsResult) return errorResult(opsResult.error);
@@ -574,6 +578,33 @@ export class DspMode implements Mode {
 		const result = await this.executeOps(opsResult.ops, session.connection);
 		if (result.type !== "error") session.markProjectTreeDirty?.();
 		return result;
+	}
+
+	private findDuplicateAddId(cmd: DspCommand): { id: string; candidates: string[] } | null {
+		const aliases = cmd.type === "add"
+			? [cmd.alias]
+			: cmd.type === "addChain" ? cmd.clauses.map((cl) => cl.alias) : [];
+		if (aliases.length === 0) return null;
+		const repeated = duplicateAliasesInRequest(aliases);
+		if (repeated) return { id: repeated, candidates: [repeated] };
+		for (const alias of aliases) {
+			const candidates = this.dspDuplicateCandidates(alias);
+			if (candidates.length > 0) return { id: alias, candidates };
+		}
+		return null;
+	}
+
+	private dspDuplicateCandidates(id: string): string[] {
+		if (!this.rawTree) return [];
+		const out: string[] = [];
+		const lower = id.toLowerCase();
+		const visit = (node: RawDspNode, path: string[]): void => {
+			const nextPath = [...path, node.nodeId];
+			if (node.nodeId.toLowerCase() === lower) out.push(nextPath.join("."));
+			for (const child of node.children) visit(child, nextPath);
+		};
+		visit(this.rawTree, []);
+		return out;
 	}
 
 	private async executeOps(

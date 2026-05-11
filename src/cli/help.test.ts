@@ -30,7 +30,7 @@ describe("renderCliHelp", () => {
 		expect(help).toContain("6 expectation failure");
 	});
 
-	it("renders script help from generated agent capabilities", () => {
+	it("renders script help from generated agent commands", () => {
 		const help = renderCliHelp(getCliCommands(), "script");
 
 		expect(help).toContain("COMMON COMMANDS");

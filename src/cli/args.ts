@@ -35,8 +35,8 @@ export interface CliOutputOptions {
 export type AgentContextQuery =
 	| { type: "manifest" }
 	| { type: "mode"; modeId: string }
-	| { type: "capability"; id: string }
-	| { type: "capability-index" };
+	| { type: "command"; id: string }
+	| { type: "command-index" };
 
 export interface McpCliCommand {
 	target: string;
@@ -329,26 +329,26 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliParseResult {
 	const rest = args.slice(1);
 	let modeId: string | undefined;
-	let capabilityId: string | undefined;
-	let listCapabilities = false;
+	let commandId: string | undefined;
+	let listCommands = false;
 
 	for (let i = 0; i < rest.length; i++) {
 		const arg = rest[i]!;
-		if (arg === "--list-capabilities") {
-			listCapabilities = true;
+		if (arg === "--list-commands") {
+			listCommands = true;
 			continue;
 		}
-		if (arg === "--capability") {
+		if (arg === "--command") {
 			const value = rest[i + 1];
-			if (!value || value.startsWith("--")) return { kind: "error", message: "--capability requires an id" };
-			capabilityId = value;
+			if (!value || value.startsWith("--")) return { kind: "error", message: `${arg} requires an id` };
+			commandId = value;
 			i++;
 			continue;
 		}
-		if (arg.startsWith("--capability=")) {
-			const value = arg.slice("--capability=".length);
-			if (!value) return { kind: "error", message: "--capability requires an id" };
-			capabilityId = value;
+		if (arg.startsWith("--command=")) {
+			const value = arg.slice("--command=".length);
+			if (!value) return { kind: "error", message: "--command requires an id" };
+			commandId = value;
 			continue;
 		}
 		if (arg.startsWith("--")) return { kind: "error", message: `Unexpected argument for agent-context: ${arg}` };
@@ -356,10 +356,10 @@ function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliPar
 		modeId = stripMatchedOuterQuotes(arg);
 	}
 
-	const queryCount = [Boolean(modeId), Boolean(capabilityId), listCapabilities].filter(Boolean).length;
-	if (queryCount > 1) return { kind: "error", message: "agent-context accepts only one query: <mode>, --capability <id>, or --list-capabilities" };
-	if (capabilityId) return { kind: "agent-context", query: { type: "capability", id: capabilityId }, output: { ...output, json: true } };
-	if (listCapabilities) return { kind: "agent-context", query: { type: "capability-index" }, output: { ...output, json: true } };
+	const queryCount = [Boolean(modeId), Boolean(commandId), listCommands].filter(Boolean).length;
+	if (queryCount > 1) return { kind: "error", message: "agent-context accepts only one query: <mode>, --command <id>, or --list-commands" };
+	if (commandId) return { kind: "agent-context", query: { type: "command", id: commandId }, output: { ...output, json: true } };
+	if (listCommands) return { kind: "agent-context", query: { type: "command-index" }, output: { ...output, json: true } };
 	if (modeId) return { kind: "agent-context", query: { type: "mode", modeId }, output: { ...output, json: true } };
 	return { kind: "agent-context", query: { type: "manifest" }, output: { ...output, json: true } };
 }

@@ -99,29 +99,16 @@ function resolveRefToTarget(
 	currentPath: string[],
 	ref: PathRef,
 	mode: "lookup" | "cd",
-): { id: string; node: TreeNode | null } | { error: string } {
+): { id: string; node: TreeNode | null; fullPath: string[] } | { error: string } {
 	if (!treeRoot) {
 		const segs = pathRefSegments(ref);
 		if (segs.length === 0) return { error: "cannot resolve `..` without tree" };
-		return { id: segs[segs.length - 1].id, node: null };
+		return { id: segs[segs.length - 1].id, node: null, fullPath: segs.map((seg) => seg.id) };
 	}
 	const r = resolvePath(treeRoot, currentPath, ref, mode);
 	if (!r.ok) return { error: r.message };
 	const id = r.node.id ?? r.fullPath[r.fullPath.length - 1];
-	return { id, node: r.node };
-}
-
-function findParentNode(tree: TreeNode | null, childId: string): TreeNode | null {
-	if (!tree) return null;
-	const lower = childId.toLowerCase();
-	if (tree.children) {
-		for (const child of tree.children) {
-			if (child.id?.toLowerCase() === lower) return tree;
-			const found = findParentNode(child, childId);
-			if (found) return found;
-		}
-	}
-	return null;
+	return { id, node: r.node, fullPath: r.fullPath };
 }
 
 /** Resolve add's parent + chain. Handles bare cwd, explicit `to`, and
@@ -141,8 +128,8 @@ function resolveAddParent(
 		if ("error" in r) return { error: r.error };
 		if (r.node?.nodeKind === "chain") {
 			chainName = r.node.label;
-			const actual = findParentNode(treeRoot, r.id);
-			parent = actual?.id ?? treeRoot?.id ?? "Master Chain";
+			const ownerPath = r.fullPath.slice(0, -1);
+			parent = ownerPath[ownerPath.length - 1] ?? treeRoot?.id ?? "Master Chain";
 		} else {
 			parent = r.id;
 		}

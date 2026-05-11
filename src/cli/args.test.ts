@@ -83,41 +83,41 @@ describe("parseCliArgs", () => {
 		}
 	});
 
-	it("parses scoped agent-context capability queries", () => {
-		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability", "script.compile"], getCliCommands());
+	it("parses scoped agent-context command queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--command", "script.compile"], getCliCommands());
 		expect(result.kind).toBe("agent-context");
 		if (result.kind === "agent-context") {
-			expect(result.query).toEqual({ type: "capability", id: "script.compile" });
+			expect(result.query).toEqual({ type: "command", id: "script.compile" });
 		}
 	});
 
-	it("parses scoped agent-context capability equals queries", () => {
-		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability=script.compile"], getCliCommands());
+	it("parses scoped agent-context command equals queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--command=script.compile"], getCliCommands());
 		expect(result.kind).toBe("agent-context");
 		if (result.kind === "agent-context") {
-			expect(result.query).toEqual({ type: "capability", id: "script.compile" });
+			expect(result.query).toEqual({ type: "command", id: "script.compile" });
 		}
 	});
 
-	it("parses agent-context capability index queries", () => {
-		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--list-capabilities"], getCliCommands());
+	it("parses agent-context command index queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--list-commands"], getCliCommands());
 		expect(result.kind).toBe("agent-context");
 		if (result.kind === "agent-context") {
-			expect(result.query).toEqual({ type: "capability-index" });
+			expect(result.query).toEqual({ type: "command-index" });
 		}
 	});
 
 	it("rejects ambiguous agent-context queries", () => {
-		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script", "--capability", "script.compile"], getCliCommands());
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script", "--command", "script.compile"], getCliCommands());
 		expect(result).toEqual({
 			kind: "error",
-			message: "agent-context accepts only one query: <mode>, --capability <id>, or --list-capabilities",
+			message: "agent-context accepts only one query: <mode>, --command <id>, or --list-commands",
 		});
 	});
 
-	it("rejects missing agent-context capability ids", () => {
-		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--capability"], getCliCommands());
-		expect(result).toEqual({ kind: "error", message: "--capability requires an id" });
+	it("rejects missing agent-context command ids", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--command"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--command requires an id" });
 	});
 
 	it("rejects unknown agent-context flags", () => {
