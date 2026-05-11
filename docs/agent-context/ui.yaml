@@ -1,65 +1,213 @@
-schemaVersion: 1
+schemaVersion: 2
 mode:
   id: ui
   title: UI component editing and parameter linking
-  summary: Add, inspect, configure, and link HISE ScriptComponents without shell-quoting UI mutations.
+  summary: Add, inspect, configure, and link HISE ScriptComponents with direct flag-style CLI commands.
   invocation:
-    - argv: [hise-cli, -ui, show, tree, --agent]
-    - argv: [hise-cli, -ui, --stdin, --agent]
+    - argv: [hise-cli, ui, tree, --agent]
+    - argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
+    - argv: [hise-cli, ui, connect, --source, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
   notes:
-    - Use --stdin by default for UI mutations, especially quoted names, array values, comma chains, and multi-step edits.
-    - Multiline stdin runs each non-empty line serially in UI mode only; use hise-cli --run for workflows that need to switch modes.
-    - add ... as "Name" creates exactly Name or fails before mutation with duplicate_id and candidate paths; hise-cli never silently accepts auto-renaming for explicit IDs.
+    - The shell CLI uses direct UI subcommands and flags only.
+    - UI commands default --module to Interface when omitted.
     - connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component.
+    - Use --dry-run on mutations to validate through HISE inside a discarded undo plan before committing changes.
   antiPatterns:
-    - avoid: Passing multi-step UI mutations as quoted argv strings.
-      prefer: hise-cli -ui --stdin --agent
     - avoid: Manually setting processorId and parameterId without matching control metadata.
-      prefer: hise-cli -ui --stdin --agent
-capabilities:
+      prefer: hise-cli ui connect --source Cutoff --target MainFilter --param Frequency --matched --agent
+
+quickStart:
+  - title: Inspect UI components
+    argv: [hise-cli, ui, tree, --agent]
+  - title: Add a slider
+    argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+  - title: Configure component geometry and text
+    argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
+  - title: Connect a slider to a builder parameter
+    argv: [hise-cli, ui, connect, --source, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
+
+concepts:
+  - id: direct-cli
+    title: Command model
+    body:
+      - UI automation uses hise-cli ui <command> [flags].
+      - Commands use explicit flags for component targets, module context, properties, and parameter links.
+      - Use --agent for compact JSON and stable error codes.
+  - id: module-context
+    title: Module context
+    body:
+      - UI commands operate on a ScriptProcessor UI context.
+      - --module identifies that HISE module context and defaults to Interface when omitted.
+      - Keep --module explicit when editing a non-default ScriptProcessor interface.
+  - id: component-properties
+    title: Component properties
+    body:
+      - UI set writes ScriptComponent properties such as bounds, text, value, colours, visibility, and enabled state.
+      - Dynamic property flags use exact HISE property names such as --itemColour and --fontSize.
+      - Prefer --bounds x,y,w,h for geometry.
+      - For complex property payloads, use a JSON file input once supported by the command.
+  - id: parameter-linking
+    title: Parameter linking
+    body:
+      - ui connect links a source UI component to a target builder module parameter.
+      - --source is the cross-mode name for the source endpoint and is shared with DSP connect.
+      - --component is accepted as a UI-specific alias for --source.
+      - --target is the builder module ID or path.
+      - --param is the target builder parameter ID.
+      - --matched copies compatible range, items, label, or default metadata depending on component type.
+  - id: dry-run-validation
+    title: Dry-run validation
+    body:
+      - UI --dry-run executes the requested mutation inside a temporary HISE undo plan and always discards that plan.
+      - This validates against HISE's actual constraints without leaving project state changed.
+
+commands:
   - id: ui.show.tree
+    syntax: ui tree [--module <module>]
     title: Show UI component tree
     purpose: Inspect the current ScriptComponent hierarchy.
     command:
-      argv: [hise-cli, -ui, show, tree, --agent]
-    examples:
-      - title: Show UI tree
-        argv: [hise-cli, -ui, show, tree, --agent]
-    tags: [ui, tree, inspect]
-    aliases:
-      - show ui tree
-      - inspect components
-      - list ui controls
+      argv: [hise-cli, ui, tree, --agent]
+    aliases: [show ui tree, inspect components, list ui controls]
+    tags: [ui, tree, inspect, read-only]
+    contexts: [cli]
+    agentRelevance: high
     help:
       visibility: common
       order: 10
+    examples:
+      - title: Show UI tree
+        argv: [hise-cli, ui, tree, --agent]
+      - title: Show UI tree for a module context
+        argv: [hise-cli, ui, tree, --module, Interface, --agent]
+  - id: ui.show.component
+    syntax: ui show --component <id-or-path> [--module <module>]
+    title: Show UI component
+    purpose: Inspect one ScriptComponent and its editable properties.
+    command:
+      argv: [hise-cli, ui, show, --component, Cutoff, --agent]
+    aliases: [show ui component, inspect control, component properties]
+    tags: [ui, show, component, inspect, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 20
+    examples:
+      - title: Inspect a slider
+        argv: [hise-cli, ui, show, --component, Cutoff, --agent]
+  - id: ui.add.component
+    syntax: ui add --type <component-type> --id <id> [--parent <component>] [--module <module>]
+    title: Add UI component
+    purpose: Add a ScriptComponent with an exact explicit ID.
+    command:
+      argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+    aliases: [add ui component, add slider, add button, add combobox]
+    tags: [ui, add, component, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --id is mandatory and exact.
+      - Duplicate IDs fail before mutation with duplicate_id and candidate paths.
+      - --parent defaults to the root UI context when omitted.
+    help:
+      visibility: common
+      order: 30
+    examples:
+      - title: Add a slider
+        argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+      - title: Add a button
+        argv: [hise-cli, ui, add, --type, ScriptButton, --id, EnableFilter, --parent, Interface, --agent]
+  - id: ui.set.properties
+    syntax: ui set --component <id-or-path> [property flags...] [--module <module>]
+    title: Set UI component properties
+    purpose: Update one or more ScriptComponent properties.
+    command:
+      argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
+    aliases: [set ui property, move control, resize component, set label]
+    tags: [ui, set, property, component, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --bounds accepts x,y,w,h.
+      - Other property flags map to ScriptComponent property names.
+      - Use --dry-run before committing broad property edits.
+    help:
+      visibility: common
+      order: 40
+    examples:
+      - title: Set bounds and text
+        argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
+      - title: Hide a component
+        argv: [hise-cli, ui, set, --component, Cutoff, --visible, "false", --agent]
   - id: ui.connect.control
+    syntax: ui connect (--source <component> | --component <component>) --target <module> --param <param> [--matched] [--module <module>]
     title: Connect UI control to module parameter
     purpose: Link a ScriptSlider, ScriptComboBox, or ScriptButton to a matching module parameter and optionally copy matching metadata.
     command:
-      argv: [hise-cli, -ui, --stdin, --agent]
-    examples:
-      - title: Connect a slider and match range
-        argv: [hise-cli, -ui, --stdin, --agent]
-        stdin: connect Cutoff to MainFilter.Frequency matched
-      - title: Connect a combobox and copy items
-        argv: [hise-cli, -ui, --stdin, --agent]
-        stdin: connect Waveform to LFO.WaveformType matched
-      - title: Connect a button and copy label/default
-        argv: [hise-cli, -ui, --stdin, --agent]
-        stdin: connect EnableFilter to MainFilter.Enabled matched
-    tags: [ui, connect, slider, combobox, button, parameter, matched]
-    aliases:
-      - connect ui control
-      - link slider to parameter
-      - link combobox to parameter
-      - link button to parameter
-      - match ui control range
+      argv: [hise-cli, ui, connect, --source, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
+    aliases: [connect ui control, link slider to parameter, link combobox to parameter, link button to parameter, match ui control range]
+    tags: [ui, connect, slider, combobox, button, parameter, matched, mutation]
+    contexts: [cli]
+    agentRelevance: high
     notes:
+      - --component is a UI-specific alias for --source.
+      - Use --source when you want the same connect flag shape as DSP; use --component when it reads clearer in UI-only scripts.
       - ScriptSlider requires a builder parameter with type Slider.
       - ScriptComboBox requires a builder parameter with type ComboBox and matched copies newline-separated items.
       - ScriptButton requires a builder parameter with type Button and matched copies the parameter id into text plus defaultValue.
       - matched uses /api/builder/tree?verbose=true metadata.
     help:
       visibility: common
-      order: 20
+      order: 50
+    examples:
+      - title: Connect a slider and match range
+        argv: [hise-cli, ui, connect, --source, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
+      - title: Connect with the UI-specific component alias
+        argv: [hise-cli, ui, connect, --component, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
+      - title: Connect a combobox and copy items
+        argv: [hise-cli, ui, connect, --source, Waveform, --target, LFO, --param, WaveformType, --matched, --agent]
+      - title: Connect a button and copy label/default
+        argv: [hise-cli, ui, connect, --source, EnableFilter, --target, MainFilter, --param, Enabled, --matched, --agent]
+  - id: ui.rename.component
+    syntax: ui rename --component <id-or-path> --id <new-id> [--module <module>]
+    title: Rename UI component
+    purpose: Change a ScriptComponent ID.
+    command:
+      argv: [hise-cli, ui, rename, --component, Cutoff, --id, CutoffSlider, --agent]
+    aliases: [rename ui component, change component id]
+    tags: [ui, rename, component, mutation]
+    contexts: [cli]
+    agentRelevance: medium
+    help:
+      visibility: common
+      order: 60
+    examples:
+      - title: Rename a component
+        argv: [hise-cli, ui, rename, --component, Cutoff, --id, CutoffSlider, --agent]
+  - id: ui.remove.component
+    syntax: ui remove --component <id-or-path> [--component <id-or-path>...] [--module <module>]
+    title: Remove UI component
+    purpose: Remove one or more ScriptComponents.
+    command:
+      argv: [hise-cli, ui, remove, --component, Cutoff, --agent]
+    aliases: [remove ui component, delete control]
+    tags: [ui, remove, delete, component, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    danger: true
+    notes:
+      - Repeat --component to remove multiple controls in one command.
+    help:
+      visibility: common
+      order: 70
+    examples:
+      - title: Remove a component
+        argv: [hise-cli, ui, remove, --component, Cutoff, --agent]
+
+types:
+  defaultModule: Interface
+  commonComponentTypes: [ScriptSlider, ScriptButton, ScriptComboBox, ScriptPanel, ScriptLabel, ScriptImage, ScriptTable, ScriptViewport]
+  connectionSources: [ScriptSlider, ScriptComboBox, ScriptButton]
+  connectSourceFlags: [--source, --component]
+  commonProperties: [bounds, text, value, visible, enabled, colour, bgColour, itemColour, fontName, fontSize]

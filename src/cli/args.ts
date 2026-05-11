@@ -172,6 +172,326 @@ function formatTargetSuffix(target: string): string {
 	return `.${target}`;
 }
 
+function quoteDslString(value: string): string {
+	return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function formatDslSegment(value: string): string {
+	if (value.startsWith('"') && value.endsWith('"')) return value;
+	return /[\s]/.test(value) ? quoteDslString(value) : value;
+}
+
+function formatDslValue(value: string): string {
+	if (value.startsWith("[") && value.endsWith("]")) return value;
+	if (/^-?\d+(?:\.\d+)?%?$/.test(value)) return value;
+	if (/^0x[0-9a-fA-F]{8}$/.test(value)) return value;
+	if (value === "true" || value === "false") return value;
+	return /[\s]/.test(value) ? quoteDslString(value) : value;
+}
+
+function formatArrayShorthand(value: string): string {
+	if (value.startsWith("[") && value.endsWith("]")) return value;
+	return value.includes(",") ? `[${value}]` : value;
+}
+
+function joinTargetParam(target: string, param: string): string {
+	return `${formatDslSegment(target)}.${formatDslSegment(param)}`;
+}
+
+function readRepeatedFlag(args: string[], flag: string): string[] {
+	const values: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (arg.startsWith(`${flag}=`)) {
+			values.push(arg.slice(flag.length + 1));
+			continue;
+		}
+		if (arg === flag) {
+			const value = args[i + 1];
+			if (value && !value.startsWith("--")) values.push(value);
+			i++;
+		}
+	}
+	return values;
+}
+
+function readRequiredFlag(args: string[], flag: string): string | { error: string } {
+	const values = readRepeatedFlag(args, flag);
+	if (values.length === 0) return { error: `${flag} is required` };
+	if (values.length > 1) return { error: `${flag} can only be provided once` };
+	return values[0]!;
+}
+
+function hasFlag(args: string[], flag: string): boolean {
+	return args.includes(flag) || args.some((arg) => arg.startsWith(`${flag}=`));
+}
+
+function parseFlagPairs(args: string[], reserved: Set<string>): Array<{ flag: string; value: string }> | { error: string } {
+	const pairs: Array<{ flag: string; value: string }> = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (!arg.startsWith("--")) return { error: `Unexpected argument: ${arg}` };
+		const eq = arg.indexOf("=");
+		const flag = eq === -1 ? arg : arg.slice(0, eq);
+		if (reserved.has(flag)) {
+			if (eq === -1) i++;
+			continue;
+		}
+		const name = flag.slice(2);
+		if (!name) return { error: `Unexpected argument: ${arg}` };
+		if (eq !== -1) {
+			const value = arg.slice(eq + 1);
+			if (!value) return { error: `${flag} requires a value` };
+			pairs.push({ flag: name, value });
+			continue;
+		}
+		const value = args[i + 1];
+		if (!value || value.startsWith("--")) return { error: `${flag} requires a value` };
+		pairs.push({ flag: name, value });
+		i++;
+	}
+	return pairs;
+}
+
+function formatSetClauses(target: string, pairs: Array<{ flag: string; value: string }>): string {
+	return pairs.map((pair) => `${joinTargetParam(target, pair.flag)} ${formatDslValue(formatArrayShorthand(pair.value))}`).join(", ");
+}
+
+function renderAdd(type: string, id: string, parent?: string, chain?: string): string {
+	const target = parent ? ` to ${formatDslSegment(parent)}${chain ? `.${formatDslSegment(chain)}` : ""}` : "";
+	return `add ${type} as ${quoteDslString(id)}${target}`;
+}
+
+function directUsage(message: string): { error: string } {
+	return { error: message };
+}
+
+function renderBuilderDirectCommand(args: string[]): string | { error: string } {
+	const command = args[0];
+	const rest = args.slice(1);
+	if (!command) return directUsage("builder requires a command");
+	if (hasFlag(rest, "--target")) return directUsage("builder direct commands do not support --target");
+	if (command === "tree") return "show tree";
+	if (command === "types") return `show types${rest[0] ? ` ${rest[0]}` : ""}`;
+	if (command === "show") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const param = readRepeatedFlag(rest, "--param")[0];
+		return `show ${param ? joinTargetParam(module, param) : formatDslSegment(module)}`;
+	}
+	if (command === "get") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const param = readRequiredFlag(rest, "--param");
+		if (typeof param !== "string") return param;
+		return `get ${joinTargetParam(module, param)}`;
+	}
+	if (command === "add") {
+		const type = readRequiredFlag(rest, "--type");
+		if (typeof type !== "string") return type;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		return renderAdd(type, id, readRepeatedFlag(rest, "--parent")[0], readRepeatedFlag(rest, "--chain")[0]);
+	}
+	if (command === "set") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const pairs: Array<{ flag: string; value: string }> = [];
+		const param = readRepeatedFlag(rest, "--param")[0];
+		const value = readRepeatedFlag(rest, "--value")[0];
+		if (param || value) {
+			if (!param || value === undefined) return directUsage("builder set requires both --param and --value");
+			pairs.push({ flag: param, value });
+		}
+		for (const flag of ["--bypassed", "--routing", "--routing-send", "--network", "--samplemap", "--effect"]) {
+			const flagValue = readRepeatedFlag(rest, flag)[0];
+			if (flagValue !== undefined) pairs.push({ flag: flag.slice(2).replace("routing-send", "routing.send"), value: flagValue });
+		}
+		const dynamic = parseFlagPairs(rest, new Set(["--module", "--param", "--value", "--bypassed", "--routing", "--routing-send", "--network", "--samplemap", "--effect"]));
+		if ("error" in dynamic) return dynamic;
+		pairs.push(...dynamic);
+		if (pairs.length === 0) return directUsage("builder set requires at least one value flag");
+		return `set ${formatSetClauses(module, pairs)}`;
+	}
+	if (command === "move") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const parent = readRepeatedFlag(rest, "--parent")[0];
+		const index = readRepeatedFlag(rest, "--index")[0];
+		if (parent && index) return directUsage("builder move accepts --parent or --index, not both");
+		if (parent) {
+			const chain = readRepeatedFlag(rest, "--chain")[0];
+			return `set ${joinTargetParam(module, "parent")} ${formatDslSegment(parent)}${chain ? `.${formatDslSegment(chain)}` : ""}`;
+		}
+		if (index !== undefined) return `set ${joinTargetParam(module, "index")} ${index}`;
+		return directUsage("builder move requires --parent or --index");
+	}
+	if (command === "clone") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const count = readRequiredFlag(rest, "--count");
+		if (typeof count !== "string") return count;
+		return `clone ${formatDslSegment(module)} ${count}`;
+	}
+	if (command === "rename") {
+		const module = readRequiredFlag(rest, "--module");
+		if (typeof module !== "string") return module;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		return `rename ${formatDslSegment(module)} as ${quoteDslString(id)}`;
+	}
+	if (command === "remove") {
+		const modules = readRepeatedFlag(rest, "--module");
+		if (modules.length === 0) return directUsage("builder remove requires --module");
+		return `remove ${modules.map(formatDslSegment).join(", ")}`;
+	}
+	if (command === "reset") return "reset";
+	return directUsage(`Unknown builder command: ${command}`);
+}
+
+function renderUiDirectCommand(args: string[]): string | { error: string } {
+	const command = args[0];
+	const rest = args.slice(1);
+	if (!command) return directUsage("ui requires a command");
+	if (command === "tree") return "show tree";
+	if (command === "show") {
+		const component = readRequiredFlag(rest, "--component");
+		if (typeof component !== "string") return component;
+		return `show ${formatDslSegment(component)}`;
+	}
+	if (command === "add") {
+		const type = readRequiredFlag(rest, "--type");
+		if (typeof type !== "string") return type;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		const parent = readRepeatedFlag(rest, "--parent")[0];
+		return `add ${type} as ${quoteDslString(id)}${parent ? ` to ${formatDslSegment(parent)}` : ""}`;
+	}
+	if (command === "set") {
+		const component = readRequiredFlag(rest, "--component");
+		if (typeof component !== "string") return component;
+		const pairs = parseFlagPairs(rest, new Set(["--module", "--component"]));
+		if ("error" in pairs) return pairs;
+		if (pairs.length === 0) return directUsage("ui set requires at least one property flag");
+		return `set ${formatSetClauses(component, pairs)}`;
+	}
+	if (command === "connect") {
+		const source = readRepeatedFlag(rest, "--source")[0];
+		const component = readRepeatedFlag(rest, "--component")[0];
+		if (source && component) return directUsage("ui connect accepts --source or --component, not both");
+		const actualSource = source ?? component;
+		if (!actualSource) return directUsage("ui connect requires --source or --component");
+		const target = readRequiredFlag(rest, "--target");
+		if (typeof target !== "string") return target;
+		const param = readRequiredFlag(rest, "--param");
+		if (typeof param !== "string") return param;
+		return `connect ${formatDslSegment(actualSource)} to ${joinTargetParam(target, param)}${rest.includes("--matched") ? " matched" : ""}`;
+	}
+	if (command === "rename") {
+		const component = readRequiredFlag(rest, "--component");
+		if (typeof component !== "string") return component;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		return `rename ${formatDslSegment(component)} as ${quoteDslString(id)}`;
+	}
+	if (command === "remove") {
+		const components = readRepeatedFlag(rest, "--component");
+		if (components.length === 0) return directUsage("ui remove requires --component");
+		return `remove ${components.map(formatDslSegment).join(", ")}`;
+	}
+	return directUsage(`Unknown ui command: ${command}`);
+}
+
+function renderDspDirectCommand(args: string[]): string | { error: string } {
+	const command = args[0];
+	const rest = args.slice(1);
+	if (!command) return directUsage("dsp requires a command");
+	if (command === "types") return `show types${rest[0] ? ` ${rest[0]}` : ""}`;
+	const module = readRequiredFlag(rest, "--module");
+	if (typeof module !== "string") return module;
+	const prefix = `${formatTargetSuffix(module)} `;
+	if (command === "tree") return `${prefix}show tree`;
+	if (command === "show") {
+		const node = readRequiredFlag(rest, "--node");
+		if (typeof node !== "string") return node;
+		return `${prefix}show ${formatDslSegment(node)}`;
+	}
+	if (command === "add") {
+		const type = readRequiredFlag(rest, "--type");
+		if (typeof type !== "string") return type;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		const parent = readRepeatedFlag(rest, "--parent")[0];
+		return `${prefix}${renderAdd(type, id, parent)}`;
+	}
+	if (command === "set") {
+		const node = readRequiredFlag(rest, "--node");
+		if (typeof node !== "string") return node;
+		const pairs: Array<{ flag: string; value: string }> = [];
+		const param = readRepeatedFlag(rest, "--param")[0];
+		const value = readRepeatedFlag(rest, "--value")[0];
+		if (param || value) {
+			if (!param || value === undefined) return directUsage("dsp set requires both --param and --value");
+			pairs.push({ flag: param, value });
+		}
+		const dynamic = parseFlagPairs(rest, new Set(["--module", "--node", "--param", "--value"]));
+		if ("error" in dynamic) return dynamic;
+		pairs.push(...dynamic);
+		if (pairs.length === 0) return directUsage("dsp set requires at least one value flag");
+		return `${prefix}set ${formatSetClauses(node, pairs)}`;
+	}
+	if (command === "connect") {
+		const source = readRequiredFlag(rest, "--source");
+		if (typeof source !== "string") return source;
+		const sourceParam = readRepeatedFlag(rest, "--source-param")[0];
+		const sourceOutput = readRepeatedFlag(rest, "--source-output")[0];
+		if (sourceParam && sourceOutput) return directUsage("dsp connect accepts --source-param or --source-output, not both");
+		const target = readRequiredFlag(rest, "--target");
+		if (typeof target !== "string") return target;
+		const param = readRequiredFlag(rest, "--param");
+		if (typeof param !== "string") return param;
+		const sourcePath = sourceParam ? joinTargetParam(source, sourceParam) : sourceOutput ? joinTargetParam(source, sourceOutput) : formatDslSegment(source);
+		return `${prefix}connect ${sourcePath} to ${joinTargetParam(target, param)}${rest.includes("--matched") ? " matched" : ""}`;
+	}
+	if (command === "rename") {
+		const node = readRequiredFlag(rest, "--node");
+		if (typeof node !== "string") return node;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		return `${prefix}rename ${formatDslSegment(node)} as ${quoteDslString(id)}`;
+	}
+	if (command === "remove") {
+		const nodes = readRepeatedFlag(rest, "--node");
+		if (nodes.length === 0) return directUsage("dsp remove requires --node");
+		return `${prefix}remove ${nodes.map(formatDslSegment).join(", ")}`;
+	}
+	if (command === "save") return `${prefix}save`;
+	return directUsage(`Unknown dsp command: ${command}`);
+}
+
+function parseDirectModeCommand(namespace: "builder" | "ui" | "dsp", args: string[], entry: CommandEntry, output: CliOutputOptions): CliParseResult {
+	if (args.includes("--stdin") || args.includes("-")) return { kind: "error", message: `${namespace} direct commands do not support --stdin` };
+	const dryRun = args.includes("--dry-run");
+	const commandArgs = args.filter((arg) => arg !== "--dry-run" && arg !== "--mock" && arg !== "--pretty");
+	const rendered = namespace === "builder"
+		? renderBuilderDirectCommand(commandArgs)
+		: namespace === "ui"
+			? renderUiDirectCommand(commandArgs)
+			: renderDspDirectCommand(commandArgs);
+	if (typeof rendered !== "string") return { kind: "error", message: rendered.error };
+	const modeCommand = rendered.startsWith(".") ? `/${namespace}${rendered}` : `/${namespace} ${rendered}`;
+	return {
+		kind: "execute",
+		entry,
+		canonicalCommand: modeCommand,
+		mode: namespace,
+		useMock: args.includes("--mock"),
+		stdin: false,
+		dryRun,
+		output,
+	};
+}
+
 function parseOutputOptions(args: string[]): { args: string[]; output: CliOutputOptions } | { error: string } {
 	const stripped: string[] = [];
 	let agent = false;
@@ -586,6 +906,19 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 
 	if (first === "mcp") {
 		return parseMcpArgs(args, output);
+	}
+
+	const directNamespace = first === "builder" || first === "-builder"
+		? "builder"
+		: first === "ui" || first === "-ui"
+			? "ui"
+			: first === "dsp" || first === "-dsp"
+				? "dsp"
+				: null;
+	if (directNamespace) {
+		const entry = commands.find((command) => command.name === directNamespace && command.kind === "mode");
+		if (!entry) return { kind: "error", message: `Unknown mode: ${directNamespace}` };
+		return parseDirectModeCommand(directNamespace, args.slice(1), entry, output);
 	}
 
 	if (first === "script") {

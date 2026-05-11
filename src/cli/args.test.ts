@@ -18,25 +18,25 @@ describe("parseCliArgs", () => {
 		}
 	});
 
-	it("parses target path for mode commands", () => {
-		const result = parseCliArgs(["node", "hise-cli", "-builder", "--target:SineGenerator", "add", "LFO"], getCliCommands());
+	it("parses direct builder add commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "add", "--type", "LFO", "--id", "Shape", "--parent", "SineGenerator", "--chain", "Gain Modulation"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder.SineGenerator add LFO");
+			expect(result.canonicalCommand).toBe('/builder add LFO as "Shape" to SineGenerator."Gain Modulation"');
 		}
 	});
 
-	it("parses separated target values for mode commands", () => {
-		const result = parseCliArgs(["node", "hise-cli", "-dsp", "--target", "Script FX1", "show", "tree"], getCliCommands());
+	it("parses direct DSP tree commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "tree", "--module", "Script FX1"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe('/dsp."Script FX1" show tree');
 		}
 	});
 
-	it("rejects target without a path", () => {
+	it("rejects target on direct mode commands", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-dsp", "show", "tree", "--target"], getCliCommands());
-		expect(result).toEqual({ kind: "error", message: "--target requires a path value" });
+		expect(result).toEqual({ kind: "error", message: "--module is required" });
 	});
 
 	it("rejects missing one-shot tail for mode commands", () => {
@@ -47,14 +47,9 @@ describe("parseCliArgs", () => {
 		});
 	});
 
-	it("parses one-shot mode command from --stdin", () => {
+	it("rejects direct builder stdin", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "--stdin"], getCliCommands());
-		expect(result.kind).toBe("execute");
-		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder");
-			expect(result.mode).toBe("builder");
-			expect(result.stdin).toBe(true);
-		}
+		expect(result).toEqual({ kind: "error", message: "builder direct commands do not support --stdin" });
 	});
 
 	it("parses global agent output flags", () => {
@@ -153,11 +148,11 @@ describe("parseCliArgs", () => {
 	});
 
 	it("parses mcp raw methods with url and timeout", () => {
-		const result = parseCliArgs(["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--url", "http://localhost:4406/mcp", "--timeout", "180"], getCliCommands());
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--url", "https://mcp.hise.dev/mcp", "--timeout", "180"], getCliCommands());
 		expect(result.kind).toBe("mcp");
 		if (result.kind === "mcp") {
 			expect(result.command.mode).toBe("method");
-			expect(result.command.url).toBe("http://localhost:4406/mcp");
+			expect(result.command.url).toBe("https://mcp.hise.dev/mcp");
 			expect(result.command.timeoutMs).toBe(180000);
 		}
 	});
@@ -188,17 +183,17 @@ describe("parseCliArgs", () => {
 		expect(result).toEqual({ kind: "error", message: "--select requires a path value" });
 	});
 
-	it("parses one-shot mode command from dash shorthand", () => {
-		const result = parseCliArgs(["node", "hise-cli", "-builder", "-"], getCliCommands());
+	it("parses direct builder dash namespace alias", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-builder", "tree"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder");
-			expect(result.stdin).toBe(true);
+			expect(result.canonicalCommand).toBe("/builder show tree");
+			expect(result.stdin).toBe(false);
 		}
 	});
 
-	it("parses dry-run for one-shot mode commands", () => {
-		const result = parseCliArgs(["node", "hise-cli", "-builder", "show", "tree", "--dry-run"], getCliCommands());
+	it("parses dry-run for direct builder commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "tree", "--dry-run"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe("/builder show tree");
@@ -206,12 +201,9 @@ describe("parseCliArgs", () => {
 		}
 	});
 
-	it("rejects --stdin combined with inline mode command", () => {
+	it("rejects direct builder stdin with command", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "--stdin", "show", "tree"], getCliCommands());
-		expect(result).toEqual({
-			kind: "error",
-			message: "-builder --stdin cannot be combined with an inline one-shot command",
-		});
+		expect(result).toEqual({ kind: "error", message: "builder direct commands do not support --stdin" });
 	});
 
 	it("reserves --help for native CLI help", () => {
@@ -233,36 +225,116 @@ describe("parseCliArgs", () => {
 		expect(result).toEqual({ kind: "tui", args: ["--no-animation"] });
 	});
 
-	it("passes multi-word verb args through without re-quoting", () => {
+	it("rejects retired quoted builder DSL route", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "show tree"], getCliCommands());
-		expect(result.kind).toBe("execute");
-		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder show tree");
-		}
+		expect(result).toEqual({ kind: "error", message: "Unknown builder command: show tree" });
 	});
 
-	it("strips matching outer double quotes from a tail arg (Git Bash on Windows)", () => {
+	it("rejects retired quoted builder DSL route preserved by Git Bash", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", '"show tree"'], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: 'Unknown builder command: "show tree"' });
+	});
+
+	it("parses direct builder show parameter", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "show", "--module", "Drive", "--param", "Gain"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder show tree");
+			expect(result.canonicalCommand).toBe("/builder show Drive.Gain");
 		}
 	});
 
-	it("strips matching outer single quotes from a tail arg", () => {
+	it("parses direct builder dynamic set flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "Drive", "--Gain", "-6", "--Balance", "50"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder set Drive.Gain -6, Drive.Balance 50");
+		}
+	});
+
+	it("parses direct UI connect component alias", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "connect", "--component", "Cutoff", "--target", "MainFilter", "--param", "Frequency", "--matched"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/ui connect Cutoff to MainFilter.Frequency matched");
+		}
+	});
+
+	it("parses direct UI dynamic property flags exactly", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Knob", "--itemColour", "0xFFFFFFFF", "--fontSize", "14"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/ui set Knob.itemColour 0xFFFFFFFF, Knob.fontSize 14");
+		}
+	});
+
+	it("preserves kebab-case dynamic UI flags literally", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Knob", "--item-colour", "0xFFFFFFFF"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/ui set Knob.item-colour 0xFFFFFFFF");
+		}
+	});
+
+	it("parses direct DSP source parameter connect", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "connect", "--module", "Script FX1", "--source", "Root", "--source-param", "Cutoff", "--target", "F1", "--param", "Frequency"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" connect Root.Cutoff to F1.Frequency');
+		}
+	});
+
+	it("parses direct DSP dynamic parameter flags exactly", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--skewFactor", "0.3", "--middlePosition", "1000"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" set F1.skewFactor 0.3, F1.middlePosition 1000');
+		}
+	});
+
+	it("rejects mutually exclusive DSP source qualifiers", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "connect", "--module", "Script FX1", "--source", "Root", "--source-param", "Cutoff", "--source-output", "0", "--target", "F1", "--param", "Frequency"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "dsp connect accepts --source-param or --source-output, not both" });
+	});
+
+	it("rejects mutually exclusive UI source flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "connect", "--source", "Cutoff", "--component", "Cutoff", "--target", "MainFilter", "--param", "Frequency"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "ui connect accepts --source or --component, not both" });
+	});
+
+	it("parses direct builder remove repeats", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "remove", "--module", "Drive2", "--module", "Drive3"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder remove Drive2, Drive3");
+		}
+	});
+
+	it("rejects missing direct builder flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "add", "--type", "SimpleGain"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--id is required" });
+	});
+
+	it("parses direct UI bounds shorthand", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--bounds", "0,0,128,32", "--text", "My Cutoff"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/ui set Cutoff.bounds [0,0,128,32], Cutoff.text "My Cutoff"');
+		}
+	});
+
+	it("rejects missing direct DSP module", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "tree"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "--module is required" });
+	});
+
+	it("rejects retired single-quoted builder DSL route", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "'show tree'"], getCliCommands());
-		expect(result.kind).toBe("execute");
-		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe("/builder show tree");
-		}
+		expect(result).toEqual({ kind: "error", message: "Unknown builder command: 'show tree'" });
 	});
 
-	it("preserves internal quotes inside an arg (e.g. quoted identifiers)", () => {
+	it("rejects retired freeform builder DSL route", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", 'add "MyGain"'], getCliCommands());
-		expect(result.kind).toBe("execute");
-		if (result.kind === "execute") {
-			expect(result.canonicalCommand).toBe('/builder add "MyGain"');
-		}
+		expect(result).toEqual({ kind: "error", message: 'Unknown builder command: add "MyGain"' });
 	});
 });
 

@@ -33,44 +33,40 @@ Filters (`show types <filter>`) are case-insensitive substring matches — same 
 
 ## CLI invocation layer
 
-Mode commands can be passed as a single quoted string or as unquoted argv tokens after the mode flag. These are equivalent and best kept to trivial read-only commands:
+The shell CLI uses direct flag-style namespaces for builder, UI, and DSP automation:
 
 ```
-hise-cli -builder "show tree"
-hise-cli -builder show tree
+hise-cli builder tree --agent
+hise-cli builder add --type SimpleGain --id Drive --agent
+hise-cli ui set --component Cutoff --bounds 0,0,128,32 --text Cutoff --agent
+hise-cli dsp connect --module "Script FX1" --source LFO1 --target F1 --param Frequency --matched --agent
 ```
 
-For agent workflows, use `--stdin` by default for non-trivial mode mutations. Use it whenever a command contains quoted names or paths, JSON-like values, CSS, HiseScript, callback bodies, comma chains, or other shell-sensitive content:
+The modal grammar in the mode sections below is the internal/TUI/script grammar. The shell parser renders direct flag-style commands to that grammar before dispatching to the shared mode execution layer. `.hsc` workflow files are executed with `hise-cli run <file>` or `hise-cli --run <file>`.
+
+For builder, UI, and DSP direct commands, structural flags use the documented spelling. Dynamic property and parameter flags use exact HISE names and are case-sensitive:
 
 ```
-hise-cli -ui --stdin --agent <<'EOF'
-add ScriptSlider as "Cutoff"
-set Cutoff.bounds [20, 20, 160, 32]
-EOF
+hise-cli builder set --module Drive --Gain -6 --Balance 50 --agent
+hise-cli ui set --component Knob --itemColour 0xFFFFFFFF --fontSize 14 --agent
+hise-cli dsp set --module "Script FX1" --node F1 --skewFactor 0.3 --middlePosition 1000 --agent
 ```
 
-For `builder`, `ui`, and `dsp`, `--stdin` can also execute a newline batch.
-Each non-empty line is one complete command in the selected mode; comma
-chaining remains the same-verb clause separator inside a single line:
+Some direct flags represent nested control concepts and intentionally use hyphenated names:
 
 ```
-hise-cli -builder --stdin --agent <<'EOF'
-add SineSynth as "Lead"
-set Lead.Volume -6
-show tree
-EOF
+--routing-send
+--source-param
+--source-output
 ```
 
-Multiline stdin batches cannot switch modes. Use `.hsc` scripts via `hise-cli --run` for workflows that need to move between modes. Multiline stdin is not treated as a command batch for `script` or `mcp`, where multiline input has mode-specific meaning.
-
-`--target <path>` sets the mode context for one-shot mode commands. The separated form is preferred because it is robust for multi-word targets across shells:
+The retired shell mode routes are not part of the public CLI grammar. Use direct namespaces instead:
 
 ```
-hise-cli -dsp --target "Script FX1" show tree --agent
-hise-cli -ui --target MainPanel add ScriptSlider as "VolumeKnob"
+hise-cli builder tree --agent
+hise-cli ui tree --agent
+hise-cli dsp tree --module "Script FX1" --agent
 ```
-
-Legacy `--target:<path>` and `--target=<path>` are accepted, but examples should prefer `--target <path>`.
 
 Direct script subcommands avoid quoting callback bodies on the command line:
 

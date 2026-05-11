@@ -2,36 +2,31 @@ schemaVersion: 2
 mode:
   id: builder
   title: Builder module tree editor
-  summary: Add, inspect, configure, clone, and remove HISE builder modules.
+  summary: Add, inspect, configure, clone, move, and remove HISE builder modules with direct flag-style CLI commands.
   invocation:
-    - argv: [hise-cli, -builder, show, tree, --agent]
-    - argv: [hise-cli, -builder, --stdin, --agent]
-    - argv: [hise-cli, -builder, --target, Master, --stdin, --agent]
+    - argv: [hise-cli, builder, tree, --agent]
+    - argv: [hise-cli, builder, add, --type, SimpleGain, --id, Drive, --agent]
+    - argv: [hise-cli, builder, set, --module, Drive, --param, Gain, --value, "-6", --agent]
   notes:
-    - Prefer --stdin for mutations. Multiline stdin runs serially in builder mode and cannot switch modes.
-    - add requires as <name>; every module gets an explicit alias.
-    - Explicit add IDs are exact. hise-cli never silently accepts HISE auto-renaming for add ... as "Name"; duplicate IDs fail before mutation.
-    - Use clone <target> <count> when you want HISE-style auto-renamed copies.
-    - Without to, add lands at the current cd context, root by default.
-    - Use --dry-run on builder mutations to validate through HISE inside a discarded undo plan before committing changes.
+    - The shell CLI uses direct builder subcommands and flags only.
+    - add requires --type and --id; explicit IDs are exact and duplicate IDs fail before mutation.
+    - Use clone when you want HISE-style auto-renamed copies.
+    - Use --dry-run on mutations to validate through HISE inside a discarded undo plan before committing changes.
   antiPatterns:
-    - avoid: Passing comma chains or quoted module paths through one long shell argument when stdin is available.
-      prefer: hise-cli -builder --stdin --agent
     - avoid: Assuming HISE-created DefaultEnvelope modules were added by hise-cli or need manual cleanup.
       prefer: Treat DefaultEnvelope* as HISE's automatic voice envelope for sound-producing generators.
     - avoid: Adding a modulator without an explicit modulation chain.
-      prefer: Use a full target chain path such as Lead."Gain Modulation" or Lead."Pitch Modulation".
+      prefer: Use --parent Lead --chain "Gain Modulation" or --parent Lead --chain "Pitch Modulation".
 
 quickStart:
   - title: Inspect the module tree
-    argv: [hise-cli, -builder, show, tree, --agent]
+    argv: [hise-cli, builder, tree, --agent]
   - title: Search module types
-    argv: [hise-cli, -builder, show, types, script, --agent]
-  - title: Add and configure an effect from stdin
-    argv: [hise-cli, -builder, --stdin, --agent]
-    stdin: |-
-      add SimpleGain as "Drive"
-      set Drive.Gain -6
+    argv: [hise-cli, builder, types, script, --agent]
+  - title: Add and configure an effect
+    argv: [hise-cli, builder, add, --type, SimpleGain, --id, Drive, --agent]
+  - title: Set a parameter
+    argv: [hise-cli, builder, set, --module, Drive, --param, Gain, --value, "-6", --agent]
 
 concepts:
   - id: module-tree
@@ -42,17 +37,23 @@ concepts:
       - children is the main signal path for sound generators and containers.
       - fx holds effect processors such as filters, reverbs, delays, and ScriptFX.
       - midi holds MIDI processors such as scripts, transposers, arpeggiators, and MIDI players.
-      - gain and pitch hold modulators for volume and pitch.
-      - Each module type can only be added to a compatible chain; builder validates this locally using constrainer rules from the module database.
+      - '"Gain Modulation" and "Pitch Modulation" hold modulators for volume and pitch.'
+      - Each module type can only be added to a compatible chain; dry-run validates against HISE's actual constraints.
+  - id: direct-cli
+    title: Command model
+    body:
+      - Builder automation uses hise-cli builder <command> [flags].
+      - Commands use explicit flags for module targets, values, parent paths, chains, and output controls.
+      - Use --agent for compact JSON and stable error codes.
   - id: chain-resolution
-    title: Chain auto-resolution
+    title: Chain targeting
     body:
       - SoundGenerator types resolve to parent.children.
       - Effect types resolve to parent.fx.
       - MidiProcessor types resolve to parent.midi.
-      - Modulator types require an explicit chain, for example to "Master Chain"."Gain Modulation" or to Lead."Pitch Modulation".
-      - Modules are appended to the end of the chain.
-      - Chained add disallows to; every clause lands at the current context.
+      - Modulator types require an explicit --chain label, for example --chain "Gain Modulation" or --chain "Pitch Modulation".
+      - --chain accepts exact live HISE chain labels shown by builder tree.
+      - Modules are appended to the end of the resolved chain.
   - id: automatic-envelope
     title: HISE automatic envelopes
     body:
@@ -62,17 +63,18 @@ concepts:
   - id: property-dispatch
     title: Property and parameter writes
     body:
-      - set <target>.bypassed maps to a set_bypassed operation.
-      - set <target>.parent and set <target>.index map to move operations.
-      - set <target>.samplemap maps to set_attributes with samplemap.
-      - set <target>.effect maps to set_effect.
-      - set <target>.network maps to DSP network initialization rather than builder apply.
-      - set <target>.routing and set <target>.routing.send map to routing operations.
-      - Other parameter tails map to set_attributes with coerced values.
+      - --bypassed maps to a set_bypassed operation.
+      - --parent and --index map to move operations through builder move.
+      - --samplemap maps to set_attributes with samplemap.
+      - --effect maps to set_effect.
+      - --network creates or loads a DSP network on a ScriptFX, ScriptSynth, or ScriptModulator host.
+      - --routing and --routing-send map to routing operations.
+      - --param and --value map to set_attributes with coerced values.
+      - Dynamic parameter flags such as --Gain -6 are shorthand for simple parameter writes; use --param/--value when names collide with reserved flags.
   - id: network-provisioning
     title: DSP network provisioning
     body:
-      - Networks are created or loaded from builder mode with set <target>.network.
+      - Use builder set --module <module> --network <name> to create or load a DspNetwork.
       - Bare names create a new network and fail if <name>.xml already exists.
       - Names ending in .xml load an existing network and fail if the file is missing.
       - Use the .xml form when you want to attach an existing network without accidentally creating a new one.
@@ -80,8 +82,8 @@ concepts:
     title: Response semantics
     body:
       - Successful mutations return a compact diff summary such as +ModuleId, -ModuleId, or *ModuleId.Param.
-      - show <target> returns a compact module summary for LLM output and does not include parameter values.
-      - Use show <target>.<param> or get <target>.<param> when range, default, or value are needed before setting.
+      - builder show --module returns a compact module summary for LLM output and does not include parameter values.
+      - Use builder show --module <id> --param <param> or builder get --module <id> --param <param> when range, default, or value are needed before setting.
   - id: dry-run-validation
     title: Dry-run validation
     body:
@@ -91,137 +93,132 @@ concepts:
 
 commands:
   - id: builder.show.tree
-    syntax: show tree
+    syntax: builder tree
     title: Show module tree
     purpose: Inspect the full module tree with types, IDs, and chain structure.
     command:
-      argv: [hise-cli, -builder, show, tree, --agent]
+      argv: [hise-cli, builder, tree, --agent]
     aliases: [show builder tree, inspect module tree, list modules]
     tags: [builder, show, tree, inspect, read-only]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     help:
       visibility: common
       order: 10
     examples:
       - title: Inspect current modules
-        argv: [hise-cli, -builder, show, tree, --agent]
+        argv: [hise-cli, builder, tree, --agent]
   - id: builder.show.types
-    syntax: show types [<filter>]
+    syntax: builder types [<filter>]
     title: Show module types
     purpose: List available module types, optionally filtered by case-insensitive substring across module ID, type, and subtype.
     command:
-      argv: [hise-cli, -builder, show, types, --agent]
+      argv: [hise-cli, builder, types, --agent]
     aliases: [list module types, find module type, search builder types]
     tags: [builder, show, types, inspect, read-only]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     help:
       visibility: common
       order: 20
     examples:
       - title: Show all module types
-        argv: [hise-cli, -builder, show, types, --agent]
+        argv: [hise-cli, builder, types, --agent]
       - title: Filter module types
-        argv: [hise-cli, -builder, show, types, Envelope, --agent]
+        argv: [hise-cli, builder, types, Envelope, --agent]
   - id: builder.show.module
-    syntax: show <target>
+    syntax: builder show --module <id-or-path>
     title: Show module summary
     purpose: Inspect one module instance with parameter IDs and modulation chains.
     command:
-      argv: [hise-cli, -builder, show, Drive, --agent]
+      argv: [hise-cli, builder, show, --module, Drive, --agent]
     aliases: [inspect module, show module, module parameters]
     tags: [builder, show, module, inspect, read-only]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
       - For LLM output this returns a compact summary; parameter values are not included.
-      - Use show <target>.<param> or get <target>.<param> for values and ranges.
+      - Use --param for values and ranges.
     help:
       visibility: common
       order: 30
     examples:
       - title: Inspect a module with spaces in its path
-        argv: [hise-cli, -builder, show, "Master Chain", --agent]
+        argv: [hise-cli, builder, show, --module, "Master Chain", --agent]
   - id: builder.show.parameter
-    syntax: show <target>.<param>
+    syntax: builder show --module <id-or-path> --param <param>
     title: Show parameter detail
     purpose: Inspect parameter range, default value, current value, valueAsString, and items when available.
     command:
-      argv: [hise-cli, -builder, show, Drive.Gain, --agent]
+      argv: [hise-cli, builder, show, --module, Drive, --param, Gain, --agent]
     aliases: [inspect parameter, show parameter range, get parameter metadata]
     tags: [builder, show, parameter, range, default, read-only]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
       - Use this before set when range or default behavior is unknown.
-      - show only goes one level deep; sub-fields such as .range or .min belong to set logic, not show.
     help:
       visibility: common
       order: 40
     examples:
       - title: Inspect gain parameter detail
-        argv: [hise-cli, -builder, show, Drive.Gain, --agent]
+        argv: [hise-cli, builder, show, --module, Drive, --param, Gain, --agent]
   - id: builder.add.module
-    syntax: add <type> as "<name>" [to <parent>[.<chain>]]
+    syntax: builder add --type <type> --id <id> [--parent <path>] [--chain <label>]
     title: Add module
     purpose: Add a module with an exact explicit ID, optionally under a specific parent or chain.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, add, --type, SimpleGain, --id, Drive, --agent]
     aliases: [add module, add synth, add effect, add lfo, create module]
-    tags: [builder, add, module, mutation, stdin]
-    contexts: [cli, stdin, tui, run]
+    tags: [builder, add, module, mutation]
+    contexts: [cli]
     agentRelevance: high
     notes:
-      - as <name> is mandatory.
-      - Explicit IDs are exact; duplicate IDs fail before mutation with duplicate_id and candidate paths.
+      - --id is mandatory and exact.
+      - Duplicate IDs fail before mutation with duplicate_id and candidate paths.
       - Sound-producing SoundGenerators get an automatic DefaultEnvelope* child from HISE.
-      - Modulators require an explicit chain target. Use the exact quoted string ID from the show tree command.
-      - Chained add disallows to; every clause lands at the current context.
+      - Modulators require --parent and --chain using the exact chain label from builder tree.
     help:
       visibility: common
       order: 50
     examples:
       - title: Add an effect
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: add SimpleGain as "Drive"
-      - title: Add a synth and gain LFO
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: |-
-          add SineSynth as "Lead"
-          add LFO as "LeadGainLFO" to Lead."Gain Modulation"
+        argv: [hise-cli, builder, add, --type, SimpleGain, --id, Drive, --agent]
+      - title: Add a synth
+        argv: [hise-cli, builder, add, --type, SineSynth, --id, Lead, --agent]
+      - title: Add a gain LFO to an existing synth
+        argv: [hise-cli, builder, add, --type, LFO, --id, LeadGainLFO, --parent, Lead, --chain, "Gain Modulation", --agent]
   - id: builder.set.parameter
-    syntax: set <target>.<param> <value>
+    syntax: builder set --module <id-or-path> --param <param> --value <value>
     title: Set module parameter
     purpose: Set a module parameter or generic attribute value.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, set, --module, Drive, --param, Gain, --value, "-6", --agent]
     aliases: [set parameter, change module value, update parameter]
     tags: [builder, set, parameter, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
-      - No to preposition; the value follows the path directly.
-      - Inspect with show <target>.<param> first when range/default is unknown.
+      - Inspect with builder show --module <id> --param <param> first when range/default is unknown.
+      - Dynamic flags such as --Gain -6 --Balance 50 are shorthand for simple parameter writes.
+      - Use --param/--value when a parameter name conflicts with a reserved flag.
     help:
       visibility: common
       order: 60
     examples:
-      - title: Set gain
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Drive.Gain -6
-      - title: Set multiple full paths with comma chaining
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Lead.Volume -6, Lead.Pan 10
+      - title: Set gain with explicit parameter/value flags
+        argv: [hise-cli, builder, set, --module, Drive, --param, Gain, --value, "-6", --agent]
+      - title: Set multiple parameters with dynamic flags
+        argv: [hise-cli, builder, set, --module, Drive, --Gain, "-6", --Balance, "50", --agent]
   - id: builder.set.bypassed
-    syntax: set <target>.bypassed <bool>
+    syntax: builder set --module <id-or-path> --bypassed <bool>
     title: Toggle module bypass
     purpose: Toggle a module bypass property through a builder property write.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, set, --module, Drive, --bypassed, "true", --agent]
     aliases: [bypass module, enable module, disable module]
     tags: [builder, set, bypassed, property, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
       - Emits a set_bypassed operation, not a generic parameter write.
@@ -230,42 +227,41 @@ commands:
       order: 70
     examples:
       - title: Bypass an effect
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Drive.bypassed true
+        argv: [hise-cli, builder, set, --module, Drive, --bypassed, "true", --agent]
   - id: builder.set.routing
-    syntax: set <target>.routing <value>
+    syntax: builder set --module <id-or-path> --routing <preset-or-array> [--routing-send <array>]
     title: Set module routing
     purpose: Configure a module routing matrix or routing preset.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, set, --module, Synth1, --routing, stereo, --agent]
     aliases: [set routing matrix, route channels, set stereo routing]
     tags: [builder, set, routing, channels, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
-      - Value may be an integer array such as [0, 1, -1, -1].
+      - --routing may be a preset or integer array such as [0,1,-1,-1].
       - Array length must match the module source channel count; each entry is a destination channel index or -1.
       - Presets include stereo, stereo_2, stereo_3, all, and all_to_stereo.
-      - set <target>.routing.send <array> writes the send-channel matrix.
+      - --routing-send writes the send-channel matrix.
     help:
       visibility: common
       order: 80
     examples:
       - title: Set explicit routing
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Synth1.routing [0, 1, -1, -1]
+        argv: [hise-cli, builder, set, --module, Synth1, --routing, "[0,1,-1,-1]", --agent]
       - title: Set routing preset
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Synth1.routing "stereo"
+        argv: [hise-cli, builder, set, --module, Synth1, --routing, stereo, --agent]
+      - title: Set send routing
+        argv: [hise-cli, builder, set, --module, Synth1, --routing-send, "[0,1]", --agent]
   - id: builder.set.network
-    syntax: set <target>.network "<name>[.xml]"
+    syntax: builder set --module <id-or-path> --network <name-or-file.xml>
     title: Create or load DSP network
     purpose: Initialize a DspNetwork on a ScriptFX, ScriptSynth, or ScriptModulator host.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, set, --module, "Script FX1", --network, my_dsp, --agent]
     aliases: [create dsp network, load dsp network, attach scriptnode network, initialize dsp network]
     tags: [builder, dsp, network, scriptnode, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
       - Bare name creates a network and fails if <name>.xml already exists.
@@ -276,40 +272,37 @@ commands:
       order: 90
     examples:
       - title: Create a new DSP network
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set "Script FX1".network "my_dsp"
+        argv: [hise-cli, builder, set, --module, "Script FX1", --network, my_dsp, --agent]
       - title: Load an existing DSP network
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set "Script FX1".network "my_dsp.xml"
+        argv: [hise-cli, builder, set, --module, "Script FX1", --network, my_dsp.xml, --agent]
   - id: builder.move.parent
-    syntax: set <target>.parent <path>
+    syntax: builder move --module <id-or-path> --parent <path> [--chain <label>]
     title: Reparent module
     purpose: Move a module to another parent or chain.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, move, --module, Drive, --parent, "Master Chain", --chain, fx, --agent]
     aliases: [move module, reparent module, change parent]
     tags: [builder, move, parent, reparent, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: medium
     notes:
       - Emits a move operation with target, parent, and optional chain.
-      - The path can be a module ID, dotted path, or quoted string; chain index is auto-resolved from the path tail.
+      - --chain accepts exact live chain labels or structural chains such as children, fx, and midi.
     help:
       visibility: common
       order: 100
     examples:
-      - title: Move effect to a chain
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Drive.parent "Master Chain".fx
+      - title: Move effect to the root FX chain
+        argv: [hise-cli, builder, move, --module, Drive, --parent, "Master Chain", --chain, fx, --agent]
   - id: builder.move.index
-    syntax: set <target>.index <n>
+    syntax: builder move --module <id-or-path> --index <n>
     title: Reorder module
     purpose: Reorder a module within its current parent and chain.
     command:
-      argv: [hise-cli, -builder, --stdin, --agent]
+      argv: [hise-cli, builder, move, --module, Drive, --index, "0", --agent]
     aliases: [reorder module, move index, change module order]
     tags: [builder, move, index, reorder, mutation]
-    contexts: [cli, stdin, tui, run]
+    contexts: [cli]
     agentRelevance: medium
     notes:
       - HISE keeps the existing parent and chain when only index is specified.
@@ -318,111 +311,89 @@ commands:
       order: 110
     examples:
       - title: Move a module to the front of its chain
-        argv: [hise-cli, -builder, --stdin, --agent]
-        stdin: set Drive.index 0
+        argv: [hise-cli, builder, move, --module, Drive, --index, "0", --agent]
   - id: builder.get.parameter
-    syntax: get <target>.<param> [, ...]
+    syntax: builder get --module <id-or-path> --param <param>
     title: Get parameter value
-    purpose: Read one or more parameter or property values.
+    purpose: Read one parameter or property value.
     command:
-      argv: [hise-cli, -builder, get, Drive.Gain, --agent]
+      argv: [hise-cli, builder, get, --module, Drive, --param, Gain, --agent]
     aliases: [get parameter, read parameter value, read module property]
     tags: [builder, get, parameter, property, read-only]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     help:
       visibility: common
       order: 120
     examples:
       - title: Read gain value
-        argv: [hise-cli, -builder, get, Drive.Gain, --agent]
+        argv: [hise-cli, builder, get, --module, Drive, --param, Gain, --agent]
   - id: builder.clone.module
-    syntax: clone <target> <count>
+    syntax: builder clone --module <id-or-path> --count <n>
     title: Clone module
     purpose: Duplicate a module with children and parameters using HISE-style auto-renamed copies.
     command:
-      argv: [hise-cli, -builder, clone, Drive, "2", --agent]
+      argv: [hise-cli, builder, clone, --module, Drive, --count, "2", --agent]
     aliases: [clone module, duplicate module, create auto-renamed copies]
     tags: [builder, clone, duplicate, mutation]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     notes:
-      - Count is a plain integer with no x-prefix.
-      - clone Lead 3 creates three copies.
-      - Use clone when you want auto-renamed copies; use add ... as "Name" when the ID must be exact.
+      - Count is a plain integer.
+      - Use clone when you want auto-renamed copies; use add --id when the ID must be exact.
     help:
       visibility: common
       order: 130
     examples:
       - title: Clone an effect twice
-        argv: [hise-cli, -builder, clone, Drive, "2", --agent]
+        argv: [hise-cli, builder, clone, --module, Drive, --count, "2", --agent]
   - id: builder.rename.module
-    syntax: rename <target> as "<name>"
+    syntax: builder rename --module <id-or-path> --id <new-id>
     title: Rename module
-    purpose: Change a module display name.
+    purpose: Change a module display name or ID.
     command:
-      argv: [hise-cli, -builder, rename, Drive, as, Drive2, --agent]
-    aliases: [rename module, change module name]
+      argv: [hise-cli, builder, rename, --module, Drive, --id, Drive2, --agent]
+    aliases: [rename module, change module name, change module id]
     tags: [builder, rename, mutation]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: medium
-    notes:
-      - The preposition is as, not to.
     help:
       visibility: common
       order: 140
     examples:
       - title: Rename a module
-        argv: [hise-cli, -builder, rename, Drive, as, Drive2, --agent]
+        argv: [hise-cli, builder, rename, --module, Drive, --id, Drive2, --agent]
   - id: builder.remove.module
-    syntax: remove <target> [, <target>...]
+    syntax: builder remove --module <id-or-path> [--module <id-or-path>...]
     title: Remove module
     purpose: Remove modules and all their children.
     command:
-      argv: [hise-cli, -builder, remove, Drive, --agent]
+      argv: [hise-cli, builder, remove, --module, Drive, --agent]
     aliases: [remove module, delete module]
     tags: [builder, remove, delete, mutation]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: high
     danger: true
     notes:
-      - Chained remove expects every clause to be a full path.
       - Removing a module removes all its children.
+      - Repeat --module to remove multiple modules in one command.
     help:
       visibility: common
       order: 150
     examples:
+      - title: Remove one module
+        argv: [hise-cli, builder, remove, --module, Drive, --agent]
       - title: Remove cloned modules
-        argv: [hise-cli, -builder, remove, Drive2, Drive3, --agent]
-  - id: builder.navigate
-    syntax: cd <path> / ls / pwd
-    title: Navigate builder context
-    purpose: Navigate the builder tree in TUI or run scripts.
-    command:
-      argv: [hise-cli, -builder, pwd, --agent]
-    aliases: [cd builder tree, list current module, print builder path]
-    tags: [builder, navigation, tui, run]
-    contexts: [tui, run]
-    agentRelevance: low
-    notes:
-      - cd Master Chain sets context so subsequent commands target that module.
-      - cd .. steps out; cd / jumps to root; ls lists children; pwd shows current path.
-      - One-shot agents should usually prefer explicit paths or --target instead of navigation state.
-    help:
-      visibility: hidden
-      order: 900
-    examples:
-      - title: Print current builder path
-        argv: [hise-cli, -builder, pwd, --agent]
+        argv: [hise-cli, builder, remove, --module, Drive2, --module, Drive3, --agent]
   - id: builder.reset
-    syntax: reset
+    syntax: builder reset
     title: Reset module tree
     purpose: Wipe the entire module tree and clear undo history.
     command:
-      argv: [hise-cli, -builder, reset, --agent]
+      argv: [hise-cli, builder, reset, --agent]
     aliases: [reset builder tree, clear module tree, new module tree]
     tags: [builder, reset, destructive, mutation]
-    contexts: [cli, tui, run]
+    contexts: [cli]
     agentRelevance: low
     danger: true
     notes:
@@ -432,7 +403,7 @@ commands:
       order: 910
     examples:
       - title: Reset the module tree
-        argv: [hise-cli, -builder, reset, --agent]
+        argv: [hise-cli, builder, reset, --agent]
 
 types:
   chainTypes:
@@ -441,6 +412,7 @@ types:
     midi: MIDI processor chain.
     "Gain Modulation": Gain or volume modulator chain.
     "Pitch Modulation": Pitch modulator chain.
+  reservedBuilderSetFlags: [--module, --param, --value, --bypassed, --routing, --routing-send, --network, --samplemap, --effect]
   commonModuleTypes:
     SoundGenerators: [SineSynth, WaveSynth, Noise, StreamingSampler, SynthGroup, GlobalModulatorContainer, SilentSynth]
     Effects: [SimpleGain, SimpleReverb, HardcodedMasterFX, PolyphonicFilter, Convolution, StereoFX, Dynamics, Saturator, Delay, ShapeFX, ScriptFX]

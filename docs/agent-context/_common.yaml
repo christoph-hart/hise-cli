@@ -1,40 +1,42 @@
 schemaVersion: 2
 common:
   syntax:
-    - form: hise-cli -<mode> "<command>"
-      purpose: One-shot mode command for simple or read-only operations.
-    - form: hise-cli -<mode> --stdin < commands.txt
-      purpose: Preferred for non-trivial builder, UI, and DSP mutations; non-empty lines execute serially in the selected mode only.
-    - form: hise-cli -<mode> --target <path> "<command>"
-      purpose: Run a command with an implicit mode context. Prefer separated target syntax, especially for paths with spaces.
+    - form: hise-cli builder <command> [flags]
+      purpose: Direct flag-style builder module tree commands for shell automation.
+    - form: hise-cli ui <command> [flags]
+      purpose: Direct flag-style UI component commands for shell automation.
+    - form: hise-cli dsp <command> [flags]
+      purpose: Direct flag-style scriptnode/DSP network commands for shell automation.
     - form: hise-cli agent-context <mode>
       purpose: Inspect structured agent-facing context for one mode.
     - form: hise-cli which "<intent>"
       purpose: Resolve a task description to a local command entry without AI or network lookup.
   grammar:
-    paths:
-      - Bare IDs are resolved in the current mode context when supported by that mode.
-      - Dotted paths address nested objects, chains, parameters, properties, or fields.
-      - Quote path segments with spaces or reserved words.
+    shellCli:
+      - The shell CLI uses direct flag-style commands only for builder, UI, and DSP automation.
+      - Builder, UI, and DSP commands are addressed with command names and explicit flags.
+      - Multi-step workflows can be kept in command files and run with hise-cli run when needed.
+    flags:
+      - Built-in CLI control flags use the documented spelling.
+      - Dynamic builder, UI, and DSP property or parameter flags use exact HISE names and are case-sensitive.
+      - Nested control concepts use explicit flags such as --routing-send, --source-param, and --source-output.
+      - Complex payloads should use stdin, file, or json-file inputs rather than shell-escaped inline code.
     values:
       - Numbers support int, float, percent forms such as 50%, and strict 8-digit hex colors such as 0xAARRGGBB where accepted by the mode.
       - Booleans are true or false.
-      - Arrays use bracket syntax, for example [0, 1, -1, -1].
-    chaining:
-      - Comma chaining writes the verb once and inherits it across clauses.
-      - Every clause still provides full arguments and full identifier paths.
-    stdin:
-      - For builder, UI, and DSP, multiline stdin executes non-empty lines serially in the same mode.
-      - Use hise-cli --run for workflows that need to switch modes.
+      - Arrays may be passed as JSON strings or comma-separated scalar forms where the command documents that shorthand.
+    selection:
+      - --select <path> selects a field from the JSON envelope while preserving { ok, value } semantics.
+      - --compact is output-only and does not change command semantics.
   inputPatterns:
+    - pattern: flag
+      purpose: Use for normal direct builder/UI/DSP commands and short scalar values.
     - pattern: stdin
-      purpose: Use for non-trivial builder/UI/DSP mutations and shell-sensitive values.
+      purpose: Use when a command explicitly accepts a payload that would be awkward to quote.
     - pattern: file
-      purpose: Use for multi-line source edits such as script callbacks.
+      purpose: Use for multi-line source edits such as script callbacks and workflow files.
     - pattern: json-file
       purpose: Use for nested or structured payloads that would be hard to quote in argv.
-    - pattern: argv
-      purpose: Use for simple read-only commands and short scalar mutations.
   output:
     - flag: --agent
       purpose: Implies JSON and compact output, and guarantees coded errors for agent callers.

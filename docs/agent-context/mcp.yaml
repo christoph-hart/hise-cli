@@ -16,8 +16,6 @@ mode:
   antiPatterns:
     - avoid: Guessing HiseScript APIs from JavaScript knowledge.
       prefer: hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
-    - avoid: Embedding complex nested JSON in shell arguments when it becomes hard to quote.
-      prefer: hise-cli mcp <tool> --args-stdin --agent
 capabilities:
   - id: mcp.tool.fields
     title: Call an MCP tool with field flags
@@ -122,22 +120,3 @@ capabilities:
     help:
       visibility: common
       order: 60
-  - id: mcp.tui.mode
-    title: Use interactive MCP mode
-    purpose: Enter /mcp TUI mode and call MCP tools with a concise first-token command syntax.
-    command:
-      argv: [hise-cli, -mcp, explore_hise, sampler, --agent]
-    examples:
-      - title: Explore sampler in TUI mode syntax
-        argv: [hise-cli, -mcp, explore_hise, sampler, --agent]
-    tags: [mcp, tui, docs, interactive]
-    aliases:
-      - mcp tui mode
-      - interactive hise docs mode
-      - slash mcp mode
-    notes:
-      - In TUI mode, autocomplete and syntax highlighting apply only to the first token.
-      - Text and resource responses render as markdown for humans.
-    help:
-      visibility: common
-      order: 70

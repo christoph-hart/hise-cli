@@ -169,7 +169,7 @@ describe("executeCliCommand", () => {
 		}
 	});
 
-	it("executes builder one-shot commands through the shared session path", async () => {
+	it("executes direct builder commands through the shared session path", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);
 		// Register builder mock handlers so execution can proceed
@@ -191,7 +191,7 @@ describe("executeCliCommand", () => {
 			errors: [],
 		}));
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-builder", 'add LFO as "LFO"'],
+			["node", "hise-cli", "builder", "add", "--type", "LFO", "--id", "LFO"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -212,7 +212,7 @@ describe("executeCliCommand", () => {
 		}
 	});
 
-	it("dry-runs builder one-shot commands inside a discarded undo group", async () => {
+	it("dry-runs direct builder commands inside a discarded undo group", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);
 		conn.onPost("/api/undo/push_group", () => ({ success: true, result: null, logs: [], errors: [] }));
@@ -236,7 +236,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-builder", 'add LFO as "LFO"', "--dry-run", "--agent"],
+			["node", "hise-cli", "builder", "add", "--type", "LFO", "--id", "LFO", "--dry-run", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -283,7 +283,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-builder", 'add LFO as "Vel"', "--dry-run", "--agent"],
+			["node", "hise-cli", "builder", "add", "--type", "LFO", "--id", "Vel", "--dry-run", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -305,30 +305,9 @@ describe("executeCliCommand", () => {
 		expect(conn.calls.find((call) => call.endpoint === "/api/undo/pop_group")?.body).toEqual({ cancel: true });
 	});
 
-	it("executes builder one-shot command from stdin", async () => {
+	it("rejects retired builder stdin route", async () => {
 		mockObserverFetch();
-		const stdin = new PassThrough();
-		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
-		stdin.end('add LFO as "LFO"');
-
 		const conn = new MockHiseConnection().setProbeResult(true);
-		conn.onGet("/api/builder/tree", () => ({
-			success: true,
-			result: {
-				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
-				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
-				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
-				colour: "#414141", children: [], midi: [], fx: [],
-			},
-			logs: [],
-			errors: [],
-		}));
-		conn.onPost("/api/builder/apply", () => ({
-			success: true,
-			result: { scope: "root", groupName: "root", diff: [{ domain: "builder", action: "+", target: "LFO" }] },
-			logs: ["Add LFO"],
-			errors: [],
-		}));
 
 		const result = await executeCliCommand(
 			["node", "hise-cli", "-builder", "--stdin"],
@@ -337,45 +316,12 @@ describe("executeCliCommand", () => {
 			conn,
 		);
 
-		expect(result.kind).toBe("json");
-		if (result.kind === "json") {
-			expect(result.payload).toMatchObject({
-				ok: true,
-				result: {
-					type: "text",
-					content: expect.stringContaining("Add LFO"),
-				},
-			});
-		}
+		expect(result).toEqual({ kind: "error", message: "builder direct commands do not support --stdin" });
 	});
 
-	it("executes multiline builder stdin through the script runner", async () => {
+	it("rejects retired multiline builder stdin route", async () => {
 		mockObserverFetch();
-		const stdin = new PassThrough();
-		Object.defineProperty(process, "stdin", { value: stdin, configurable: true });
-		stdin.end('add LFO as "LFO"\nadd LFO as "LFO2"');
-
 		const conn = new MockHiseConnection().setProbeResult(true);
-		conn.onGet("/api/builder/tree", () => ({
-			success: true,
-			result: {
-				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
-				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
-				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
-				colour: "#414141", children: [], midi: [], fx: [],
-			},
-			logs: [],
-			errors: [],
-		}));
-		conn.onPost("/api/builder/apply", () => ({
-			success: true,
-			result: { scope: "root", groupName: "root", diff: [
-				{ domain: "builder", action: "+", target: "LFO" },
-				{ domain: "builder", action: "+", target: "LFO2" },
-			] },
-			logs: ["Add LFO", "Add LFO2"],
-			errors: [],
-		}));
 
 		const result = await executeCliCommand(
 			["node", "hise-cli", "-builder", "--stdin", "--agent"],
@@ -384,18 +330,7 @@ describe("executeCliCommand", () => {
 			conn,
 		);
 
-		expect(result.kind).toBe("json");
-		if (result.kind === "json") {
-			expect(result.payload).toMatchObject({
-				ok: true,
-				value: {
-					linesExecuted: 1,
-					summary: expect.stringContaining("1 commands"),
-				},
-			});
-		}
-		const applyCalls = conn.calls.filter((call) => call.endpoint === "/api/builder/apply");
-		expect(applyCalls).toHaveLength(1);
+		expect(result).toEqual({ kind: "error", message: "builder direct commands do not support --stdin" });
 	});
 
 	it("returns structured builder tree output for agent calls", async () => {
@@ -414,7 +349,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-builder", "show", "tree", "--agent"],
+			["node", "hise-cli", "builder", "tree", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -441,7 +376,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-ui", "show", "tree", "--agent"],
+			["node", "hise-cli", "ui", "tree", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -470,7 +405,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-ui", "set", "Button1.value", "1", "--agent"],
+			["node", "hise-cli", "ui", "set", "--component", "Button1", "--value", "1", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -503,7 +438,7 @@ describe("executeCliCommand", () => {
 		}));
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-dsp", "--target", "Script FX1", "show", "tree", "--agent"],
+			["node", "hise-cli", "dsp", "tree", "--module", "Script FX1", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -516,12 +451,12 @@ describe("executeCliCommand", () => {
 		expect(conn.calls.some((call) => call.endpoint.includes("moduleId=Script%20FX1"))).toBe(true);
 	});
 
-	it("returns null DSP tree output for agent calls without a selected network", async () => {
+	it("returns coded DSP error for module without a selected network", async () => {
 		mockObserverFetch();
 		const conn = new MockHiseConnection().setProbeResult(true);
 
 		const result = await executeCliCommand(
-			["node", "hise-cli", "-dsp", "show", "tree", "--agent"],
+			["node", "hise-cli", "dsp", "tree", "--module", "Script FX1", "--agent"],
 			getCliCommands(),
 			createDataLoader(),
 			conn,
@@ -529,7 +464,11 @@ describe("executeCliCommand", () => {
 
 		expect(result.kind).toBe("json");
 		if (result.kind === "json") {
-			expect(result.payload).toEqual({ ok: true, value: null });
+			expect(result.payload).toMatchObject({
+				ok: false,
+				code: "execution_error",
+				error: expect.stringContaining('No network loaded on "Script FX1"'),
+			});
 		}
 	});
 

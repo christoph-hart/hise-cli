@@ -1,0 +1,235 @@
+schemaVersion: 2
+mode:
+  id: dsp
+  title: DSP network editor
+  summary: Inspect, edit, connect, and save HISE scriptnode DSP networks with direct flag-style CLI commands.
+  invocation:
+    - argv: [hise-cli, dsp, tree, --module, "Script FX1", --agent]
+    - argv: [hise-cli, dsp, add, --module, "Script FX1", --type, core.filter, --id, F1, --agent]
+    - argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, LFO1, --target, F1, --param, Frequency, --matched, --agent]
+  notes:
+    - The shell CLI uses direct DSP subcommands and flags only.
+    - --module identifies the HISE module that owns the DspNetwork, commonly a ScriptFX, ScriptSynth, or ScriptModulator.
+    - Use builder set --module <module> --network <name> to create or load a network before editing it.
+    - Use --dry-run on mutations to validate through HISE inside a discarded undo plan before committing changes.
+  antiPatterns:
+    - avoid: Omitting --module when multiple scriptnode hosts exist.
+      prefer: Always pass --module for DSP automation.
+
+quickStart:
+  - title: Inspect a DSP network
+    argv: [hise-cli, dsp, tree, --module, "Script FX1", --agent]
+  - title: Add a node
+    argv: [hise-cli, dsp, add, --module, "Script FX1", --type, core.filter, --id, F1, --agent]
+  - title: Set a node parameter
+    argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --value, "1000", --agent]
+  - title: Connect a modulation source
+    argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, LFO1, --target, F1, --param, Frequency, --matched, --agent]
+
+concepts:
+  - id: direct-cli
+    title: Command model
+    body:
+      - DSP automation uses hise-cli dsp <command> [flags].
+      - Commands use explicit flags for network host modules, nodes, source endpoints, target parameters, and values.
+      - Use --agent for compact JSON and stable error codes.
+  - id: network-host
+    title: Network host module
+    body:
+      - --module is the HISE processor/module context that owns the DSP network.
+      - Builder mode creates or loads the network on that host with builder set --module <module> --network <name>.
+      - DSP commands edit the existing network on that host.
+  - id: node-parameters
+    title: Node parameters
+    body:
+      - --node identifies the scriptnode node to inspect or edit.
+      - --param identifies a target parameter on that node.
+      - --value is coerced according to HISE parameter metadata where available.
+      - Dynamic parameter flags may be used for simple node parameter writes; use --param/--value when names collide with reserved flags.
+  - id: connections
+    title: Connection model
+    body:
+      - dsp connect uses --source, --target, and --param like ui connect.
+      - --source is a DSP node unless qualified by --source-param or --source-output.
+      - --target is the destination DSP node.
+      - --param is the destination parameter.
+      - --matched copies compatible range or metadata where HISE exposes enough information.
+      - --source-param and --source-output are mutually exclusive.
+  - id: dry-run-validation
+    title: Dry-run validation
+    body:
+      - DSP --dry-run executes the requested mutation inside a temporary HISE undo plan and always discards that plan.
+      - This validates against HISE's actual constraints without leaving project state changed.
+
+commands:
+  - id: dsp.show.tree
+    syntax: dsp tree --module <module>
+    title: Show DSP network tree
+    purpose: Inspect the nodes and connections in a scriptnode DSP network.
+    command:
+      argv: [hise-cli, dsp, tree, --module, "Script FX1", --agent]
+    aliases: [show dsp tree, inspect scriptnode network, list dsp nodes]
+    tags: [dsp, tree, scriptnode, inspect, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 10
+    examples:
+      - title: Inspect network nodes
+        argv: [hise-cli, dsp, tree, --module, "Script FX1", --agent]
+  - id: dsp.show.node
+    syntax: dsp show --module <module> --node <id-or-path>
+    title: Show DSP node
+    purpose: Inspect one scriptnode node with parameters and metadata.
+    command:
+      argv: [hise-cli, dsp, show, --module, "Script FX1", --node, F1, --agent]
+    aliases: [show dsp node, inspect node, node parameters]
+    tags: [dsp, show, node, inspect, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 20
+    examples:
+      - title: Inspect a filter node
+        argv: [hise-cli, dsp, show, --module, "Script FX1", --node, F1, --agent]
+  - id: dsp.show.types
+    syntax: dsp types [<filter>]
+    title: Show DSP node types
+    purpose: List available scriptnode factory types, optionally filtered by substring.
+    command:
+      argv: [hise-cli, dsp, types, --agent]
+    aliases: [list dsp types, find scriptnode type, search dsp nodes]
+    tags: [dsp, types, scriptnode, inspect, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 30
+    examples:
+      - title: Show all node types
+        argv: [hise-cli, dsp, types, --agent]
+      - title: Filter node types
+        argv: [hise-cli, dsp, types, filter, --agent]
+  - id: dsp.add.node
+    syntax: dsp add --module <module> --type <node-type> --id <id> [--parent <node>]
+    title: Add DSP node
+    purpose: Add a scriptnode node with an exact explicit ID.
+    command:
+      argv: [hise-cli, dsp, add, --module, "Script FX1", --type, core.filter, --id, F1, --agent]
+    aliases: [add dsp node, add scriptnode, create dsp node]
+    tags: [dsp, add, node, scriptnode, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --id is mandatory and exact.
+      - --parent targets a container node when adding inside a nested network.
+    help:
+      visibility: common
+      order: 40
+    examples:
+      - title: Add a filter node
+        argv: [hise-cli, dsp, add, --module, "Script FX1", --type, core.filter, --id, F1, --agent]
+  - id: dsp.set.parameter
+    syntax: dsp set --module <module> --node <id-or-path> --param <param> --value <value>
+    title: Set DSP node parameter
+    purpose: Set a parameter on a scriptnode node.
+    command:
+      argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --value, "1000", --agent]
+    aliases: [set dsp parameter, change node value, update scriptnode parameter]
+    tags: [dsp, set, parameter, node, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - Inspect with dsp show --module <module> --node <node> first when range/default is unknown.
+      - Dynamic flags may be used for simple parameter writes.
+    help:
+      visibility: common
+      order: 50
+    examples:
+      - title: Set filter frequency
+        argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --value, "1000", --agent]
+  - id: dsp.connect.node
+    syntax: dsp connect --module <module> --source <source> --target <node> --param <param> [--matched]
+    title: Connect DSP source to node parameter
+    purpose: Connect a DSP node source to a target node parameter and optionally copy matching metadata.
+    command:
+      argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, LFO1, --target, F1, --param, Frequency, --matched, --agent]
+    aliases: [connect dsp node, connect modulation source, link node parameter]
+    tags: [dsp, connect, node, parameter, modulation, matched, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --source-param and --source-output are optional source qualifiers and are mutually exclusive.
+      - Use --source-param when the source is a parameter on another node.
+      - Use --source-output when the source is an output channel index.
+    help:
+      visibility: common
+      order: 60
+    examples:
+      - title: Connect an LFO node to filter frequency
+        argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, LFO1, --target, F1, --param, Frequency, --matched, --agent]
+      - title: Connect a source node parameter
+        argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, Root, --source-param, Cutoff, --target, F1, --param, Frequency, --agent]
+      - title: Connect a source output channel
+        argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, MultiOut, --source-output, "0", --target, F1, --param, Frequency, --agent]
+  - id: dsp.rename.node
+    syntax: dsp rename --module <module> --node <id-or-path> --id <new-id>
+    title: Rename DSP node
+    purpose: Change a scriptnode node ID.
+    command:
+      argv: [hise-cli, dsp, rename, --module, "Script FX1", --node, F1, --id, Filter1, --agent]
+    aliases: [rename dsp node, change node id]
+    tags: [dsp, rename, node, mutation]
+    contexts: [cli]
+    agentRelevance: medium
+    help:
+      visibility: common
+      order: 70
+    examples:
+      - title: Rename a node
+        argv: [hise-cli, dsp, rename, --module, "Script FX1", --node, F1, --id, Filter1, --agent]
+  - id: dsp.remove.node
+    syntax: dsp remove --module <module> --node <id-or-path> [--node <id-or-path>...]
+    title: Remove DSP node
+    purpose: Remove one or more scriptnode nodes.
+    command:
+      argv: [hise-cli, dsp, remove, --module, "Script FX1", --node, F1, --agent]
+    aliases: [remove dsp node, delete scriptnode]
+    tags: [dsp, remove, delete, node, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    danger: true
+    notes:
+      - Repeat --node to remove multiple nodes in one command.
+    help:
+      visibility: common
+      order: 80
+    examples:
+      - title: Remove a node
+        argv: [hise-cli, dsp, remove, --module, "Script FX1", --node, F1, --agent]
+  - id: dsp.save.network
+    syntax: dsp save --module <module>
+    title: Save DSP network
+    purpose: Persist the current DSP network state for a module.
+    command:
+      argv: [hise-cli, dsp, save, --module, "Script FX1", --agent]
+    aliases: [save dsp network, persist scriptnode network]
+    tags: [dsp, save, network, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - Save writes network state; use only after intended edits are complete.
+    help:
+      visibility: common
+      order: 90
+    examples:
+      - title: Save a network
+        argv: [hise-cli, dsp, save, --module, "Script FX1", --agent]
+
+types:
+  hostModuleTypes: [ScriptFX, ScriptSynth, ScriptModulator]
+  sourceQualifiers: [--source-param, --source-output]
+  commonNodeTypes: [core.filter, core.gain, core.peak, core.saturator, core.delay, routing.matrix, control.lfo, control.envelope]
+  reservedDspFlags: [--module, --node, --type, --id, --parent, --param, --value, --source, --source-param, --source-output, --target, --matched]

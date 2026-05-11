@@ -3,6 +3,10 @@ import { renderAgentModeHelp } from "./agentContext.js";
 
 export function renderCliHelp(_commands: CommandEntry[], scope?: string): string {
 	if (scope) {
+		if (GENERATED_MODE_HELP_SCOPES.has(scope)) {
+			const generated = renderAgentModeHelp(scope);
+			if (generated) return generated;
+		}
 		const section = SCOPED_HELP[scope];
 		if (section) return section;
 		return `Unknown help topic: "${scope}". Available: ${Object.keys(SCOPED_HELP).join(", ")}`;
@@ -10,14 +14,18 @@ export function renderCliHelp(_commands: CommandEntry[], scope?: string): string
 	return GLOBAL_HELP;
 }
 
+const GENERATED_MODE_HELP_SCOPES = new Set(["builder", "ui", "dsp", "script"]);
+
 // ── Global help (overview only) ─────────────────────────────────────
 
 const GLOBAL_HELP = `hise-cli — automation frontend for HISE audio plugin framework (connects to HISE at http://127.0.0.1:1900).
 
 USAGE
   hise-cli                                  Open the interactive TUI
-  hise-cli -<mode> "<command>"              One-shot mode command (trivial/read-only)
-  hise-cli -<mode> --stdin < command.txt     Read same-mode commands from stdin
+  hise-cli builder <command> [flags]         Builder module tree commands
+  hise-cli ui <command> [flags]              UI component commands
+  hise-cli dsp <command> [flags]             DSP network commands
+  hise-cli run <file.hsc> [--dry-run]        Run a .hsc script file
   hise-cli --run <file.hsc> [--dry-run] [--verbosity=<level>]   Run a .hsc script file
   hise-cli --run --inline "<script>"        Run an inline script
   hise-cli --run - < script.hsc             Run script from stdin
@@ -30,7 +38,7 @@ USAGE
   hise-cli -version                         Print the CLI version
   hise-cli -status                          Print CLI + HISE status
   hise-cli --help                           Show this help
-  hise-cli -<mode> --help                   Show mode-specific help
+  hise-cli <topic> --help                   Show topic-specific help
 
 OUTPUT FORMAT
   Default: pretty text. Markdown rendered as ANSI on a TTY, plain text
@@ -64,9 +72,9 @@ OUTPUT FORMAT
     6 expectation failure
 
 MODES
-  -builder "<command>"     Module tree editor       (--help for syntax)
-  -dsp "<command>"         Scriptnode graph editor  (--help for syntax)
-  -ui "<command>"          UI component editor      (--help for syntax)
+  builder <command>        Module tree editor       (--help for syntax)
+  dsp <command>            Scriptnode graph editor  (--help for syntax)
+  ui <command>             UI component editor      (--help for syntax)
   -script "<expression>"   HiseScript REPL          (--help for syntax)
   -inspect "<command>"     Runtime monitor           (--help for syntax)
   -undo "<command>"        Undo history navigation   (--help for syntax)
@@ -79,16 +87,11 @@ MODES
   -wizard <subcommand>     Guided workflows          (--help for syntax)
 
 OPTIONS
-  --help             Show this help (or mode help with -<mode> --help)
+  --help             Show this help or topic help
   --json             Emit structured JSON output instead of pretty text
   --agent            Emit compact JSON for tool/LLM callers
   --compact          Compact the final output payload only
   --select <path>    Select a payload field, preserving { ok, value }
-  --stdin            Preferred for non-trivial -builder/-ui/-dsp mutations
-                     and shell-sensitive content. For those modes, multiple
-                     non-empty stdin lines execute serially in the selected
-                     mode only; use --run for workflows that switch modes.
-  --target <path>    Set context path for mode commands
   --dry-run          Validate builder/ui/dsp mutations inside a discarded
                      HISE undo plan without committing state changes`;
 
@@ -525,7 +528,7 @@ DESCRIPTION
   without a slash are sent as MCP tools/call requests. Names containing a slash
   are sent as raw MCP methods such as resources/read or tools/list.
 
-  Default endpoint: HISE_MCP_URL or http://localhost:4406/mcp.
+	  Default endpoint: HISE_MCP_URL or https://mcp.hise.dev/mcp.
 
 OPTIONS
   --url <url>          Override the MCP endpoint
