@@ -44,3 +44,5 @@ common:
       purpose: Compacts the final output payload only; it does not change command behavior.
     - flag: --json
       purpose: Emits structured JSON output.
+    - flag: --dry-run
+      purpose: For builder, UI, and DSP mutations, validates against HISE inside a temporary undo plan that is always discarded.

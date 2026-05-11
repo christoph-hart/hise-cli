@@ -583,7 +583,7 @@ After `/compile`, verify the interface was created:
 /builder
 add SineSynth as Lead
 add SimpleGain to Lead.fx
-add AHDSR to Lead.gain
+add AHDSR to Lead."Gain Modulation"
 set Lead.Gain 0.5
 /expect get Lead.Gain is 0.5
 /exit

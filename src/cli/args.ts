@@ -21,6 +21,7 @@ export type CliParseResult =
 		mode: string;
 		useMock: boolean;
 		stdin: boolean;
+		dryRun: boolean;
 		output: CliOutputOptions;
 	};
 
@@ -681,8 +682,9 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	}
 
 	const rawTailParts = args.filter((arg, index) => arg !== commandFlag && !targetArgIndexes.has(index) && arg !== "--mock" && arg !== "--pretty");
+	const dryRun = rawTailParts.includes("--dry-run");
 	const stdin = rawTailParts.includes("--stdin") || rawTailParts.includes("-");
-	const tailParts = rawTailParts.filter((arg) => arg !== "--stdin" && arg !== "-");
+	const tailParts = rawTailParts.filter((arg) => arg !== "--stdin" && arg !== "-" && arg !== "--dry-run");
 
 	if (stdin && entry.kind !== "mode") {
 		return { kind: "error", message: `${commandFlag} does not support stdin input` };
@@ -717,6 +719,6 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 	const targetSuffix = formatTargetSuffix(target);
 	const canonicalCommand = `/${entry.name}${targetSuffix}${tail ? ` ${tail}` : ""}`;
 
-	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin, output };
+	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin, dryRun, output };
 }
 

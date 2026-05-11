@@ -212,6 +212,99 @@ describe("executeCliCommand", () => {
 		}
 	});
 
+	it("dry-runs builder one-shot commands inside a discarded undo group", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onPost("/api/undo/push_group", () => ({ success: true, result: null, logs: [], errors: [] }));
+		conn.onPost("/api/undo/pop_group", () => ({ success: true, result: null, logs: [], errors: [] }));
+		conn.onGet("/api/builder/tree", () => ({
+			success: true,
+			result: {
+				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
+				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
+				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
+				colour: "#414141", children: [], midi: [], fx: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/builder/apply", () => ({
+			success: true,
+			result: { scope: "root", groupName: "root", diff: [{ domain: "builder", action: "+", target: "LFO" }] },
+			logs: ["Add LFO"],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-builder", 'add LFO as "LFO"', "--dry-run", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toMatchObject({
+				ok: true,
+				value: {
+					dryRun: true,
+					validatedBy: "hise-undo-plan",
+					command: '/builder add LFO as "LFO"',
+				},
+			});
+		}
+		expect(conn.calls.filter((call) => call.endpoint === "/api/undo/push_group")).toHaveLength(1);
+		expect(conn.calls.filter((call) => call.endpoint === "/api/builder/apply")).toHaveLength(1);
+		expect(conn.calls.filter((call) => call.endpoint === "/api/undo/pop_group")).toHaveLength(1);
+		expect(conn.calls.find((call) => call.endpoint === "/api/undo/pop_group")?.body).toEqual({ cancel: true });
+	});
+
+	it("dry-run discards undo group after builder validation failures", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onPost("/api/undo/push_group", () => ({ success: true, result: null, logs: [], errors: [] }));
+		conn.onPost("/api/undo/pop_group", () => ({ success: true, result: null, logs: [], errors: [] }));
+		conn.onGet("/api/builder/tree", () => ({
+			success: true,
+			result: {
+				id: "SynthChain", processorId: "Master Chain", prettyName: "Container",
+				type: "SoundGenerator", subtype: "SoundGenerator", category: ["container"],
+				hasChildren: true, hasFX: false, modulation: [], bypassed: false,
+				colour: "#414141", children: [], midi: [], fx: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/builder/apply", () => ({
+			success: false,
+			result: null,
+			logs: [],
+			errors: [{ errorMessage: "Velocity cannot be added to Gain Modulation", callstack: [] }],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "-builder", 'add LFO as "Vel"', "--dry-run", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload).toMatchObject({
+				ok: false,
+				code: "validation_error",
+				error: expect.stringContaining("cannot be added"),
+				value: {
+					dryRun: true,
+					validatedBy: "hise-undo-plan",
+				},
+			});
+		}
+		expect(conn.calls.filter((call) => call.endpoint === "/api/undo/pop_group")).toHaveLength(1);
+		expect(conn.calls.find((call) => call.endpoint === "/api/undo/pop_group")?.body).toEqual({ cancel: true });
+	});
+
 	it("executes builder one-shot command from stdin", async () => {
 		mockObserverFetch();
 		const stdin = new PassThrough();

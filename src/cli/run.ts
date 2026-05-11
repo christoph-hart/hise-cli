@@ -176,7 +176,12 @@ export async function executeCliCommand(
 	try {
 		let result: import("../engine/result.js").CommandResult;
 		let payload: CliOutputPayload;
-		if (stdinBatch) {
+		if (parsed.dryRun) {
+			payload = await dryRunModeCommand(parsed, canonicalCommand, stdinSource, stdinBatch, session);
+			result = payload.ok
+				? { type: "text", content: "Dry-run validation passed" } as import("../engine/result.js").CommandResult
+				: { type: "error", message: "error" in payload ? payload.error : "Dry-run validation failed" } as import("../engine/result.js").CommandResult;
+		} else if (stdinBatch) {
 			const { executeScript } = await import("../engine/run/executor.js");
 			const { runReportResult } = await import("../engine/result.js");
 			const runResult = await executeScript(stdinBatch.script, session, undefined, {
@@ -206,6 +211,43 @@ export async function executeCliCommand(
 }
 
 const BATCHABLE_STDIN_MODES = new Set(["builder", "ui", "dsp"]);
+
+async function dryRunModeCommand(
+	parsed: Extract<import("./args.js").CliParseResult, { kind: "execute" }>,
+	canonicalCommand: string,
+	stdinSource: string | null,
+	stdinBatch: { script: import("../engine/run/types.js").ParsedScript } | null,
+	session: import("../engine/session.js").Session,
+): Promise<CliOutputPayload> {
+	if (!BATCHABLE_STDIN_MODES.has(parsed.mode)) {
+		return cliError("usage_error", `--dry-run is supported for builder, ui, and dsp mode commands`);
+	}
+	if (!session.connection) {
+		return cliError("hise_unavailable", "--dry-run requires a live HISE connection");
+	}
+
+	const { parseScript } = await import("../engine/run/parser.js");
+	const { dryRunScript } = await import("../engine/run/executor.js");
+	const script = stdinBatch?.script
+		?? (stdinSource !== null
+			? parseScript(`/${parsed.mode}\n${stdinSource}`)
+			: parseScript(canonicalCommand));
+	const validation = await dryRunScript(script, session);
+	const value = {
+		dryRun: true,
+		validatedBy: "hise-undo-plan",
+		command: canonicalCommand,
+		lines: script.lines.length,
+		errors: validation.errors,
+	};
+	if (!validation.ok) {
+		return {
+			...cliError("validation_error", validation.errors.map((error) => error.message).join("\n") || "Dry-run validation failed"),
+			value,
+		};
+	}
+	return { ok: true, value };
+}
 
 async function prepareModeStdinBatch(
 	mode: string,

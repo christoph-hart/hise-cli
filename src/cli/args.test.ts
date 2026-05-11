@@ -197,6 +197,15 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses dry-run for one-shot mode commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "-builder", "show", "tree", "--dry-run"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder show tree");
+			expect(result.dryRun).toBe(true);
+		}
+	});
+
 	it("rejects --stdin combined with inline mode command", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-builder", "--stdin", "show", "tree"], getCliCommands());
 		expect(result).toEqual({

@@ -13,6 +13,7 @@ mode:
     - Explicit add IDs are exact. hise-cli never silently accepts HISE auto-renaming for add ... as "Name"; duplicate IDs fail before mutation.
     - Use clone <target> <count> when you want HISE-style auto-renamed copies.
     - Without to, add lands at the current cd context, root by default.
+    - Use --dry-run on builder mutations to validate through HISE inside a discarded undo plan before committing changes.
   antiPatterns:
     - avoid: Passing comma chains or quoted module paths through one long shell argument when stdin is available.
       prefer: hise-cli -builder --stdin --agent
@@ -81,6 +82,12 @@ concepts:
       - Successful mutations return a compact diff summary such as +ModuleId, -ModuleId, or *ModuleId.Param.
       - show <target> returns a compact module summary for LLM output and does not include parameter values.
       - Use show <target>.<param> or get <target>.<param> when range, default, or value are needed before setting.
+  - id: dry-run-validation
+    title: Dry-run validation
+    body:
+      - Builder --dry-run executes the requested mutation inside a temporary HISE undo plan and always discards that plan.
+      - This validates against HISE's actual constraints without leaving project state changed.
+      - Use dry-run to check chain compatibility, duplicate IDs, routing validity, and parameter writes before committing.
 
 commands:
   - id: builder.show.tree

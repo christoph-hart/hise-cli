@@ -81,6 +81,10 @@ export const GENERATED_AGENT_CONTEXT = {
 			{
 				"flag": "--json",
 				"purpose": "Emits structured JSON output."
+			},
+			{
+				"flag": "--dry-run",
+				"purpose": "For builder, UI, and DSP mutations, validates against HISE inside a temporary undo plan that is always discarded."
 			}
 		]
 	},
@@ -129,7 +133,8 @@ export const GENERATED_AGENT_CONTEXT = {
 				"add requires as <name>; every module gets an explicit alias.",
 				"Explicit add IDs are exact. hise-cli never silently accepts HISE auto-renaming for add ... as \"Name\"; duplicate IDs fail before mutation.",
 				"Use clone <target> <count> when you want HISE-style auto-renamed copies.",
-				"Without to, add lands at the current cd context, root by default."
+				"Without to, add lands at the current cd context, root by default.",
+				"Use --dry-run on builder mutations to validate through HISE inside a discarded undo plan before committing changes."
 			],
 			"antiPatterns": [
 				{
@@ -246,6 +251,15 @@ export const GENERATED_AGENT_CONTEXT = {
 						"Successful mutations return a compact diff summary such as +ModuleId, -ModuleId, or *ModuleId.Param.",
 						"show <target> returns a compact module summary for LLM output and does not include parameter values.",
 						"Use show <target>.<param> or get <target>.<param> when range, default, or value are needed before setting."
+					]
+				},
+				{
+					"id": "dry-run-validation",
+					"title": "Dry-run validation",
+					"body": [
+						"Builder --dry-run executes the requested mutation inside a temporary HISE undo plan and always discards that plan.",
+						"This validates against HISE's actual constraints without leaving project state changed.",
+						"Use dry-run to check chain compatibility, duplicate IDs, routing validity, and parameter writes before committing."
 					]
 				}
 			],
@@ -547,7 +561,7 @@ export const GENERATED_AGENT_CONTEXT = {
 						"as <name> is mandatory.",
 						"Explicit IDs are exact; duplicate IDs fail before mutation with duplicate_id and candidate paths.",
 						"Sound-producing SoundGenerators get an automatic DefaultEnvelope* child from HISE.",
-						"Modulators require an explicit gain or pitch chain.",
+						"Modulators require an explicit chain target. Use the exact quoted string ID from the show tree command.",
 						"Chained add disallows to; every clause lands at the current context."
 					]
 				},

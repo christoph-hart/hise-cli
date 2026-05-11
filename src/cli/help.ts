@@ -88,7 +88,9 @@ OPTIONS
                      and shell-sensitive content. For those modes, multiple
                      non-empty stdin lines execute serially in the selected
                      mode only; use --run for workflows that switch modes.
-  --target <path>    Set context path for mode commands`;
+  --target <path>    Set context path for mode commands
+  --dry-run          Validate builder/ui/dsp mutations inside a discarded
+                     HISE undo plan without committing state changes`;
 
 // ── Per-mode scoped help ────────────────────────────────────────────
 
