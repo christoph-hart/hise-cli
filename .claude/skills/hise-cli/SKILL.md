@@ -1,12 +1,14 @@
 ---
 name: hise-cli
-description: Use hise-cli to inspect, edit, validate, and document HISE projects safely from agent workflows.
+description: Use hise-cli direct commands to inspect and modify HISE builder trees, UI components, DSP networks, and HiseScript callbacks.
 allowed-tools: Read Grep Glob Bash
 ---
 
 # hise-cli
 
-Use `hise-cli` for HISE project automation. Prefer dedicated CLI modes and documented wrappers over ad-hoc HiseScript snippets.
+Use `hise-cli` for automated development of HISE projects.
+
+This skill is opinionated: use the shown command shape first. Other supported forms may exist in `--help`, but agents should not branch unless a command fails or `which` returns a different recipe.
 
 ## Verify
 
@@ -14,6 +16,7 @@ Run these first when you need to confirm the local CLI surface:
 
 ```bash
 hise-cli --help
+hise-cli -status --agent
 hise-cli agent-context --agent
 ```
 
@@ -21,54 +24,39 @@ For documentation lookup, use `hise-cli mcp` so the workflow stays inside the CL
 
 ## Discovery
 
-Use deterministic local lookup before guessing commands:
+Start with `which`; use `agent-context --command <id>` only when you need the full command recipe.
 
 ```bash
-hise-cli which "set a script callback from a file" --agent
-hise-cli agent-context script --agent
-hise-cli agent-context mcp --agent
-```
-
-Use `--select <path>` to keep JSON small:
-
-```bash
-hise-cli which "inspect script symbols" --agent --select value.matches
+hise-cli which "connect slider to filter cutoff" --agent --select value[0]
+hise-cli agent-context --command ui.connect.control --agent
 ```
 
 ## MCP Documentation
 
-Use `hise-cli mcp` for HISE documentation lookup from this skill:
+Use `explore_hise` when unsure. Use exact query tools only when you already know the symbol or API class.
 
 ```bash
-hise-cli mcp search_hise --query Content.addKnob --domain api --limit 3 --agent
-hise-cli mcp explore_hise --query sampler --agent
+hise-cli mcp explore_hise --query "slider callback" --agent
 hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
-hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent
 ```
 
-Do not invent HiseScript APIs, UI properties, module parameters, or LAF functions from JavaScript knowledge. Look them up with `hise-cli mcp` or `hise-cli -api` first. If the current agent already has native HISE MCP access, that is equivalent for docs lookup.
+Do not invent HiseScript APIs, UI properties, module parameters, or LAF functions from JavaScript knowledge. Look them up with `hise-cli mcp` first. If the current agent already has native HISE MCP access, that is equivalent for docs lookup.
 
 ## Script Workflow
 
-Avoid shell-quoting callback bodies. Use stdin, files, or JSON files:
+For generated callback bodies, use stdin. For new persistent script features, use `script add-file` first so the code lives in an external file that can be diagnosed and compiled separately.
 
 ```bash
 hise-cli script get --module-id Interface --callback onInit --agent
-hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
 hise-cli script set --module-id Interface --callback onInit --stdin --agent
-hise-cli script set --module-id Interface --callbacks-json ./callbacks.json --agent
-```
-
-`script set` compiles by default. Add `--no-compile` only when intentionally staging changes.
-
-For external script files, diagnose before compiling when possible:
-
-```bash
-hise-cli script diagnose --file-path Scripts/UI.js --agent
+hise-cli script add-file UI/MyControls.js --module-id Interface --agent
+hise-cli script diagnose --file-path Scripts/UI/MyControls.js --agent
 hise-cli script compile --module-id Interface --agent
 ```
 
-Use REPL for read-only queries or explicit calls to existing functions. Do not use REPL to create persistent variables, callbacks, includes, or large source edits:
+Keep `onInit` small in real projects: initialize the interface, include external files, and avoid large implementation bodies directly in the callback.
+
+Use REPL only for short read-only queries or explicit calls to existing functions:
 
 ```bash
 hise-cli script repl --module-id Interface --stdin --agent
@@ -79,21 +67,78 @@ Inspect compiled script symbols with server-side filtering to avoid huge respons
 ```bash
 hise-cli script show tree --module-id Interface --symbols-only --agent
 hise-cli script show tree Knob --module-id Interface --format flat --limit 20 --agent
-hise-cli script show Components.Knob1 --module-id Interface --agent
 ```
 
-## Modal Modes
+## Builder, UI, And DSP Workflows
 
-Use the mode that matches the state you are changing:
+Use direct flag-style commands for builder, UI, and DSP automation.
+
+### Inspect Before Mutating
 
 ```bash
-hise-cli -builder "show tree" --agent
-hise-cli -ui "show tree" --agent
-hise-cli -ui set Button1.text "Start" --agent
-hise-cli -dsp "show tree" --agent
+hise-cli builder tree --agent
+hise-cli builder show --module Drive --agent
+hise-cli builder show --module Drive --param Gain --agent
+hise-cli ui tree --agent
+hise-cli dsp tree --module "Script FX1" --agent
 ```
 
-Prefer these modes over mutating UI, builder, DSP, project, or asset state through REPL-side HiseScript when a dedicated command exists.
+### Builder: Add And Configure Modules
+
+```bash
+hise-cli builder add --type SimpleGain --id Drive --agent
+hise-cli builder set --module Drive --Gain -6 --Balance 50 --agent
+hise-cli builder add --type LFO --id LeadGainLFO --parent Lead --chain "Gain Modulation" --agent
+hise-cli builder set --module "Script FX1" --network my_dsp --agent
+```
+
+Use exact HISE parameter names for dynamic flags, for example `--Gain`, `--Balance`, and `--Frequency`.
+
+### UI: Add Controls And Link Parameters
+
+```bash
+hise-cli ui add --type ScriptSlider --id Cutoff --parent Interface --agent
+hise-cli ui set --component Cutoff --bounds 0,0,128,32 --text Cutoff --itemColour 0xFFFFFFFF --agent
+hise-cli ui connect --component Cutoff --target MainFilter --param Frequency --matched --agent
+```
+
+Use exact HISE property names for dynamic flags, for example `--itemColour`, `--fontSize`, and `--visible`.
+
+### DSP: Edit Scriptnode Networks
+
+```bash
+hise-cli builder set --module "Script FX1" --network my_dsp --agent
+hise-cli dsp tree --module "Script FX1" --agent
+hise-cli dsp add --module "Script FX1" --type core.filter --id F1 --agent
+hise-cli dsp set --module "Script FX1" --node F1 --Frequency 1000 --skewFactor 0.3 --middlePosition 1000 --agent
+hise-cli dsp connect --module "Script FX1" --source LFO1 --target F1 --param Frequency --matched --agent
+hise-cli dsp connect --module "Script FX1" --source Root --source-param Cutoff --target F1 --param Frequency --agent
+hise-cli dsp save --module "Script FX1" --agent
+```
+
+`--source-param` and `--source-output` append a dot child to the source path internally. They are mutually exclusive.
+
+### Validate Before Committing
+
+Use `--dry-run` for builder/UI/DSP mutations when uncertain:
+
+```bash
+hise-cli builder add --type LFO --id LeadGainLFO --parent Lead --chain "Gain Modulation" --dry-run --agent
+hise-cli ui connect --component Cutoff --target MainFilter --param Frequency --matched --dry-run --agent
+hise-cli dsp connect --module "Script FX1" --source LFO1 --target F1 --param Frequency --matched --dry-run --agent
+```
+
+## Verification Workflow
+
+Verify state with direct read commands before and after mutations. Use `--select <path>` only for large read outputs.
+
+```bash
+hise-cli builder tree --agent
+hise-cli builder show --module Drive --agent
+hise-cli builder show --module Drive --param Gain --agent
+hise-cli ui tree --agent
+hise-cli dsp tree --module "Script FX1" --agent
+```
 
 ## Output And Errors
 
@@ -102,8 +147,6 @@ Use `--agent` for machine-readable output. It implies JSON and compact output:
 ```bash
 hise-cli script get --module-id Interface --agent
 ```
-
-Use `--select <path>` for focused output. Missing paths return `code: "select_not_found"`.
 
 Agent errors use stable `code` values. Exit codes are:
 
@@ -117,10 +160,14 @@ Agent errors use stable `code` values. Exit codes are:
 
 ## Decision Rules
 
-- Prefer `hise-cli which` and `hise-cli agent-context` for command discovery.
-- Use `hise-cli mcp` or equivalent native HISE MCP docs before guessing HISE APIs.
-- Prefer stdin, file, or JSON-file inputs for multi-line or nested data.
-- Prefer `--target "Script FX1"` syntax for targets with spaces.
-- Keep `onInit` small in real projects; include external files that can be diagnosed separately.
+- Start with `hise-cli which "<intent>" --agent --select value[0]`; use `agent-context --command <id>` only for full command details.
+- Use `hise-cli mcp explore_hise` before guessing, and exact MCP query tools only when you know the symbol.
+- Use direct `builder`, `ui`, and `dsp` commands for project mutations.
+- Use dynamic exact HISE flags for normal property and parameter writes. Use `--param/--value` only if `which` or `agent-context` specifically recommends it.
+- Use `--dry-run` before uncertain builder/UI/DSP mutations.
+- Inspect parameter metadata before setting unfamiliar values.
+- Use stdin for generated in-memory callback bodies.
+- Use `script add-file` for new persistent script features, then diagnose and compile the returned file path.
+- Keep `onInit` small in real projects; use `hise-cli script add-file <relative-path>.js --module-id Interface --agent` for new external files so they can be diagnosed separately.
 - Prefer component-specific control callbacks using `Component.setControlCallback(f)`. HISE requires `f` to be an `inline function` reference with signature `(component, value)`.
 - Do not rely on global `--compact` to alter command semantics. Use explicit mode options such as `--symbols-only` for compact tree shapes.

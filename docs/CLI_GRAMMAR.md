@@ -42,7 +42,7 @@ hise-cli ui set --component Cutoff --bounds 0,0,128,32 --text Cutoff --agent
 hise-cli dsp connect --module "Script FX1" --source LFO1 --target F1 --param Frequency --matched --agent
 ```
 
-The modal grammar in the mode sections below is the internal/TUI/script grammar. The shell parser renders direct flag-style commands to that grammar before dispatching to the shared mode execution layer. `.hsc` workflow files are executed with `hise-cli run <file>` or `hise-cli --run <file>`.
+The mode grammar in the sections below is the internal command grammar used by the shared execution layer. The shell parser renders direct flag-style commands to that grammar before dispatching. Workflow files are executed with `hise-cli run <file>` or `hise-cli --run <file>`.
 
 For builder, UI, and DSP direct commands, structural flags use the documented spelling. Dynamic property and parameter flags use exact HISE names and are case-sensitive:
 
@@ -96,9 +96,9 @@ Default one-shot CLI output is pretty text. Use output flags for machine consume
 Agent-safe tree queries must return structured JSON, not terminal-only tree art:
 
 ```
-hise-cli -builder show tree --agent
-hise-cli -ui show tree --agent
-hise-cli -dsp --target "Script FX1" show tree --agent
+hise-cli builder tree --agent
+hise-cli ui tree --agent
+hise-cli dsp tree --module "Script FX1" --agent
 ```
 
 Error payload shape under `--agent`:

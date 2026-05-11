@@ -148,11 +148,11 @@ describe("parseCliArgs", () => {
 	});
 
 	it("parses mcp raw methods with url and timeout", () => {
-		const result = parseCliArgs(["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--url", "https://mcp.hise.dev/mcp", "--timeout", "180"], getCliCommands());
+		const result = parseCliArgs(["node", "hise-cli", "mcp", "resources/read", "--uri", "hise://style-guides/hisescript-style", "--url", "http://localhost:4406/mcp", "--timeout", "180"], getCliCommands());
 		expect(result.kind).toBe("mcp");
 		if (result.kind === "mcp") {
 			expect(result.command.mode).toBe("method");
-			expect(result.command.url).toBe("https://mcp.hise.dev/mcp");
+			expect(result.command.url).toBe("http://localhost:4406/mcp");
 			expect(result.command.timeoutMs).toBe(180000);
 		}
 	});
@@ -307,6 +307,76 @@ describe("parseCliArgs", () => {
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe("/builder remove Drive2, Drive3");
 		}
+	});
+
+	it("parses direct builder routing and network commands", () => {
+		const routing = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "Synth1", "--routing", "stereo", "--routing-send", "0,1"], getCliCommands());
+		expect(routing.kind).toBe("execute");
+		if (routing.kind === "execute") {
+			expect(routing.canonicalCommand).toBe("/builder set Synth1.routing stereo, Synth1.routing.send [0,1]");
+		}
+		const network = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "Script FX1", "--network", "my_dsp.xml"], getCliCommands());
+		expect(network.kind).toBe("execute");
+		if (network.kind === "execute") {
+			expect(network.canonicalCommand).toBe('/builder set "Script FX1".network my_dsp.xml');
+		}
+	});
+
+	it("parses direct builder move clone rename and reset commands", () => {
+		const moveParent = parseCliArgs(["node", "hise-cli", "builder", "move", "--module", "Drive", "--parent", "Master Chain", "--chain", "fx"], getCliCommands());
+		expect(moveParent.kind).toBe("execute");
+		if (moveParent.kind === "execute") expect(moveParent.canonicalCommand).toBe('/builder set Drive.parent "Master Chain".fx');
+		const moveIndex = parseCliArgs(["node", "hise-cli", "builder", "move", "--module", "Drive", "--index", "0"], getCliCommands());
+		expect(moveIndex.kind).toBe("execute");
+		if (moveIndex.kind === "execute") expect(moveIndex.canonicalCommand).toBe("/builder set Drive.index 0");
+		const clone = parseCliArgs(["node", "hise-cli", "builder", "clone", "--module", "Drive", "--count", "2"], getCliCommands());
+		expect(clone.kind).toBe("execute");
+		if (clone.kind === "execute") expect(clone.canonicalCommand).toBe("/builder clone Drive 2");
+		const rename = parseCliArgs(["node", "hise-cli", "builder", "rename", "--module", "Drive", "--id", "Drive2"], getCliCommands());
+		expect(rename.kind).toBe("execute");
+		if (rename.kind === "execute") expect(rename.canonicalCommand).toBe('/builder rename Drive as "Drive2"');
+		const reset = parseCliArgs(["node", "hise-cli", "builder", "reset"], getCliCommands());
+		expect(reset.kind).toBe("execute");
+		if (reset.kind === "execute") expect(reset.canonicalCommand).toBe("/builder reset");
+	});
+
+	it("parses direct UI show add rename and remove commands", () => {
+		const show = parseCliArgs(["node", "hise-cli", "ui", "show", "--component", "Cutoff"], getCliCommands());
+		expect(show.kind).toBe("execute");
+		if (show.kind === "execute") expect(show.canonicalCommand).toBe("/ui show Cutoff");
+		const add = parseCliArgs(["node", "hise-cli", "ui", "add", "--type", "ScriptSlider", "--id", "Cutoff", "--parent", "Interface"], getCliCommands());
+		expect(add.kind).toBe("execute");
+		if (add.kind === "execute") expect(add.canonicalCommand).toBe('/ui add ScriptSlider as "Cutoff" to Interface');
+		const rename = parseCliArgs(["node", "hise-cli", "ui", "rename", "--component", "Cutoff", "--id", "CutoffSlider"], getCliCommands());
+		expect(rename.kind).toBe("execute");
+		if (rename.kind === "execute") expect(rename.canonicalCommand).toBe('/ui rename Cutoff as "CutoffSlider"');
+		const remove = parseCliArgs(["node", "hise-cli", "ui", "remove", "--component", "A", "--component", "B"], getCliCommands());
+		expect(remove.kind).toBe("execute");
+		if (remove.kind === "execute") expect(remove.canonicalCommand).toBe("/ui remove A, B");
+	});
+
+	it("parses direct DSP types show add source-output rename remove and save commands", () => {
+		const types = parseCliArgs(["node", "hise-cli", "dsp", "types", "filter"], getCliCommands());
+		expect(types.kind).toBe("execute");
+		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/dsp show types filter");
+		const show = parseCliArgs(["node", "hise-cli", "dsp", "show", "--module", "Script FX1", "--node", "F1"], getCliCommands());
+		expect(show.kind).toBe("execute");
+		if (show.kind === "execute") expect(show.canonicalCommand).toBe('/dsp."Script FX1" show F1');
+		const add = parseCliArgs(["node", "hise-cli", "dsp", "add", "--module", "Script FX1", "--type", "core.filter", "--id", "F1", "--parent", "root"], getCliCommands());
+		expect(add.kind).toBe("execute");
+		if (add.kind === "execute") expect(add.canonicalCommand).toBe('/dsp."Script FX1" add core.filter as "F1" to root');
+		const connect = parseCliArgs(["node", "hise-cli", "dsp", "connect", "--module", "Script FX1", "--source", "MultiOut", "--source-output", "0", "--target", "F1", "--param", "Frequency", "--matched"], getCliCommands());
+		expect(connect.kind).toBe("execute");
+		if (connect.kind === "execute") expect(connect.canonicalCommand).toBe('/dsp."Script FX1" connect MultiOut.0 to F1.Frequency matched');
+		const rename = parseCliArgs(["node", "hise-cli", "dsp", "rename", "--module", "Script FX1", "--node", "F1", "--id", "Filter1"], getCliCommands());
+		expect(rename.kind).toBe("execute");
+		if (rename.kind === "execute") expect(rename.canonicalCommand).toBe('/dsp."Script FX1" rename F1 as "Filter1"');
+		const remove = parseCliArgs(["node", "hise-cli", "dsp", "remove", "--module", "Script FX1", "--node", "F1", "--node", "F2"], getCliCommands());
+		expect(remove.kind).toBe("execute");
+		if (remove.kind === "execute") expect(remove.canonicalCommand).toBe('/dsp."Script FX1" remove F1, F2');
+		const save = parseCliArgs(["node", "hise-cli", "dsp", "save", "--module", "Script FX1"], getCliCommands());
+		expect(save.kind).toBe("execute");
+		if (save.kind === "execute") expect(save.canonicalCommand).toBe('/dsp."Script FX1" save');
 	});
 
 	it("rejects missing direct builder flags", () => {

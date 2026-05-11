@@ -75,33 +75,32 @@ that need to ensure HISE is available.
 hise-cli offers three ways to send commands. Picking the right one avoids
 wasted round-trips and keeps undo history clean.
 
-### Single one-shot command
+### Single direct command
 
 ```bash
-hise-cli -builder "add SimpleGain to Master Chain"
+hise-cli builder add --type SimpleGain --id MyGain
 ```
 
 Use when you need **one operation and want to inspect the result** before
 deciding what to do next. Each call returns JSON with the outcome.
 
-### Comma chaining
+### Multi-value direct commands
 
 ```bash
-hise-cli -builder "add SimpleGain as MyGain, set MyGain.Gain to -6, set MyGain.Balance to 15"
+hise-cli builder set --module MyGain --Gain -6 --Balance 15
 ```
 
 Use when you have **multiple related mutations in the same mode**. All
-commands execute in a single call. Comma chaining supports target inheritance
-— repeated `set` calls reuse the last target:
+values execute in a single call. Dynamic parameter flags use exact HISE names:
 
 ```bash
-hise-cli -builder "set MyGain.Gain -6, Balance 15, Bypass 0"
+hise-cli ui set --component Header --visible true --itemColour 0xFFFFFFFF
 ```
 
-Verb inheritance also works for `add`:
+Use repeated target flags when the command supports multiple targets:
 
 ```bash
-hise-cli -ui "add ScriptButton \"Play\", ScriptSlider \"Volume\", ScriptPanel \"Header\""
+hise-cli builder remove --module Drive2 --module Drive3
 ```
 
 **When NOT to use:** when you need to inspect intermediate results, or when
@@ -188,10 +187,10 @@ ordinary one-shot CLI automation.
 Run direct commands and verify after each logical step:
 
 ```bash
-hise-cli -builder "add SineSynth as Lead"
-hise-cli -builder "add SimpleGain to Lead"
-hise-cli -builder "set Lead.Gain 0.5"
-hise-cli -builder "show tree"
+hise-cli builder add --type SineSynth --id Lead
+hise-cli builder add --type SimpleGain --id LeadGain --parent Lead
+hise-cli builder set --module LeadGain --Gain 0.5
+hise-cli builder tree
 ```
 
 ### Checking undo history
@@ -269,7 +268,7 @@ Before writing any `set` command, check the parameter:
 
 ```bash
 # In builder mode: see all parameters with ranges
-hise-cli -builder "show SineSynth"
+hise-cli builder show --module SineSynth
 
 # Via MCP: get full parameter details
 query_module_parameter("SineSynth")

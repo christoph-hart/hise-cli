@@ -2,7 +2,7 @@ import type { CliErrorPayload } from "../cli/errors.js";
 import { cliError } from "../cli/errors.js";
 import type { McpCallOptions, McpCallRequest, McpClient, McpJsonValue, McpToolRequest } from "../engine/mcp/types.js";
 
-export const DEFAULT_HISE_MCP_URL = "https://mcp.hise.dev/mcp";
+export const DEFAULT_HISE_MCP_URL = "http://localhost:4406/mcp";
 const MCP_PROTOCOL_VERSION = "2024-11-05";
 
 interface McpHttpClientOptions {

@@ -18,7 +18,7 @@ describe("HttpMcpClient", () => {
 			return new Response('event: message\ndata: {"result":{"content":[{"type":"text","text":"ok"}]},"jsonrpc":"2.0","id":2}\n', { status: 200, headers: { "Content-Type": "text/event-stream" } });
 		}) as unknown as typeof fetch;
 
-		const client = new HttpMcpClient({ fetchImpl });
+		const client = new HttpMcpClient({ defaultUrl: "http://localhost:4406/mcp", fetchImpl });
 		const result = await client.callTool({ name: "search_hise", arguments: { query: "sampler" } });
 
 		expect(result).toEqual({ content: [{ type: "text", text: "ok" }] });
