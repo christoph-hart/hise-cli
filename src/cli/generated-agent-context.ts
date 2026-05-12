@@ -2201,7 +2201,7 @@ export const GENERATED_AGENT_CONTEXT = {
 		{
 			"id": "mcp",
 			"title": "HISE MCP documentation bridge",
-			"summary": "Call the HISE MCP documentation server through hise-cli when native MCP access is unavailable.",
+			"summary": "Call the HISE documentation server REST tool API through hise-cli.",
 			"invocation": [
 				{
 					"title": "Invocation 1",
@@ -2236,18 +2236,17 @@ export const GENERATED_AGENT_CONTEXT = {
 					"argv": [
 						"hise-cli",
 						"mcp",
-						"resources/read",
-						"--uri",
-						"hise://style-guides/hisescript-style",
+						"get_resource",
+						"--id",
+						"hisescript-style",
 						"--agent"
 					],
-					"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
+					"display": "hise-cli mcp get_resource --id hisescript-style --agent"
 				}
 			],
 			"notes": [
-				"Use native MCP access directly when the current AI agent has the HISE MCP server installed.",
-				"Use hise-cli mcp as a fallback bridge when native MCP setup is unavailable or unreliable.",
-				"hise-cli mcp preserves the MCP result under the normal hise-cli JSON envelope.",
+				"hise-cli mcp uses the stateless HISE docs REST API, not Streamable HTTP sessions.",
+				"hise-cli mcp preserves the REST tool result under the normal hise-cli JSON envelope.",
 				"Use --args-stdin or --args-file for nested or complex MCP arguments; keep inline --args only for tiny JSON.",
 				"Use docs lookup before inventing HiseScript APIs, UI properties, module parameters, or LAF functions."
 			],
@@ -2379,29 +2378,26 @@ export const GENERATED_AGENT_CONTEXT = {
 				},
 				{
 					"id": "mcp.raw.method",
-					"title": "Call a raw MCP method",
-					"purpose": "Call raw MCP methods such as resources/list, resources/read, tools/list, or prompts/list.",
+					"title": "List REST tools",
+					"purpose": "List mirrored HISE docs tools exposed by the REST API.",
 					"command": {
 						"argv": [
 							"hise-cli",
 							"mcp",
-							"resources/read",
-							"--uri",
-							"hise://style-guides/hisescript-style",
+							"tools/list",
 							"--agent"
 						],
-						"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
+						"display": "hise-cli mcp tools/list --agent"
 					},
 					"tags": [
 						"mcp",
-						"resources",
-						"prompts",
-						"methods"
+						"docs",
+						"tools",
+						"discovery"
 					],
 					"aliases": [
-						"read mcp resource",
 						"list mcp tools",
-						"call mcp method"
+						"list hise docs tools"
 					],
 					"help": {
 						"visibility": "common",
@@ -2417,21 +2413,9 @@ export const GENERATED_AGENT_CONTEXT = {
 								"--agent"
 							],
 							"display": "hise-cli mcp tools/list --agent"
-						},
-						{
-							"title": "Read HiseScript style guide",
-							"argv": [
-								"hise-cli",
-								"mcp",
-								"resources/read",
-								"--uri",
-								"hise://style-guides/hisescript-style",
-								"--agent"
-							],
-							"display": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent"
 						}
 					],
-					"syntax": "hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent",
+					"syntax": "hise-cli mcp tools/list --agent",
 					"contexts": [
 						"cli"
 					],
@@ -2687,6 +2671,9 @@ export const GENERATED_AGENT_CONTEXT = {
 				"Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.",
 				"For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.",
 				"If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.",
+				"Do not create, move, resize, or style static UI controls from script callbacks; use hise-cli ui add/set/connect for static interface structure.",
+				"In UI work, HiseScript is for callbacks, runtime behaviour, data-dependent updates, LAF, and paint routines on existing components.",
+				"If Content.addXXX() is unavoidable, omit position arguments and set bounds with hise-cli ui set so Interface Designer edits survive recompilation.",
 				"For multi-step workflows that need to switch modes, use hise-cli run with a workflow file.",
 				"Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.",
 				"Prefer script add-file for new external script files. It creates a one-namespace stub, adds the HISE include line to onInit, compiles, and returns the absolute path for editing.",
@@ -2701,6 +2688,14 @@ export const GENERATED_AGENT_CONTEXT = {
 				{
 					"avoid": "Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.",
 					"prefer": "hise-cli ui set --component <component> [property flags...] --agent"
+				},
+				{
+					"avoid": "Building static UI layout in onInit with Content.add*, setPosition, or set properties.",
+					"prefer": "hise-cli ui add/set/connect for components, bounds, text, colours, and hierarchy; then script dynamic behaviour."
+				},
+				{
+					"avoid": "Content.addPanel(\"Panel\", x, y) or other positioned Content.addXXX calls.",
+					"prefer": "Content.addPanel(\"Panel\"), then hise-cli ui set --component Panel --bounds x,y,w,h --agent."
 				},
 				{
 					"avoid": "Putting large implementation bodies directly into onInit.",
@@ -3472,6 +3467,8 @@ export const GENERATED_AGENT_CONTEXT = {
 			"notes": [
 				"The shell CLI uses direct UI subcommands and flags only.",
 				"UI commands default --module to Interface when omitted.",
+				"Create static components, bounds, text, colours, and hierarchy with UI commands; do not script these as onInit layout code.",
+				"Use HiseScript for callbacks, runtime behaviour, data-dependent updates, LAF, and paint routines on existing components.",
 				"connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component.",
 				"Use --dry-run on mutations to validate through HISE inside a discarded undo plan before committing changes."
 			],
@@ -3479,6 +3476,22 @@ export const GENERATED_AGENT_CONTEXT = {
 				{
 					"avoid": "Manually setting processorId and parameterId without matching control metadata.",
 					"prefer": "hise-cli ui connect --source Cutoff --target MainFilter --param Frequency --matched --agent"
+				},
+				{
+					"avoid": "Removing and recreating controls just to reparent them.",
+					"prefer": "hise-cli ui set --component Cutoff --parent ControlsPanel --agent"
+				},
+				{
+					"avoid": "Sketching the whole interface in one ScriptPanel.",
+					"prefer": "Create the component hierarchy first, then style focused sections."
+				},
+				{
+					"avoid": "Creating, moving, resizing, or styling static controls from HiseScript onInit.",
+					"prefer": "Use ui add and ui set commands for the static interface, then script callbacks or paint routines."
+				},
+				{
+					"avoid": "Passing position arguments to Content.addXXX() when scripted creation is unavoidable.",
+					"prefer": "Create with Content.addXXX(\"Id\"), then set bounds with hise-cli ui set --component Id --bounds x,y,w,h --agent."
 				}
 			],
 			"quickStart": [
@@ -3502,11 +3515,9 @@ export const GENERATED_AGENT_CONTEXT = {
 						"ScriptSlider",
 						"--id",
 						"Cutoff",
-						"--parent",
-						"Interface",
 						"--agent"
 					],
-					"display": "hise-cli ui add --type ScriptSlider --id Cutoff --parent Interface --agent"
+					"display": "hise-cli ui add --type ScriptSlider --id Cutoff --agent"
 				},
 				{
 					"title": "Configure component geometry and text",
@@ -3540,6 +3551,18 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--agent"
 					],
 					"display": "hise-cli ui connect --source Cutoff --target MainFilter --param Frequency --matched --agent"
+				},
+				{
+					"title": "Capture a UI screenshot",
+					"argv": [
+						"hise-cli",
+						"ui",
+						"screenshot",
+						"--output",
+						"images/ui.png",
+						"--agent"
+					],
+					"display": "hise-cli ui screenshot --output images/ui.png --agent"
 				}
 			],
 			"concepts": [
@@ -3566,9 +3589,27 @@ export const GENERATED_AGENT_CONTEXT = {
 					"title": "Component properties",
 					"body": [
 						"UI set writes ScriptComponent properties such as bounds, text, value, colours, visibility, and enabled state.",
+						"Use --parent <component> to reparent a component.",
+						"--parentComponent is accepted as a reparent alias when property metadata suggests that HISE name.",
+						"The root node is displayed as root in agent output; use --parent root only when an explicit root parent is clearer than omitting --parent.",
+						"--parent Content is accepted as a compatibility alias for root because HISE exposes the script object as Content.",
+						"Use --index <n> to reorder within the current parent.",
 						"Dynamic property flags use exact HISE property names such as --itemColour and --fontSize.",
 						"Prefer --bounds x,y,w,h for geometry.",
 						"For complex property payloads, use a JSON file input once supported by the command."
+					]
+				},
+				{
+					"id": "layout-strategy",
+					"title": "Layout Strategy",
+					"body": [
+						"Build hierarchy and bounds with UI commands first; then apply styles, LAF, and paint routines in focused batches.",
+						"Dynamic UI logic means callbacks and runtime updates, not scripted creation or layout of static controls.",
+						"If Content.addXXX() is unavoidable, omit position arguments and set bounds with UI commands so Interface Designer edits survive recompilation.",
+						"Use nested ScriptPanels for sections; 4-5 levels is fine in complex UIs.",
+						"Prefer small focused components over one large painted background.",
+						"For static section headers, prefer ScriptPanel paint text over extra Label components.",
+						"Use predictable grouped IDs like Osc1Level, Osc2Level, EnvAttack, FxDelayMix for script batching."
 					]
 				},
 				{
@@ -3581,6 +3622,19 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--target is the builder module ID or path.",
 						"--param is the target builder parameter ID.",
 						"--matched copies compatible range, items, label, or default metadata depending on component type."
+					]
+				},
+				{
+					"id": "screenshots",
+					"title": "Screenshots",
+					"body": [
+						"ui screenshot captures the full interface or one component through HISE's testing screenshot endpoint.",
+						"--module defaults to Interface.",
+						"--component captures and crops to that component's bounds.",
+						"--output writes a PNG file; relative paths resolve from the HISE project folder.",
+						"--scale accepts decimal values such as 0.5.",
+						"[object Object]",
+						"Prefer --component and low --scale to capture only the risky area."
 					]
 				},
 				{
@@ -3718,11 +3772,9 @@ export const GENERATED_AGENT_CONTEXT = {
 							"ScriptSlider",
 							"--id",
 							"Cutoff",
-							"--parent",
-							"Interface",
 							"--agent"
 						],
-						"display": "hise-cli ui add --type ScriptSlider --id Cutoff --parent Interface --agent"
+						"display": "hise-cli ui add --type ScriptSlider --id Cutoff --agent"
 					},
 					"tags": [
 						"ui",
@@ -3756,11 +3808,9 @@ export const GENERATED_AGENT_CONTEXT = {
 								"ScriptSlider",
 								"--id",
 								"Cutoff",
-								"--parent",
-								"Interface",
 								"--agent"
 							],
-							"display": "hise-cli ui add --type ScriptSlider --id Cutoff --parent Interface --agent"
+							"display": "hise-cli ui add --type ScriptSlider --id Cutoff --agent"
 						},
 						{
 							"title": "Add a button",
@@ -3772,17 +3822,16 @@ export const GENERATED_AGENT_CONTEXT = {
 								"ScriptButton",
 								"--id",
 								"EnableFilter",
-								"--parent",
-								"Interface",
 								"--agent"
 							],
-							"display": "hise-cli ui add --type ScriptButton --id EnableFilter --parent Interface --agent"
+							"display": "hise-cli ui add --type ScriptButton --id EnableFilter --agent"
 						}
 					],
 					"notes": [
 						"--id is mandatory and exact.",
 						"Duplicate IDs fail before mutation with duplicate_id and candidate paths.",
-						"--parent defaults to the root UI context when omitted."
+						"--parent defaults to the root UI context when omitted.",
+						"--parent root and --parent Content are accepted and normalized to the root UI context."
 					]
 				},
 				{
@@ -3857,10 +3906,43 @@ export const GENERATED_AGENT_CONTEXT = {
 								"--agent"
 							],
 							"display": "hise-cli ui set --component Cutoff --visible false --agent"
+						},
+						{
+							"title": "Reparent a component",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"set",
+								"--component",
+								"Cutoff",
+								"--parent",
+								"ControlsPanel",
+								"--agent"
+							],
+							"display": "hise-cli ui set --component Cutoff --parent ControlsPanel --agent"
+						},
+						{
+							"title": "Reparent using property metadata name",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"set",
+								"--component",
+								"Cutoff",
+								"--parentComponent",
+								"ControlsPanel",
+								"--agent"
+							],
+							"display": "hise-cli ui set --component Cutoff --parentComponent ControlsPanel --agent"
 						}
 					],
 					"notes": [
 						"--bounds accepts x,y,w,h.",
+						"--parent reparents the component.",
+						"--parentComponent is accepted as an alias for --parent.",
+						"--parent root and --parentComponent root move the component to the root UI context.",
+						"--parent Content and --parentComponent Content are accepted as compatibility aliases for root.",
+						"--index reorders the component within its current parent.",
 						"Other property flags map to ScriptComponent property names.",
 						"Use --dry-run before committing broad property edits."
 					]
@@ -3989,6 +4071,96 @@ export const GENERATED_AGENT_CONTEXT = {
 						"ScriptComboBox requires a builder parameter with type ComboBox and matched copies newline-separated items.",
 						"ScriptButton requires a builder parameter with type Button and matched copies the parameter id into text plus defaultValue.",
 						"matched uses /api/builder/tree?verbose=true metadata."
+					]
+				},
+				{
+					"id": "ui.screenshot",
+					"title": "Capture UI screenshot",
+					"purpose": "Capture the full ScriptProcessor interface or crop to one ScriptComponent.",
+					"syntax": "ui screenshot [--component <id>] [--scale <n>] [--output <png>] [--module <module>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"ui",
+							"screenshot",
+							"--output",
+							"images/ui.png",
+							"--agent"
+						],
+						"display": "hise-cli ui screenshot --output images/ui.png --agent"
+					},
+					"tags": [
+						"ui",
+						"screenshot",
+						"component",
+						"testing",
+						"read-only"
+					],
+					"aliases": [
+						"capture ui screenshot",
+						"screenshot component",
+						"grab component bounds",
+						"export ui png"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 55
+					},
+					"examples": [
+						{
+							"title": "Capture full interface",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"screenshot",
+								"--output",
+								"images/ui.png",
+								"--agent"
+							],
+							"display": "hise-cli ui screenshot --output images/ui.png --agent"
+						},
+						{
+							"title": "Capture one component",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"screenshot",
+								"--component",
+								"Cutoff",
+								"--scale",
+								"0.5",
+								"--output",
+								"images/cutoff.png",
+								"--agent"
+							],
+							"display": "hise-cli ui screenshot --component Cutoff --scale 0.5 --output images/cutoff.png --agent"
+						},
+						{
+							"title": "Capture another module UI",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"screenshot",
+								"--module",
+								"ScriptFX",
+								"--output",
+								"images/scriptfx.png",
+								"--agent"
+							],
+							"display": "hise-cli ui screenshot --module ScriptFX --output images/scriptfx.png --agent"
+						}
+					],
+					"notes": [
+						"--module defaults to Interface.",
+						"Omit --component to capture the full interface.",
+						"--component captures the component bounds within the rendered interface.",
+						"--output must be a PNG path; relative paths resolve from the HISE project folder.",
+						"Prefer --component and low --scale after visual-risk edits."
 					]
 				},
 				{
@@ -4127,6 +4299,9 @@ export const GENERATED_AGENT_CONTEXT = {
 					"value",
 					"visible",
 					"enabled",
+					"parent",
+					"parentComponent",
+					"index",
 					"colour",
 					"bgColour",
 					"itemColour",

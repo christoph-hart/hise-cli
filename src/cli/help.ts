@@ -143,20 +143,19 @@ EXAMPLES
 
 SYNTAX
   hise-cli mcp <tool-name> [--field value ...] [--agent]
-  hise-cli mcp <mcp-method> [--field value ...] [--agent]
   hise-cli mcp <tool-name> --args '<json>' [--agent]
   hise-cli mcp <tool-name> --args-file ./args.json [--agent]
   hise-cli mcp <tool-name> --args-stdin [--agent]
 
 DESCRIPTION
-  Calls the HISE MCP documentation server using Streamable HTTP. Tool names
-  without a slash are sent as MCP tools/call requests. Names containing a slash
-  are sent as raw MCP methods such as resources/read or tools/list.
+  Calls the HISE documentation server using its stateless REST tool API. Tool
+  names are sent to POST /api/tools/<tool-name>. The tools/list method is
+  supported through GET /api/tools for discovery.
 
-	  Default endpoint: HISE_MCP_URL or http://localhost:4406/mcp.
+	  Default endpoint: HISE_DOCS_API_URL, HISE_MCP_URL, or http://localhost:4406.
 
 OPTIONS
-  --url <url>          Override the MCP endpoint
+  --url <url>          Override the REST API base URL
   --timeout <seconds>  Request timeout (also accepts 500ms or 2s)
   --args <json>        Exact JSON arguments / params
   --args-file <path>   Read exact JSON arguments / params from a file
@@ -170,14 +169,13 @@ EXAMPLES
   hise-cli mcp search_hise --query "Content.addKnob" --domain api --limit 3 --agent
   hise-cli mcp explore_hise --query "create slider callback" --domain ui --source docs --timeout 180 --agent
   hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
-  hise-cli mcp resources/read --uri hise://style-guides/hisescript-style --agent
   hise-cli mcp tools/list --agent
 
 TUI MODE
   Type /mcp, then enter calls like:
     explore_hise sampler
     search_hise Content.addKnob
-    resources/read hise://style-guides/hisescript-style`,
+    query_module_parameter WaveSynth.Gain`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 

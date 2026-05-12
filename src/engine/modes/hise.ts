@@ -442,6 +442,7 @@ export class HiseMode implements Mode {
 
 		// Build query string
 		const params = new URLSearchParams();
+		params.set("moduleId", "Interface");
 		params.set("outputPath", outputPath);
 		if (opts.id) params.set("id", opts.id);
 		if (opts.scale !== undefined) params.set("scale", String(opts.scale));

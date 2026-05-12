@@ -73,8 +73,16 @@ describe("parseCliArgs", () => {
 		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script"], getCliCommands());
 		expect(result.kind).toBe("agent-context");
 		if (result.kind === "agent-context") {
-			expect(result.query).toEqual({ type: "mode", modeId: "script" });
+			expect(result.query).toEqual({ type: "mode", modeId: "script", full: false });
 			expect(result.output.json).toBe(true);
+		}
+	});
+
+	it("parses full scoped agent-context mode queries", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "script", "--full"], getCliCommands());
+		expect(result.kind).toBe("agent-context");
+		if (result.kind === "agent-context") {
+			expect(result.query).toEqual({ type: "mode", modeId: "script", full: true });
 		}
 	});
 
@@ -118,6 +126,11 @@ describe("parseCliArgs", () => {
 	it("rejects unknown agent-context flags", () => {
 		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--unknown"], getCliCommands());
 		expect(result).toEqual({ kind: "error", message: "Unexpected argument for agent-context: --unknown" });
+	});
+
+	it("rejects full agent-context without mode", () => {
+		const result = parseCliArgs(["node", "hise-cli", "agent-context", "--full"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "agent-context --full requires a mode" });
 	});
 
 	it("parses which queries as JSON output", () => {
@@ -259,11 +272,47 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct UI screenshot flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "ui", "screenshot", "--module", "Interface", "--component", "Cutoff", "--scale", "0.5", "--output", "images/cutoff.png"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/ui screenshot module Interface component Cutoff scale 0.5 output "images/cutoff.png"');
+		}
+	});
+
 	it("parses direct UI dynamic property flags exactly", () => {
 		const result = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Knob", "--itemColour", "0xFFFFFFFF", "--fontSize", "14"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe("/ui set Knob.itemColour 0xFFFFFFFF, Knob.fontSize 14");
+		}
+	});
+
+	it("parses direct UI parent and index property flags", () => {
+		const parent = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--parent", "ControlsPanel"], getCliCommands());
+		expect(parent.kind).toBe("execute");
+		if (parent.kind === "execute") {
+			expect(parent.canonicalCommand).toBe("/ui set Cutoff.parent ControlsPanel");
+		}
+		const parentComponent = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--parentComponent", "ControlsPanel"], getCliCommands());
+		expect(parentComponent.kind).toBe("execute");
+		if (parentComponent.kind === "execute") {
+			expect(parentComponent.canonicalCommand).toBe("/ui set Cutoff.parent ControlsPanel");
+		}
+		const rootParent = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--parentComponent", "Content"], getCliCommands());
+		expect(rootParent.kind).toBe("execute");
+		if (rootParent.kind === "execute") {
+			expect(rootParent.canonicalCommand).toBe('/ui set Cutoff.parent ""');
+		}
+		const namedRootParent = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--parentComponent", "root"], getCliCommands());
+		expect(namedRootParent.kind).toBe("execute");
+		if (namedRootParent.kind === "execute") {
+			expect(namedRootParent.canonicalCommand).toBe('/ui set Cutoff.parent ""');
+		}
+		const index = parseCliArgs(["node", "hise-cli", "ui", "set", "--component", "Cutoff", "--index", "0"], getCliCommands());
+		expect(index.kind).toBe("execute");
+		if (index.kind === "execute") {
+			expect(index.canonicalCommand).toBe("/ui set Cutoff.index 0");
 		}
 	});
 
@@ -344,9 +393,15 @@ describe("parseCliArgs", () => {
 		const show = parseCliArgs(["node", "hise-cli", "ui", "show", "--component", "Cutoff"], getCliCommands());
 		expect(show.kind).toBe("execute");
 		if (show.kind === "execute") expect(show.canonicalCommand).toBe("/ui show Cutoff");
-		const add = parseCliArgs(["node", "hise-cli", "ui", "add", "--type", "ScriptSlider", "--id", "Cutoff", "--parent", "Interface"], getCliCommands());
+		const add = parseCliArgs(["node", "hise-cli", "ui", "add", "--type", "ScriptSlider", "--id", "Cutoff", "--parent", "ControlsPanel"], getCliCommands());
 		expect(add.kind).toBe("execute");
-		if (add.kind === "execute") expect(add.canonicalCommand).toBe('/ui add ScriptSlider as "Cutoff" to Interface');
+		if (add.kind === "execute") expect(add.canonicalCommand).toBe('/ui add ScriptSlider as "Cutoff" to ControlsPanel');
+		const rootAdd = parseCliArgs(["node", "hise-cli", "ui", "add", "--type", "ScriptSlider", "--id", "Cutoff", "--parent", "Content"], getCliCommands());
+		expect(rootAdd.kind).toBe("execute");
+		if (rootAdd.kind === "execute") expect(rootAdd.canonicalCommand).toBe('/ui add ScriptSlider as "Cutoff"');
+		const namedRootAdd = parseCliArgs(["node", "hise-cli", "ui", "add", "--type", "ScriptSlider", "--id", "Cutoff", "--parent", "root"], getCliCommands());
+		expect(namedRootAdd.kind).toBe("execute");
+		if (namedRootAdd.kind === "execute") expect(namedRootAdd.canonicalCommand).toBe('/ui add ScriptSlider as "Cutoff"');
 		const rename = parseCliArgs(["node", "hise-cli", "ui", "rename", "--component", "Cutoff", "--id", "CutoffSlider"], getCliCommands());
 		expect(rename.kind).toBe("execute");
 		if (rename.kind === "execute") expect(rename.canonicalCommand).toBe('/ui rename Cutoff as "CutoffSlider"');

@@ -79,20 +79,47 @@ describe("generated agent context", () => {
 		if (!result.ok) return;
 		const context = result.value as {
 			modes: Array<{ id: string; commandCount: number }>;
-			commands: Array<{ id: string; examples?: unknown }>;
-			errorExitCodes: Record<string, number>;
+			commands?: unknown;
+			lookup: Record<string, string>;
 		};
 
 		expect(context.modes.some((mode) => mode.id === "script")).toBe(true);
 		expect(context.modes.find((mode) => mode.id === "script")?.commandCount).toBeGreaterThan(0);
-		expect(context.commands.some((command) => command.id === "script.compile")).toBe(true);
-		expect(context.commands.find((command) => command.id === "script.compile")?.examples).toBeUndefined();
-		expect(context.errorExitCodes.hise_api_error).toBe(4);
-		expect(context.errorExitCodes.expectation_failed).toBe(6);
+		expect(context.commands).toBeUndefined();
+		expect(context.lookup.intent).toContain("--select value[0]");
 	});
 
-	it("builds full mode context for a scoped mode query", () => {
-		const result = buildAgentContext({ type: "mode", modeId: "script" });
+	it("builds compact mode context for a scoped mode query", () => {
+		const result = buildAgentContext({ type: "mode", modeId: "ui", full: false });
+
+		expect(result.ok).toBe(true);
+		if (!result.ok) return;
+		const mode = result.value as {
+			id: string;
+			commands: Array<{ id: string; syntax: string; purpose: string; examples?: unknown; command?: unknown; tags?: unknown; aliases?: unknown; help?: unknown }>;
+			concepts: Array<{ id: string; title: string; body: string[] }>;
+			notes: string[];
+			antiPatterns: Array<{ avoid: string; prefer: string }>;
+			lookup: Record<string, string>;
+		};
+		expect(mode.id).toBe("ui");
+		const setCommand = mode.commands.find((command) => command.id === "ui.set.properties");
+		expect(setCommand?.purpose).toBe("Update one or more ScriptComponent properties.");
+		expect(setCommand?.examples).toBeUndefined();
+		expect(setCommand?.command).toBeUndefined();
+		expect(setCommand?.tags).toBeUndefined();
+		expect(setCommand?.aliases).toBeUndefined();
+		expect(setCommand?.help).toBeUndefined();
+		expect(mode.notes.some((note) => note.includes("do not script these as onInit layout code"))).toBe(true);
+		expect(mode.antiPatterns.some((item) => item.avoid.includes("static controls from HiseScript onInit"))).toBe(true);
+		const layout = mode.concepts.find((concept) => concept.id === "layout-strategy");
+		expect(layout?.body.length).toBeLessThanOrEqual(2);
+		expect(layout?.body.join(" ")).toContain("Dynamic UI logic means callbacks and runtime updates");
+		expect(mode.lookup.full).toContain("--full");
+	});
+
+	it("builds full mode context when requested", () => {
+		const result = buildAgentContext({ type: "mode", modeId: "script", full: true });
 
 		expect(result.ok).toBe(true);
 		if (!result.ok) return;
@@ -114,16 +141,18 @@ describe("generated agent context", () => {
 	});
 
 	it("builds a flat command index", () => {
-		const index = buildAgentCommandIndex() as Array<{ id: string; mode: string; examples?: unknown }>;
+		const index = buildAgentCommandIndex() as Array<{ id: string; mode: string; title: string; examples?: unknown; command?: unknown; tags?: unknown }>;
 
 		expect(index).toEqual(expect.arrayContaining([
 			expect.objectContaining({ id: "script.compile", mode: "script" }),
 		]));
 		expect(index.find((command) => command.id === "script.compile")?.examples).toBeUndefined();
+		expect(index.find((command) => command.id === "script.compile")?.command).toBeUndefined();
+		expect(index.find((command) => command.id === "script.compile")?.tags).toBeUndefined();
 	});
 
 	it("returns usage errors for unknown scoped agent-context queries", () => {
-		expect(buildAgentContext({ type: "mode", modeId: "nonesuch" })).toEqual({
+		expect(buildAgentContext({ type: "mode", modeId: "nonesuch", full: false })).toEqual({
 			ok: false,
 			code: "usage_error",
 			error: "Unknown agent-context mode: nonesuch",

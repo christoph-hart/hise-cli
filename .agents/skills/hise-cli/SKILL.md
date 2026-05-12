@@ -24,11 +24,23 @@ For documentation lookup, use `hise-cli mcp` so the workflow stays inside the CL
 
 ## Discovery
 
-Start with `which`; use `agent-context --command <id>` only when you need the full command recipe.
+Start with `which`, then fetch only the selected command recipe. Do not load full mode context by default.
 
 ```bash
 hise-cli which "connect slider to filter cutoff" --agent --select value[0]
 hise-cli agent-context --command ui.connect.control --agent
+```
+
+Use compact mode context only for multi-command workflows or strategy decisions:
+
+```bash
+hise-cli agent-context ui --agent
+```
+
+Use full mode context only when compact context and command recipes are insufficient:
+
+```bash
+hise-cli agent-context ui --full --agent
 ```
 
 ## MCP Documentation
@@ -55,6 +67,8 @@ hise-cli script compile --module-id Interface --agent
 ```
 
 Keep `onInit` small in real projects: initialize the interface, include external files, and avoid large implementation bodies directly in the callback.
+Do not build static UI layout in HiseScript callbacks. Use `hise-cli ui add/set/connect` for components, bounds, text, colours, and hierarchy; use scripts for callbacks, runtime behaviour, LAF, and paint routines on existing components.
+If `Content.addXXX()` is unavoidable, omit position arguments and set bounds afterwards with `hise-cli ui set --component <id> --bounds x,y,w,h --agent`; this keeps Interface Designer edits from jumping back after recompilation.
 
 Use REPL only for short read-only queries or explicit calls to existing functions:
 
@@ -97,12 +111,22 @@ Use exact HISE parameter names for dynamic flags, for example `--Gain`, `--Balan
 ### UI: Add Controls And Link Parameters
 
 ```bash
-hise-cli ui add --type ScriptSlider --id Cutoff --parent Interface --agent
+hise-cli ui add --type ScriptSlider --id Cutoff --agent
 hise-cli ui set --component Cutoff --bounds 0,0,128,32 --text Cutoff --itemColour 0xFFFFFFFF --agent
+hise-cli ui set --component Cutoff --parent ControlsPanel --agent
 hise-cli ui connect --component Cutoff --target MainFilter --param Frequency --matched --agent
+hise-cli ui screenshot --component Cutoff --scale 0.5 --output images/cutoff.png --agent
 ```
 
 Use exact HISE property names for dynamic flags, for example `--itemColour`, `--fontSize`, and `--visible`.
+For reparenting, prefer `--parent`; `--parentComponent` is accepted when metadata suggests that property name.
+`ui tree --agent` displays the root as `root`; omit `--parent` for root-level adds, or use `--parent root` when explicit root placement is clearer. `--parent Content` is accepted only as a compatibility alias for root.
+Use `ui screenshot` for full interface PNGs or `--component <id>` to crop to a component's bounds. `--module` defaults to `Interface`.
+Build static UI structure with UI commands first: hierarchy, bounds, text, colours, and grouped IDs. Dynamic UI logic means callbacks and runtime updates, not scripted creation or layout of static controls.
+Use HiseScript for callbacks, runtime behaviour, LAF, and paint routines on existing components.
+If scripted `Content.addXXX()` creation is unavoidable, do not pass position arguments; set bounds with `ui set` afterwards to preserve Interface Designer editability.
+Prefer nested panels and focused components over one large painted background. Do not remove/recreate controls just to reparent them; use `ui set --parent`.
+After visual-risk edits such as Path drawing, FloatingTile layout, LAF, paint routines, or complex nesting, capture the smallest useful screenshot with `--component` and a low `--scale`.
 
 ### DSP: Edit Scriptnode Networks
 

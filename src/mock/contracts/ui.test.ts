@@ -6,6 +6,7 @@ import {
 	applyUiDiffToTree,
 	collectComponentIds,
 	cleanUiPropertiesForLlm,
+	cleanUiTreeForLlm,
 } from "./ui.js";
 import { MOCK_COMPONENT_TREE } from "../componentTree.js";
 
@@ -141,6 +142,24 @@ describe("cleanUiPropertiesForLlm", () => {
 				{ id: "text", value: "Button1" },
 				{ id: "radioGroup", value: 1, modified: true },
 				{ id: "style", value: 0, items: ["Text", "Toggle"] },
+			],
+		});
+	});
+});
+
+describe("cleanUiTreeForLlm", () => {
+	it("renames only the synthetic root Content node for agents", () => {
+		expect(cleanUiTreeForLlm({
+			id: "Content",
+			type: "ScriptPanel",
+			childComponents: [
+				{ id: "Content", type: "ScriptButton", childComponents: [] },
+			],
+		})).toEqual({
+			id: "root",
+			type: "Root",
+			childComponents: [
+				{ id: "Content", type: "ScriptButton" },
 			],
 		});
 	});

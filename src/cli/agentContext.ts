@@ -1,5 +1,5 @@
 import { GENERATED_AGENT_CONTEXT } from "./generated-agent-context.js";
-import { CLI_ERROR_EXIT_CODES, cliError, type CliErrorPayload } from "./errors.js";
+import { cliError, type CliErrorPayload } from "./errors.js";
 import type { AgentContextQuery } from "./args.js";
 import type { AgentCommand, AgentContextMode } from "./agentContextTypes.js";
 
@@ -9,7 +9,7 @@ export function buildAgentContext(query: AgentContextQuery = { type: "manifest" 
 	if (query.type === "mode") {
 		const mode = getAgentContextMode(query.modeId);
 		if (!mode) return cliError("usage_error", `Unknown agent-context mode: ${query.modeId}`);
-		return { ok: true, value: mode };
+		return { ok: true, value: query.full ? mode : buildCompactModeContext(mode) };
 	}
 	const command = getAgentCommand(query.id);
 	if (!command) return cliError("usage_error", `Unknown agent-context command: ${query.id}`);
@@ -19,23 +19,19 @@ export function buildAgentContext(query: AgentContextQuery = { type: "manifest" 
 export function buildAgentContextManifest(): object {
 	return {
 		schemaVersion: GENERATED_AGENT_CONTEXT.schemaVersion,
-		common: GENERATED_AGENT_CONTEXT.common,
-		cli: cliInfo(),
-		globalFlags: globalFlags(),
-		inputPatterns: inputPatterns(),
-		errorExitCodes: CLI_ERROR_EXIT_CODES,
+		cli: { name: "hise-cli" },
 		modes: GENERATED_AGENT_CONTEXT.modes.map((mode) => ({
 			id: mode.id,
 			title: mode.title,
 			summary: mode.summary,
 			commandCount: mode.commands.length,
 		})),
-		commands: buildAgentCommandIndex(),
 		lookup: {
-			mode: "hise-cli agent-context <mode>",
-			command: "hise-cli agent-context --command <id>",
-			commandIndex: "hise-cli agent-context --list-commands",
-			intent: "hise-cli which \"<intent>\"",
+			intent: "hise-cli which \"<intent>\" --agent --select value[0]",
+			mode: "hise-cli agent-context <mode> --agent",
+			modeFull: "hise-cli agent-context <mode> --full --agent",
+			command: "hise-cli agent-context --command <id> --agent",
+			commandIndex: "hise-cli agent-context --list-commands --agent",
 		},
 	};
 }
@@ -45,10 +41,40 @@ export function buildAgentCommandIndex(): object[] {
 		id: command.id,
 		mode: mode.id,
 		title: command.title,
-		purpose: command.purpose,
-		command: command.command,
-		tags: command.tags,
 	}))).sort((a, b) => a.id.localeCompare(b.id));
+}
+
+function buildCompactModeContext(mode: AgentContextMode): object {
+	const visible = mode.commands
+		.filter((command) => command.help.visibility !== "hidden")
+		.sort((a, b) => a.help.order - b.help.order || a.id.localeCompare(b.id));
+	return {
+		id: mode.id,
+		title: mode.title,
+		summary: mode.summary,
+		quickStart: mode.quickStart.slice(0, 6).map((recipe) => ({
+			title: recipe.title,
+			display: recipe.display,
+		})),
+		concepts: mode.concepts.map((concept) => ({
+			id: concept.id,
+			title: concept.title,
+			body: concept.body.slice(0, 2),
+		})),
+		notes: mode.notes.slice(0, 5),
+		antiPatterns: mode.antiPatterns.slice(0, 5),
+		commands: visible.map((command) => ({
+			id: command.id,
+			title: command.title,
+			syntax: command.syntax,
+			purpose: command.purpose,
+		})),
+		lookup: {
+			intent: "hise-cli which \"<intent>\" --agent --select value[0]",
+			command: "hise-cli agent-context --command <id> --agent",
+			full: `hise-cli agent-context ${mode.id} --full --agent`,
+		},
+	};
 }
 
 export function getAgentContextMode(modeId: string): AgentContextMode | undefined {
@@ -170,31 +196,4 @@ function renderExamples(command: AgentCommand): string[] {
 function quoteShell(value: string): string {
 	if (!value.includes("\n") && !value.includes("'")) return `'${value}'`;
 	return "'<stdin>'";
-}
-
-function cliInfo(): object {
-	return {
-		name: "hise-cli",
-		description: "Modal REPL and CLI for controlling HISE via REST.",
-		hiseBaseUrl: "http://127.0.0.1:1900",
-	};
-}
-
-function globalFlags(): object[] {
-	return [
-		{ flag: "--agent", description: "Implies --json --compact and guarantees coded errors." },
-		{ flag: "--json", description: "Emit structured JSON output." },
-		{ flag: "--compact", description: "Remove empty wrapper noise from the final output payload only." },
-		{ flag: "--select <path>", description: "Extract a payload field while preserving { ok, value }. Implies JSON output." },
-		{ flag: "--dry-run", description: "Validate builder/ui/dsp mutations inside a discarded HISE undo plan." },
-	];
-}
-
-function inputPatterns(): object[] {
-	return [
-		{ pattern: "flag", description: "Default for builder/ui/dsp direct shell commands and short scalar values." },
-		{ pattern: "stdin", description: "Use only for commands that explicitly accept stdin payloads." },
-		{ pattern: "file", description: "Preferred for multi-line callback edits." },
-		{ pattern: "json-file", description: "Preferred for nested or structured payloads that would be hard to quote in argv." },
-	];
 }

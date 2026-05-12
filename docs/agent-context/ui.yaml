@@ -10,21 +10,33 @@ mode:
   notes:
     - The shell CLI uses direct UI subcommands and flags only.
     - UI commands default --module to Interface when omitted.
+    - Create static components, bounds, text, colours, and hierarchy with UI commands; do not script these as onInit layout code.
+    - Use HiseScript for callbacks, runtime behaviour, data-dependent updates, LAF, and paint routines on existing components.
     - connect validates ScriptSlider, ScriptComboBox, and ScriptButton against verbose builder parameter type metadata before mutating the component.
     - Use --dry-run on mutations to validate through HISE inside a discarded undo plan before committing changes.
   antiPatterns:
     - avoid: Manually setting processorId and parameterId without matching control metadata.
       prefer: hise-cli ui connect --source Cutoff --target MainFilter --param Frequency --matched --agent
+    - avoid: Removing and recreating controls just to reparent them.
+      prefer: hise-cli ui set --component Cutoff --parent ControlsPanel --agent
+    - avoid: Sketching the whole interface in one ScriptPanel.
+      prefer: Create the component hierarchy first, then style focused sections.
+    - avoid: Creating, moving, resizing, or styling static controls from HiseScript onInit.
+      prefer: Use ui add and ui set commands for the static interface, then script callbacks or paint routines.
+    - avoid: Passing position arguments to Content.addXXX() when scripted creation is unavoidable.
+      prefer: Create with Content.addXXX("Id"), then set bounds with hise-cli ui set --component Id --bounds x,y,w,h --agent.
 
 quickStart:
   - title: Inspect UI components
     argv: [hise-cli, ui, tree, --agent]
   - title: Add a slider
-    argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+    argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --agent]
   - title: Configure component geometry and text
     argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
   - title: Connect a slider to a builder parameter
     argv: [hise-cli, ui, connect, --source, Cutoff, --target, MainFilter, --param, Frequency, --matched, --agent]
+  - title: Capture a UI screenshot
+    argv: [hise-cli, ui, screenshot, --output, images/ui.png, --agent]
 
 concepts:
   - id: direct-cli
@@ -43,9 +55,24 @@ concepts:
     title: Component properties
     body:
       - UI set writes ScriptComponent properties such as bounds, text, value, colours, visibility, and enabled state.
+      - Use --parent <component> to reparent a component.
+      - --parentComponent is accepted as a reparent alias when property metadata suggests that HISE name.
+      - The root node is displayed as root in agent output; use --parent root only when an explicit root parent is clearer than omitting --parent.
+      - --parent Content is accepted as a compatibility alias for root because HISE exposes the script object as Content.
+      - Use --index <n> to reorder within the current parent.
       - Dynamic property flags use exact HISE property names such as --itemColour and --fontSize.
       - Prefer --bounds x,y,w,h for geometry.
       - For complex property payloads, use a JSON file input once supported by the command.
+  - id: layout-strategy
+    title: Layout Strategy
+    body:
+      - Build hierarchy and bounds with UI commands first; then apply styles, LAF, and paint routines in focused batches.
+      - Dynamic UI logic means callbacks and runtime updates, not scripted creation or layout of static controls.
+      - If Content.addXXX() is unavoidable, omit position arguments and set bounds with UI commands so Interface Designer edits survive recompilation.
+      - Use nested ScriptPanels for sections; 4-5 levels is fine in complex UIs.
+      - Prefer small focused components over one large painted background.
+      - For static section headers, prefer ScriptPanel paint text over extra Label components.
+      - Use predictable grouped IDs like Osc1Level, Osc2Level, EnvAttack, FxDelayMix for script batching.
   - id: parameter-linking
     title: Parameter linking
     body:
@@ -55,6 +82,16 @@ concepts:
       - --target is the builder module ID or path.
       - --param is the target builder parameter ID.
       - --matched copies compatible range, items, label, or default metadata depending on component type.
+  - id: screenshots
+    title: Screenshots
+    body:
+      - ui screenshot captures the full interface or one component through HISE's testing screenshot endpoint.
+      - --module defaults to Interface.
+      - --component captures and crops to that component's bounds.
+      - --output writes a PNG file; relative paths resolve from the HISE project folder.
+      - --scale accepts decimal values such as 0.5.
+      - Screenshot after visual-risk edits: Path-based drawing, FloatingTile layout, LAF, paint routines, and complex nesting.
+      - Prefer --component and low --scale to capture only the risky area.
   - id: dry-run-validation
     title: Dry-run validation
     body:
@@ -101,7 +138,7 @@ commands:
     title: Add UI component
     purpose: Add a ScriptComponent with an exact explicit ID.
     command:
-      argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+      argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --agent]
     aliases: [add ui component, add slider, add button, add combobox]
     tags: [ui, add, component, mutation]
     contexts: [cli]
@@ -110,14 +147,15 @@ commands:
       - --id is mandatory and exact.
       - Duplicate IDs fail before mutation with duplicate_id and candidate paths.
       - --parent defaults to the root UI context when omitted.
+      - --parent root and --parent Content are accepted and normalized to the root UI context.
     help:
       visibility: common
       order: 30
     examples:
       - title: Add a slider
-        argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --parent, Interface, --agent]
+        argv: [hise-cli, ui, add, --type, ScriptSlider, --id, Cutoff, --agent]
       - title: Add a button
-        argv: [hise-cli, ui, add, --type, ScriptButton, --id, EnableFilter, --parent, Interface, --agent]
+        argv: [hise-cli, ui, add, --type, ScriptButton, --id, EnableFilter, --agent]
   - id: ui.set.properties
     syntax: ui set --component <id-or-path> [property flags...] [--module <module>]
     title: Set UI component properties
@@ -130,6 +168,11 @@ commands:
     agentRelevance: high
     notes:
       - --bounds accepts x,y,w,h.
+      - --parent reparents the component.
+      - --parentComponent is accepted as an alias for --parent.
+      - --parent root and --parentComponent root move the component to the root UI context.
+      - --parent Content and --parentComponent Content are accepted as compatibility aliases for root.
+      - --index reorders the component within its current parent.
       - Other property flags map to ScriptComponent property names.
       - Use --dry-run before committing broad property edits.
     help:
@@ -140,6 +183,10 @@ commands:
         argv: [hise-cli, ui, set, --component, Cutoff, --bounds, "0,0,128,32", --text, Cutoff, --agent]
       - title: Hide a component
         argv: [hise-cli, ui, set, --component, Cutoff, --visible, "false", --agent]
+      - title: Reparent a component
+        argv: [hise-cli, ui, set, --component, Cutoff, --parent, ControlsPanel, --agent]
+      - title: Reparent using property metadata name
+        argv: [hise-cli, ui, set, --component, Cutoff, --parentComponent, ControlsPanel, --agent]
   - id: ui.connect.control
     syntax: ui connect (--source <component> | --component <component>) --target <module> --param <param> [--matched] [--module <module>]
     title: Connect UI control to module parameter
@@ -169,6 +216,32 @@ commands:
         argv: [hise-cli, ui, connect, --source, Waveform, --target, LFO, --param, WaveformType, --matched, --agent]
       - title: Connect a button and copy label/default
         argv: [hise-cli, ui, connect, --source, EnableFilter, --target, MainFilter, --param, Enabled, --matched, --agent]
+  - id: ui.screenshot
+    syntax: ui screenshot [--component <id>] [--scale <n>] [--output <png>] [--module <module>]
+    title: Capture UI screenshot
+    purpose: Capture the full ScriptProcessor interface or crop to one ScriptComponent.
+    command:
+      argv: [hise-cli, ui, screenshot, --output, images/ui.png, --agent]
+    aliases: [capture ui screenshot, screenshot component, grab component bounds, export ui png]
+    tags: [ui, screenshot, component, testing, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --module defaults to Interface.
+      - Omit --component to capture the full interface.
+      - --component captures the component bounds within the rendered interface.
+      - --output must be a PNG path; relative paths resolve from the HISE project folder.
+      - Prefer --component and low --scale after visual-risk edits.
+    help:
+      visibility: common
+      order: 55
+    examples:
+      - title: Capture full interface
+        argv: [hise-cli, ui, screenshot, --output, images/ui.png, --agent]
+      - title: Capture one component
+        argv: [hise-cli, ui, screenshot, --component, Cutoff, --scale, "0.5", --output, images/cutoff.png, --agent]
+      - title: Capture another module UI
+        argv: [hise-cli, ui, screenshot, --module, ScriptFX, --output, images/scriptfx.png, --agent]
   - id: ui.rename.component
     syntax: ui rename --component <id-or-path> --id <new-id> [--module <module>]
     title: Rename UI component
@@ -210,4 +283,4 @@ types:
   commonComponentTypes: [ScriptSlider, ScriptButton, ScriptComboBox, ScriptPanel, ScriptLabel, ScriptImage, ScriptTable, ScriptViewport]
   connectionSources: [ScriptSlider, ScriptComboBox, ScriptButton]
   connectSourceFlags: [--source, --component]
-  commonProperties: [bounds, text, value, visible, enabled, colour, bgColour, itemColour, fontName, fontSize]
+  commonProperties: [bounds, text, value, visible, enabled, parent, parentComponent, index, colour, bgColour, itemColour, fontName, fontSize]

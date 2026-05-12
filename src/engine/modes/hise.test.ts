@@ -275,6 +275,7 @@ describe("HiseMode screenshot", () => {
 		// Check query params include outputPath
 		const call = mock.calls.find((c) => c.endpoint.includes("/api/testing/screenshot"));
 		expect(call?.endpoint).toContain("outputPath=");
+		expect(call?.endpoint).toContain("moduleId=Interface");
 		expect(call?.endpoint).toContain("screenshot.png");
 	});
 

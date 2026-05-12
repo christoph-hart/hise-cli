@@ -2,15 +2,14 @@ schemaVersion: 1
 mode:
   id: mcp
   title: HISE MCP documentation bridge
-  summary: Call the HISE MCP documentation server through hise-cli when native MCP access is unavailable.
+  summary: Call the HISE documentation server REST tool API through hise-cli.
   invocation:
     - argv: [hise-cli, mcp, search_hise, --query, Content.addKnob, --domain, api, --limit, "3", --agent]
     - argv: [hise-cli, mcp, explore_hise, --query, sampler, --agent]
-    - argv: [hise-cli, mcp, resources/read, --uri, hise://style-guides/hisescript-style, --agent]
+    - argv: [hise-cli, mcp, get_resource, --id, hisescript-style, --agent]
   notes:
-    - Use native MCP access directly when the current AI agent has the HISE MCP server installed.
-    - Use hise-cli mcp as a fallback bridge when native MCP setup is unavailable or unreliable.
-    - hise-cli mcp preserves the MCP result under the normal hise-cli JSON envelope.
+    - hise-cli mcp uses the stateless HISE docs REST API, not Streamable HTTP sessions.
+    - hise-cli mcp preserves the REST tool result under the normal hise-cli JSON envelope.
     - Use --args-stdin or --args-file for nested or complex MCP arguments; keep inline --args only for tiny JSON.
     - Use docs lookup before inventing HiseScript APIs, UI properties, module parameters, or LAF functions.
   antiPatterns:
@@ -53,20 +52,17 @@ capabilities:
       visibility: common
       order: 20
   - id: mcp.raw.method
-    title: Call a raw MCP method
-    purpose: Call raw MCP methods such as resources/list, resources/read, tools/list, or prompts/list.
+    title: List REST tools
+    purpose: List mirrored HISE docs tools exposed by the REST API.
     command:
-      argv: [hise-cli, mcp, resources/read, --uri, hise://style-guides/hisescript-style, --agent]
+      argv: [hise-cli, mcp, tools/list, --agent]
     examples:
       - title: List MCP tools
         argv: [hise-cli, mcp, tools/list, --agent]
-      - title: Read HiseScript style guide
-        argv: [hise-cli, mcp, resources/read, --uri, hise://style-guides/hisescript-style, --agent]
-    tags: [mcp, resources, prompts, methods]
+    tags: [mcp, docs, tools, discovery]
     aliases:
-      - read mcp resource
       - list mcp tools
-      - call mcp method
+      - list hise docs tools
     help:
       visibility: common
       order: 30

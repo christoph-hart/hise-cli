@@ -50,7 +50,7 @@ import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js"
 import { extractStatusPayload } from "../engine/modes/inspect.js";
 import { isEnvelopeResponse, isErrorResponse, isSuccessResponse } from "../engine/hise.js";
 import { executeScriptShow } from "../engine/modes/script-symbols.js";
-import { HttpMcpClient, mcpErrorPayload } from "../mcp/httpClient.js";
+import { RestMcpClient, mcpErrorPayload } from "../mcp/restClient.js";
 import { prepareMcpCommand } from "./mcp.js";
 import { McpMode } from "../engine/modes/mcp.js";
 
@@ -59,6 +59,10 @@ export interface CliCommandOptions {
 	handlerRegistry?: WizardHandlerRegistry;
 	launcher?: import("../engine/modes/hise.js").HiseLauncher;
 	mcpClient?: import("../engine/mcp/types.js").McpClient;
+}
+
+function createDefaultMcpClient(): RestMcpClient {
+	return new RestMcpClient({ defaultUrl: process.env.HISE_DOCS_API_URL ?? process.env.HISE_MCP_URL });
 }
 
 export async function executeCliCommand(
@@ -125,7 +129,7 @@ export async function executeCliCommand(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
-		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
+		mcpClient: opts.mcpClient ?? createDefaultMcpClient(),
 	});
 	// Wire up script file I/O for /run, /parse, and /edit commands
 	session.loadScriptFile = async (filePath: string) => {
@@ -293,7 +297,7 @@ async function executeRunCommand(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
-		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
+		mcpClient: opts.mcpClient ?? createDefaultMcpClient(),
 	});
 	session.loadScriptFile = async (fp: string) => readFile(resolve(fp), "utf-8");
 	wireScriptFileOps(session);
@@ -400,7 +404,7 @@ async function runWatchMode(
 		handlerRegistry: opts.handlerRegistry,
 		launcher: opts.launcher,
 		assetEnvironment,
-		mcpClient: opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }),
+		mcpClient: opts.mcpClient ?? createDefaultMcpClient(),
 	});
 	session.loadScriptFile = async (fp: string) => readFile(resolve(fp), "utf-8");
 	wireScriptFileOps(session);
@@ -512,7 +516,7 @@ async function executeMcpModeOneShot(
 		? `${parsed.canonicalCommand} ${(await readStdin()).trim()}`.trim()
 		: parsed.canonicalCommand;
 	const body = command.replace(/^\/mcp\s*/, "").trim();
-	const mode = new McpMode(opts.mcpClient ?? new HttpMcpClient({ defaultUrl: process.env.HISE_MCP_URL, clientVersion: cliVersion() }));
+	const mode = new McpMode(opts.mcpClient ?? createDefaultMcpClient());
 	const result = await mode.parse(body, {} as import("../engine/modes/mode.js").SessionContext);
 	return finalizeJsonPayload(serializeCliOutput("mcp", result), parsed.output);
 }
@@ -527,10 +531,7 @@ async function executeMcpCliCommand(
 		return readFile(resolve(source.path), "utf-8");
 	});
 	if ("ok" in prepared) return prepared;
-	const client = opts.mcpClient ?? new HttpMcpClient({
-		defaultUrl: process.env.HISE_MCP_URL,
-		clientVersion: cliVersion(),
-	});
+	const client = opts.mcpClient ?? createDefaultMcpClient();
 	try {
 		const options = { url: prepared.url, timeoutMs: prepared.timeoutMs };
 		const value = prepared.kind === "tool"

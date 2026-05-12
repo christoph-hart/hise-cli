@@ -35,7 +35,7 @@ export interface CliOutputOptions {
 
 export type AgentContextQuery =
 	| { type: "manifest" }
-	| { type: "mode"; modeId: string }
+	| { type: "mode"; modeId: string; full: boolean }
 	| { type: "command"; id: string }
 	| { type: "command-index" };
 
@@ -182,11 +182,25 @@ function formatDslSegment(value: string): string {
 }
 
 function formatDslValue(value: string): string {
+	if (value === "") return quoteDslString(value);
 	if (value.startsWith("[") && value.endsWith("]")) return value;
 	if (/^-?\d+(?:\.\d+)?%?$/.test(value)) return value;
 	if (/^0x[0-9a-fA-F]{8}$/.test(value)) return value;
 	if (value === "true" || value === "false") return value;
 	return /[\s]/.test(value) ? quoteDslString(value) : value;
+}
+
+function isUiRootParent(value: string | undefined): boolean {
+	return value === "root" || value === "Content";
+}
+
+function normalizeUiSetPair(pair: { flag: string; value: string }): { flag: string; value: string } {
+	const flag = pair.flag === "parentComponent" ? "parent" : pair.flag;
+	return {
+		...pair,
+		flag,
+		value: flag === "parent" && isUiRootParent(pair.value) ? "" : pair.value,
+	};
 }
 
 function formatArrayShorthand(value: string): string {
@@ -219,6 +233,13 @@ function readRequiredFlag(args: string[], flag: string): string | { error: strin
 	const values = readRepeatedFlag(args, flag);
 	if (values.length === 0) return { error: `${flag} is required` };
 	if (values.length > 1) return { error: `${flag} can only be provided once` };
+	return values[0]!;
+}
+
+function readOptionalFlag(args: string[], flag: string): string | undefined | { error: string } {
+	const values = readRepeatedFlag(args, flag);
+	if (values.length > 1) return { error: `${flag} can only be provided once` };
+	if (values.length === 0) return hasFlag(args, flag) ? { error: `${flag} requires a value` } : undefined;
 	return values[0]!;
 }
 
@@ -359,13 +380,33 @@ function renderUiDirectCommand(args: string[]): string | { error: string } {
 		if (typeof component !== "string") return component;
 		return `show ${formatDslSegment(component)}`;
 	}
+	if (command === "screenshot") {
+		const unknown = parseFlagPairs(rest, new Set(["--module", "--component", "--scale", "--output"]));
+		if ("error" in unknown) return unknown;
+		if (unknown.length > 0) return directUsage(`Unknown ui screenshot flag: --${unknown[0]!.flag}`);
+		const module = readOptionalFlag(rest, "--module");
+		if (typeof module !== "string" && module !== undefined) return module;
+		const component = readOptionalFlag(rest, "--component");
+		if (typeof component !== "string" && component !== undefined) return component;
+		const scale = readOptionalFlag(rest, "--scale");
+		if (typeof scale !== "string" && scale !== undefined) return scale;
+		const output = readOptionalFlag(rest, "--output");
+		if (typeof output !== "string" && output !== undefined) return output;
+		const clauses = [
+			module ? `module ${formatDslSegment(module)}` : "",
+			component ? `component ${formatDslSegment(component)}` : "",
+			scale ? `scale ${scale}` : "",
+			output ? `output ${quoteDslString(output)}` : "",
+		].filter(Boolean).join(" ");
+		return `screenshot${clauses ? ` ${clauses}` : ""}`;
+	}
 	if (command === "add") {
 		const type = readRequiredFlag(rest, "--type");
 		if (typeof type !== "string") return type;
 		const id = readRequiredFlag(rest, "--id");
 		if (typeof id !== "string") return id;
 		const parent = readRepeatedFlag(rest, "--parent")[0];
-		return `add ${type} as ${quoteDslString(id)}${parent ? ` to ${formatDslSegment(parent)}` : ""}`;
+		return `add ${type} as ${quoteDslString(id)}${parent && !isUiRootParent(parent) ? ` to ${formatDslSegment(parent)}` : ""}`;
 	}
 	if (command === "set") {
 		const component = readRequiredFlag(rest, "--component");
@@ -373,7 +414,7 @@ function renderUiDirectCommand(args: string[]): string | { error: string } {
 		const pairs = parseFlagPairs(rest, new Set(["--module", "--component"]));
 		if ("error" in pairs) return pairs;
 		if (pairs.length === 0) return directUsage("ui set requires at least one property flag");
-		return `set ${formatSetClauses(component, pairs)}`;
+		return `set ${formatSetClauses(component, pairs.map(normalizeUiSetPair))}`;
 	}
 	if (command === "connect") {
 		const source = readRepeatedFlag(rest, "--source")[0];
@@ -652,11 +693,16 @@ function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliPar
 	let modeId: string | undefined;
 	let commandId: string | undefined;
 	let listCommands = false;
+	let full = false;
 
 	for (let i = 0; i < rest.length; i++) {
 		const arg = rest[i]!;
 		if (arg === "--list-commands") {
 			listCommands = true;
+			continue;
+		}
+		if (arg === "--full") {
+			full = true;
 			continue;
 		}
 		if (arg === "--command") {
@@ -679,9 +725,10 @@ function parseAgentContextArgs(args: string[], output: CliOutputOptions): CliPar
 
 	const queryCount = [Boolean(modeId), Boolean(commandId), listCommands].filter(Boolean).length;
 	if (queryCount > 1) return { kind: "error", message: "agent-context accepts only one query: <mode>, --command <id>, or --list-commands" };
+	if (full && !modeId) return { kind: "error", message: "agent-context --full requires a mode" };
 	if (commandId) return { kind: "agent-context", query: { type: "command", id: commandId }, output: { ...output, json: true } };
 	if (listCommands) return { kind: "agent-context", query: { type: "command-index" }, output: { ...output, json: true } };
-	if (modeId) return { kind: "agent-context", query: { type: "mode", modeId }, output: { ...output, json: true } };
+	if (modeId) return { kind: "agent-context", query: { type: "mode", modeId, full }, output: { ...output, json: true } };
 	return { kind: "agent-context", query: { type: "manifest" }, output: { ...output, json: true } };
 }
 

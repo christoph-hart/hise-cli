@@ -254,10 +254,10 @@ function translateSetClause(
 		return { ops: [{ op: "set_value", target: target.id, value: f.out }] };
 	}
 
-	if (tailLower === "parent") {
+	if (tailLower === "parent" || tailLower === "parentcomponent") {
 		// New parent expressed as path → resolve to id.
 		if (clause.value.kind !== "path" && clause.value.kind !== "string") {
-			return { error: "set X.parent requires an identifier or quoted path" };
+			return { error: `set X.${tail} requires an identifier or quoted path` };
 		}
 		let newParentId: string;
 		if (clause.value.kind === "path") {

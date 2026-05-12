@@ -6,7 +6,7 @@ import type { TokenSpan } from "../highlight/tokens.js";
 import { tokenizeUi } from "../highlight/ui.js";
 import type { CompletionItem, CompletionResult, Mode, ModeId, SessionContext } from "./mode.js";
 import { MODE_ACCENTS } from "./mode.js";
-import { isErrorResponse, isEnvelopeResponse } from "../hise.js";
+import { isErrorResponse, isEnvelopeResponse, isSuccessResponse } from "../hise.js";
 import { stripQuotes } from "../string-utils.js";
 import { findNodeById, resolveNodeByPath } from "../tree-utils.js";
 import { renderTreeBox } from "./builder-ops.js";
@@ -114,6 +114,13 @@ interface BuilderProcessorInfo {
 	parameters: BuilderParameterInfo[];
 }
 
+interface UiScreenshotOptions {
+	moduleId?: string;
+	component?: string;
+	scale?: number;
+	outputPath?: string;
+}
+
 const UI_TO_PARAMETER_TYPE: Record<UiConnectComponentType, BuilderParameterType> = {
 	ScriptSlider: "Slider",
 	ScriptComboBox: "ComboBox",
@@ -122,6 +129,78 @@ const UI_TO_PARAMETER_TYPE: Record<UiConnectComponentType, BuilderParameterType>
 
 function isConnectComponentType(value: string | undefined): value is UiConnectComponentType {
 	return value === "ScriptSlider" || value === "ScriptComboBox" || value === "ScriptButton";
+}
+
+function splitUiScreenshotWords(input: string): string[] {
+	const words: string[] = [];
+	let current = "";
+	let inQuote = false;
+	let escaped = false;
+	for (const ch of input) {
+		if (escaped) {
+			current += ch;
+			escaped = false;
+			continue;
+		}
+		if (ch === "\\" && inQuote) {
+			current += ch;
+			escaped = true;
+			continue;
+		}
+		if (ch === "\"") {
+			inQuote = !inQuote;
+			current += ch;
+			continue;
+		}
+		if (/\s/.test(ch) && !inQuote) {
+			if (current) {
+				words.push(stripQuotes(current));
+				current = "";
+			}
+			continue;
+		}
+		current += ch;
+	}
+	if (current) words.push(stripQuotes(current));
+	return words;
+}
+
+function parseUiScreenshotInput(input: string): UiScreenshotOptions | { error: string } | null {
+	if (!/^screenshot(?:\s|$)/i.test(input.trim())) return null;
+	const words = splitUiScreenshotWords(input.trim()).slice(1);
+	const opts: UiScreenshotOptions = {};
+	for (let i = 0; i < words.length; i++) {
+		const key = words[i]!.toLowerCase();
+		const value = words[i + 1];
+		if (key === "module") {
+			if (!value) return { error: "screenshot module requires a value" };
+			opts.moduleId = value;
+			i++;
+			continue;
+		}
+		if (key === "component" || key === "of") {
+			if (!value) return { error: "screenshot component requires a value" };
+			opts.component = value;
+			i++;
+			continue;
+		}
+		if (key === "scale" || key === "at") {
+			if (!value) return { error: "screenshot scale requires a value" };
+			const scale = value.endsWith("%") ? Number(value.slice(0, -1)) / 100 : Number(value);
+			if (!Number.isFinite(scale) || scale <= 0) return { error: `screenshot: invalid scale "${value}"` };
+			opts.scale = scale;
+			i++;
+			continue;
+		}
+		if (key === "output" || key === "to") {
+			if (!value) return { error: "screenshot output requires a value" };
+			opts.outputPath = value;
+			i++;
+			continue;
+		}
+		return { error: `screenshot: unknown option "${words[i]}"` };
+	}
+	return opts;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -306,7 +385,7 @@ export class UiMode implements Mode {
 
 		if (tokens.length === 0 || (tokens.length === 1 && !trailingSpace)) {
 			const prefix = tokens.length > 0 ? tokens[0].image.toLowerCase() : "";
-			const keywords = ["add", "remove", "set", "get", "connect", "rename", "show", "cd", "ls", "pwd", "reset"];
+			const keywords = ["add", "remove", "set", "get", "connect", "rename", "show", "screenshot", "cd", "ls", "pwd", "reset"];
 			const items: CompletionItem[] = keywords
 				.filter((k) => k.startsWith(prefix))
 				.map((k) => ({ label: k }));
@@ -534,6 +613,11 @@ export class UiMode implements Mode {
 
 	async parse(input: string, session: SessionContext): Promise<CommandResult> {
 		await this.ensureTree(session);
+		const screenshot = parseUiScreenshotInput(input);
+		if (screenshot) {
+			if ("error" in screenshot) return errorResult(screenshot.error);
+			return this.handleScreenshot(screenshot, session);
+		}
 
 		const result = parseUiInput(input);
 		if ("error" in result) return errorResult(result.error);
@@ -602,6 +686,40 @@ export class UiMode implements Mode {
 		if (session.forLlm) return jsonResult(cleanUiTreeForLlm(this.lastTreeResult ?? this.treeRoot));
 		const pwdNode = this.currentPath.length > 0 ? resolveNodeByPath(this.treeRoot, this.currentPath) : null;
 		return preformattedResult(renderTreeBox(this.treeRoot, { pwdNode }), undefined, true);
+	}
+
+	private async handleScreenshot(
+		opts: UiScreenshotOptions,
+		session: SessionContext,
+	): Promise<CommandResult> {
+		if (!session.connection) return errorResult("screenshot requires a HISE connection");
+		const projectFolder = session.projectFolder ?? null;
+		if (!projectFolder) return errorResult("No project folder available. Is HISE connected?");
+
+		const outputPath = opts.outputPath
+			? (session.resolvePath?.(opts.outputPath) ?? `${projectFolder}/${opts.outputPath}`)
+			: `${projectFolder}/screenshot.png`;
+
+		const params = new URLSearchParams();
+		params.set("moduleId", opts.moduleId ?? this.moduleId);
+		params.set("outputPath", outputPath);
+		if (opts.component) params.set("id", opts.component);
+		if (opts.scale !== undefined) params.set("scale", String(opts.scale));
+
+		const response = await session.connection.get(`/api/testing/screenshot?${params.toString()}`);
+		if (isErrorResponse(response)) return errorResult(response.message);
+		if (!isSuccessResponse(response)) {
+			const msg = isEnvelopeResponse(response)
+				? response.errors?.[0]?.errorMessage ?? "Screenshot failed"
+				: "Screenshot failed";
+			return errorResult(msg);
+		}
+
+		const data = response as unknown as Record<string, unknown>;
+		const width = data.width ?? "?";
+		const height = data.height ?? "?";
+		const componentInfo = opts.component ? ` of ${opts.component}` : "";
+		return textResult(`Screenshot${componentInfo} saved to ${outputPath} (${width}x${height})`);
 	}
 
 	// ── Command dispatch and execution ──────────────────────────

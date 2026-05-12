@@ -16,6 +16,9 @@ mode:
     - Use REPL only for read-only queries and explicit calls to existing functions or APIs. Those calls may still have side effects.
     - For persistent script source changes, use script set with --stdin, --file, or --callbacks-json.
     - If a task has a dedicated hise-cli mode, use that mode instead of mutating state through REPL-side HiseScript.
+    - Do not create, move, resize, or style static UI controls from script callbacks; use hise-cli ui add/set/connect for static interface structure.
+    - In UI work, HiseScript is for callbacks, runtime behaviour, data-dependent updates, LAF, and paint routines on existing components.
+    - If Content.addXXX() is unavoidable, omit position arguments and set bounds with hise-cli ui set so Interface Designer edits survive recompilation.
     - For multi-step workflows that need to switch modes, use hise-cli run with a workflow file.
     - Keep callbacks thin in real projects. onInit should usually include external files rather than contain large inline implementations, so those files can be checked with script diagnose before compilation.
     - Prefer script add-file for new external script files. It creates a one-namespace stub, adds the HISE include line to onInit, compiles, and returns the absolute path for editing.
@@ -26,6 +29,10 @@ mode:
       prefer: hise-cli script set --module-id Interface --callback onInit --file ./onInit.js --agent
     - avoid: Using REPL-side HiseScript to perform UI edits when the UI mode supports the operation.
       prefer: hise-cli ui set --component <component> [property flags...] --agent
+    - avoid: Building static UI layout in onInit with Content.add*, setPosition, or set properties.
+      prefer: hise-cli ui add/set/connect for components, bounds, text, colours, and hierarchy; then script dynamic behaviour.
+    - avoid: Content.addPanel("Panel", x, y) or other positioned Content.addXXX calls.
+      prefer: Content.addPanel("Panel"), then hise-cli ui set --component Panel --bounds x,y,w,h --agent.
     - avoid: Putting large implementation bodies directly into onInit.
       prefer: Use hise-cli script add-file UI/MyFile.js --agent, then edit the returned path and run script diagnose.
     - avoid: Building a large global onControl dispatcher or passing an anonymous regular function to setControlCallback.

@@ -384,8 +384,52 @@ describe("executeCliCommand", () => {
 
 		expect(result.kind).toBe("json");
 		if (result.kind === "json") {
-			expect(result.payload).toEqual({ ok: true, value: { id: "Content", type: "Root", childComponents: [{ id: "Button1", type: "ScriptButton" }] } });
+			expect(result.payload).toEqual({ ok: true, value: { id: "root", type: "Root", childComponents: [{ id: "Button1", type: "ScriptButton" }] } });
 		}
+	});
+
+	it("captures UI screenshots through direct UI command", async () => {
+		mockObserverFetch();
+		const conn = new MockHiseConnection().setProbeResult(true);
+		conn.onGet("/api/status", () => ({
+			success: true,
+			project: { name: "Test", projectFolder: "D:/Projects/Test", scriptsFolder: "D:/Projects/Test/Scripts" },
+			scriptProcessors: [],
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/ui/tree", () => ({
+			success: true,
+			result: { id: "Content", type: "ScriptPanel", childComponents: [{ id: "Cutoff", type: "ScriptSlider", childComponents: [] }] },
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/testing/screenshot", () => ({
+			success: true,
+			width: 64,
+			height: 32,
+			scale: 0.5,
+			filePath: "D:/Projects/Test/images/cutoff.png",
+			logs: [],
+			errors: [],
+		}));
+
+		const result = await executeCliCommand(
+			["node", "hise-cli", "ui", "screenshot", "--component", "Cutoff", "--scale", "0.5", "--output", "images/cutoff.png", "--agent"],
+			getCliCommands(),
+			createDataLoader(),
+			conn,
+		);
+
+		expect(result.kind).toBe("json");
+		if (result.kind === "json") {
+			expect(result.payload.ok).toBe(true);
+		}
+		const call = conn.calls.find((c) => c.endpoint.includes("/api/testing/screenshot"));
+		expect(call?.endpoint).toContain("moduleId=Interface");
+		expect(call?.endpoint).toContain("id=Cutoff");
+		expect(call?.endpoint).toContain("scale=0.5");
+		expect(call?.endpoint).toContain("D%3A%2FProjects%2FTest%2Fimages%2Fcutoff.png");
 	});
 
 	it("includes UI set value callback logs in agent output", async () => {
@@ -595,8 +639,7 @@ describe("executeCliCommand", () => {
 		expect(result.kind).toBe("json");
 		if (result.kind === "json") {
 			expect(result.payload.ok).toBe(true);
-			expect((result.payload as { value: { modes: Array<{ id: string }>; commands: Array<{ id: string; examples?: unknown }> } }).value.modes.some((mode) => mode.id === "script")).toBe(true);
-			expect((result.payload as { value: { commands: Array<{ id: string; examples?: unknown }> } }).value.commands.find((command) => command.id === "script.compile")?.examples).toBeUndefined();
+			expect((result.payload as { value: { modes: Array<{ id: string }> } }).value.modes.some((mode) => mode.id === "script")).toBe(true);
 		}
 	});
 

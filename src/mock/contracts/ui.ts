@@ -81,16 +81,20 @@ function normalizeNode(
  *  id, type, optional visible (when false), optional saveInPreset (when true),
  *  recursive childComponents. Empty arrays are dropped. */
 export function cleanUiTreeForLlm(raw: unknown): unknown {
+	return cleanUiTreeNodeForLlm(raw, true);
+}
+
+function cleanUiTreeNodeForLlm(raw: unknown, isRoot: boolean): unknown {
 	if (!raw || typeof raw !== "object") return null;
 	const n = raw as Record<string, unknown>;
 	const out: Record<string, unknown> = {};
-	if (typeof n.id === "string") out.id = n.id;
-	if (typeof n.type === "string") out.type = n.type;
+	if (typeof n.id === "string") out.id = isRoot && n.id === "Content" ? "root" : n.id;
+	if (typeof n.type === "string") out.type = isRoot && n.id === "Content" && n.type === "ScriptPanel" ? "Root" : n.type;
 	if (n.visible === false) out.visible = false;
 	if (n.saveInPreset === true) out.saveInPreset = true;
 	if (Array.isArray(n.childComponents)) {
 		const kids = n.childComponents
-			.map(cleanUiTreeForLlm)
+			.map((child) => cleanUiTreeNodeForLlm(child, false))
 			.filter((v) => v !== null && v !== undefined);
 		if (kids.length > 0) out.childComponents = kids;
 	}

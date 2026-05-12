@@ -122,6 +122,11 @@ describe("ui-ops — set X.parent → move", () => {
 		const ops = opsOk("set Play.parent Container");
 		expect(ops[0]).toMatchObject({ op: "move", target: "Play", parent: "Container" });
 	});
+
+	it("treats parentComponent as a move alias", () => {
+		const ops = opsOk("set Play.parentComponent Container");
+		expect(ops[0]).toMatchObject({ op: "move", target: "Play", parent: "Container" });
+	});
 });
 
 describe("ui-ops — set X.index → move with current parent", () => {
