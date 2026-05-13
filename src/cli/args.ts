@@ -54,7 +54,7 @@ export type ScriptApiCommand =
 	| { action: "compile"; moduleId: string }
 	| { action: "diagnose"; moduleId: string; filePath?: string; async: boolean }
 	| { action: "add-file"; moduleId: string; relativePath: string }
-	| { action: "show"; moduleId: string; target: "tree" | string; filters: ScriptShowFilters };
+	| { action: "show"; moduleId: string; target: "tree" | string; filters: ScriptShowFilters; raw?: string };
 
 const RESERVED_FLAGS = new Set(["--help", "-h", "--mock", "--dry-run", "--watch", "--show-keys", "--quiet", "--verbose", "--pretty", "--json", "--stdin", "--agent", "--compact", "--select", "--target"]);
 
@@ -278,6 +278,36 @@ function formatSetClauses(target: string, pairs: Array<{ flag: string; value: st
 	return pairs.map((pair) => `${joinTargetParam(target, pair.flag)} ${formatDslValue(formatArrayShorthand(pair.value))}`).join(", ");
 }
 
+function formatDspSetClauses(node: string, param: string | undefined, pairs: Array<{ flag: string; value: string }>): string {
+	return pairs.map((pair) => {
+		const path = param && pair.flag.startsWith(".")
+			? `${joinTargetParam(node, param)}${pair.flag}`
+			: joinTargetParam(node, pair.flag);
+		return `${path} ${formatDslValue(formatArrayShorthand(pair.value))}`;
+	}).join(", ");
+}
+
+function readDspParameterMetadataFlags(rest: string[]): Array<{ flag: string; value: string }> | { error: string } {
+	const pairs: Array<{ flag: string; value: string }> = [];
+	for (const flag of ["--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor"]) {
+		const value = readOptionalFlag(rest, flag);
+		if (typeof value !== "string" && value !== undefined) return value;
+		if (value !== undefined) pairs.push({ flag: `.${flag.slice(2)}`, value });
+	}
+	if (pairs.some((pair) => pair.flag === ".middlePosition") && pairs.some((pair) => pair.flag === ".skewFactor")) {
+		return { error: "dsp set accepts --middlePosition or --skewFactor, not both" };
+	}
+	return pairs;
+}
+
+function formatBuilderSetValue(flag: string, value: string): string {
+	if (flag === "network" || flag === "samplemap" || flag === "effect") return quoteDslString(value);
+	if (flag === "routing") return value.includes(",") || (value.startsWith("[") && value.endsWith("]"))
+		? formatArrayShorthand(value)
+		: quoteDslString(value);
+	return value;
+}
+
 function renderAdd(type: string, id: string, parent?: string, chain?: string): string {
 	const target = parent ? ` to ${formatDslSegment(parent)}${chain ? `.${formatDslSegment(chain)}` : ""}` : "";
 	return `add ${type} as ${quoteDslString(id)}${target}`;
@@ -293,10 +323,14 @@ function renderBuilderDirectCommand(args: string[]): string | { error: string } 
 	if (!command) return directUsage("builder requires a command");
 	if (hasFlag(rest, "--target")) return directUsage("builder direct commands do not support --target");
 	if (command === "tree") return "show tree";
-	if (command === "types") return `show types${rest[0] ? ` ${rest[0]}` : ""}`;
+	if (command === "docs") return `docs${rest[0] ? ` ${rest.join(" ")}` : ""}`;
 	if (command === "show") {
+		if (rest.some((arg) => arg === "--type" || arg.startsWith("--type=")) || rest[0] === "types" || rest[0] === "type") {
+			return directUsage("`builder show` inspects live module instances. Use `hise-cli builder docs <module-type>` for static module documentation.");
+		}
+		if (rest[0] && !rest[0].startsWith("--")) return directUsage("`builder show` inspects live module instances. Use `hise-cli builder show --module <instance-id>` for live inspection, or `hise-cli builder docs <module-type>` for static documentation.");
 		const module = readRequiredFlag(rest, "--module");
-		if (typeof module !== "string") return module;
+		if (typeof module !== "string") return directUsage("`builder show` requires --module for live inspection. Use `hise-cli builder docs <module-type>` for static module documentation.");
 		const param = readRepeatedFlag(rest, "--param")[0];
 		return `show ${param ? joinTargetParam(module, param) : formatDslSegment(module)}`;
 	}
@@ -326,7 +360,10 @@ function renderBuilderDirectCommand(args: string[]): string | { error: string } 
 		}
 		for (const flag of ["--bypassed", "--routing", "--routing-send", "--network", "--samplemap", "--effect"]) {
 			const flagValue = readRepeatedFlag(rest, flag)[0];
-			if (flagValue !== undefined) pairs.push({ flag: flag.slice(2).replace("routing-send", "routing.send"), value: flagValue });
+			if (flagValue !== undefined) {
+				const field = flag.slice(2).replace("routing-send", "routing.send");
+				pairs.push({ flag: field, value: formatBuilderSetValue(field, flagValue) });
+			}
 		}
 		const dynamic = parseFlagPairs(rest, new Set(["--module", "--param", "--value", "--bypassed", "--routing", "--routing-send", "--network", "--samplemap", "--effect"]));
 		if ("error" in dynamic) return dynamic;
@@ -375,10 +412,24 @@ function renderUiDirectCommand(args: string[]): string | { error: string } {
 	const rest = args.slice(1);
 	if (!command) return directUsage("ui requires a command");
 	if (command === "tree") return "show tree";
+	if (command === "docs") return `docs${rest[0] ? ` ${rest.join(" ")}` : ""}`;
 	if (command === "show") {
+		if (rest.some((arg) => arg === "--type" || arg.startsWith("--type=")) || rest[0] === "types" || rest[0] === "type") {
+			return directUsage("`ui show` inspects live UI components. Use `hise-cli ui docs <component-type>` for static component documentation.");
+		}
+		if (rest[0] && !rest[0].startsWith("--")) return directUsage("`ui show` inspects live UI components. Use `hise-cli ui show --component <component-id>` for live inspection, or `hise-cli ui docs <component-type>` for static documentation.");
+		const component = readRequiredFlag(rest, "--component");
+		if (typeof component !== "string") return directUsage("`ui show` requires --component for live inspection. Use `hise-cli ui docs <component-type>` for static component documentation.");
+		const property = readOptionalFlag(rest, "--property");
+		if (typeof property !== "string" && property !== undefined) return property;
+		return `show ${property ? joinTargetParam(component, property) : formatDslSegment(component)}`;
+	}
+	if (command === "get") {
 		const component = readRequiredFlag(rest, "--component");
 		if (typeof component !== "string") return component;
-		return `show ${formatDslSegment(component)}`;
+		const property = readRequiredFlag(rest, "--property");
+		if (typeof property !== "string") return property;
+		return `get ${joinTargetParam(component, property)}`;
 	}
 	if (command === "screenshot") {
 		const unknown = parseFlagPairs(rest, new Set(["--module", "--component", "--scale", "--output"]));
@@ -444,18 +495,42 @@ function renderUiDirectCommand(args: string[]): string | { error: string } {
 }
 
 function renderDspDirectCommand(args: string[]): string | { error: string } {
-	const command = args[0];
-	const rest = args.slice(1);
+	const normalizedArgs = normalizeLeadingModuleFlag(args);
+	const command = normalizedArgs[0];
+	const rest = normalizedArgs.slice(1);
 	if (!command) return directUsage("dsp requires a command");
-	if (command === "types") return `show types${rest[0] ? ` ${rest[0]}` : ""}`;
+	if (command === "docs") {
+		const docsArgs = stripModuleFlags(rest);
+		return `docs${docsArgs[0] ? ` ${docsArgs.join(" ")}` : ""}`;
+	}
+	if (command === "show") {
+		if (rest.some((arg) => arg === "--type" || arg.startsWith("--type=")) || rest[0] === "types" || rest[0] === "type") {
+			return directUsage("`dsp show` inspects live DSP nodes. Use `hise-cli dsp docs <factory.node>` for static scriptnode documentation.");
+		}
+		if (rest[0] && !rest[0].startsWith("--")) return directUsage("`dsp show` inspects live DSP nodes and requires --module plus --node. Use `hise-cli dsp show --module <scriptnode-host> --node <node>` for live inspection, or `hise-cli dsp docs <factory.node>` for static documentation.");
+	}
 	const module = readRequiredFlag(rest, "--module");
+	if (typeof module !== "string" && command === "show") return directUsage("`dsp show` requires --module and --node for live inspection. Use `hise-cli dsp docs <factory.node>` for static scriptnode documentation.");
 	if (typeof module !== "string") return module;
 	const prefix = `${formatTargetSuffix(module)} `;
 	if (command === "tree") return `${prefix}show tree`;
+	if (command === "networks" || command === "modules" || command === "connections") return `${prefix}show ${command}`;
 	if (command === "show") {
 		const node = readRequiredFlag(rest, "--node");
 		if (typeof node !== "string") return node;
-		return `${prefix}show ${formatDslSegment(node)}`;
+		const param = readOptionalFlag(rest, "--param");
+		if (typeof param !== "string" && param !== undefined) return param;
+		return `${prefix}show ${param ? joinTargetParam(node, param) : formatDslSegment(node)}`;
+	}
+	if (command === "get") {
+		const node = readRequiredFlag(rest, "--node");
+		if (typeof node !== "string") return node;
+		const param = readRequiredFlag(rest, "--param");
+		if (typeof param !== "string") return param;
+		const field = readOptionalFlag(rest, "--field");
+		if (typeof field !== "string" && field !== undefined) return field;
+		const path = field ? `${joinTargetParam(node, param)}.${formatDslSegment(field)}` : joinTargetParam(node, param);
+		return `${prefix}get ${path}`;
 	}
 	if (command === "add") {
 		const type = readRequiredFlag(rest, "--type");
@@ -471,15 +546,25 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		const pairs: Array<{ flag: string; value: string }> = [];
 		const param = readRepeatedFlag(rest, "--param")[0];
 		const value = readRepeatedFlag(rest, "--value")[0];
-		if (param || value) {
-			if (!param || value === undefined) return directUsage("dsp set requires both --param and --value");
+		if (value !== undefined) {
+			if (!param) return directUsage("dsp set requires --param when using --value");
 			pairs.push({ flag: param, value });
 		}
-		const dynamic = parseFlagPairs(rest, new Set(["--module", "--node", "--param", "--value"]));
+		if (param) {
+			const metadata = readDspParameterMetadataFlags(rest);
+			if ("error" in metadata) return metadata;
+			pairs.push(...metadata);
+		} else if (hasFlag(rest, "--range")) {
+			return directUsage("dsp set parameter metadata flags require --param");
+		}
+		const reserved = param
+			? new Set(["--module", "--node", "--param", "--value", "--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor"])
+			: new Set(["--module", "--node", "--param", "--value"]);
+		const dynamic = parseFlagPairs(rest, reserved);
 		if ("error" in dynamic) return dynamic;
 		pairs.push(...dynamic);
 		if (pairs.length === 0) return directUsage("dsp set requires at least one value flag");
-		return `${prefix}set ${formatSetClauses(node, pairs)}`;
+		return `${prefix}set ${formatDspSetClauses(node, param, pairs)}`;
 	}
 	if (command === "connect") {
 		const source = readRequiredFlag(rest, "--source");
@@ -494,6 +579,33 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		const sourcePath = sourceParam ? joinTargetParam(source, sourceParam) : sourceOutput ? joinTargetParam(source, sourceOutput) : formatDslSegment(source);
 		return `${prefix}connect ${sourcePath} to ${joinTargetParam(target, param)}${rest.includes("--matched") ? " matched" : ""}`;
 	}
+	if (command === "disconnect") {
+		const targets = readRepeatedFlag(rest, "--target");
+		if (targets.length === 0) return directUsage("dsp disconnect requires --target");
+		return `${prefix}disconnect ${targets.map(formatDslSegment).join(", ")}`;
+	}
+	if (command === "create_parameter") {
+		const container = readRequiredFlag(rest, "--container");
+		if (typeof container !== "string") return container;
+		const id = readRequiredFlag(rest, "--id");
+		if (typeof id !== "string") return id;
+		const range = readRequiredFlag(rest, "--range");
+		if (typeof range !== "string") return range;
+		const clauses: string[] = [];
+		for (const flag of ["--default", "--stepSize", "--middlePosition", "--skewFactor"]) {
+			const value = readOptionalFlag(rest, flag);
+			if (typeof value !== "string" && value !== undefined) return value;
+			if (value !== undefined) clauses.push(`${flag.slice(2)} ${value}`);
+		}
+		return `${prefix}create_parameter ${joinTargetParam(container, id)} ${formatArrayShorthand(range)}${clauses.length > 0 ? ` ${clauses.join(" ")}` : ""}`;
+	}
+	if (command === "screenshot") {
+		const scale = readOptionalFlag(rest, "--scale");
+		if (typeof scale !== "string" && scale !== undefined) return scale;
+		const output = readRequiredFlag(rest, "--output");
+		if (typeof output !== "string") return output;
+		return `${prefix}screenshot scale ${scale ?? "1"} file ${quoteDslString(output)}`;
+	}
 	if (command === "rename") {
 		const node = readRequiredFlag(rest, "--node");
 		if (typeof node !== "string") return node;
@@ -507,7 +619,35 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		return `${prefix}remove ${nodes.map(formatDslSegment).join(", ")}`;
 	}
 	if (command === "save") return `${prefix}save`;
+	if (command === "reset") return `${prefix}reset`;
 	return directUsage(`Unknown dsp command: ${command}`);
+}
+
+function normalizeLeadingModuleFlag(args: string[]): string[] {
+	const first = args[0];
+	if (first === "--module") {
+		const module = args[1];
+		const command = args[2];
+		if (!module || !command) return args;
+		return [command, ...args.slice(3), "--module", module];
+	}
+	if (first?.startsWith("--module=")) {
+		const command = args[1];
+		if (!command) return args;
+		return [command, ...args.slice(2), first];
+	}
+	return args;
+}
+
+function stripModuleFlags(args: string[]): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i]!;
+		if (arg === "--module") { i++; continue; }
+		if (arg.startsWith("--module=")) continue;
+		out.push(arg);
+	}
+	return out;
 }
 
 function parseDirectModeCommand(namespace: "builder" | "ui" | "dsp", args: string[], entry: CommandEntry, output: CliOutputOptions): CliParseResult {
@@ -600,8 +740,8 @@ function findUnexpectedArgs(args: string[], valueFlags: Set<string>, booleanFlag
 function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseResult {
 	const action = args[1];
 	if (!action) return { kind: "error", message: "script requires a subcommand: repl | get | set | add-file | compile" };
-	if (action !== "repl" && action !== "get" && action !== "set" && action !== "add-file" && action !== "compile" && action !== "diagnose" && action !== "show") {
-		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, add-file, compile, diagnose, or show.` };
+	if (action !== "repl" && action !== "get" && action !== "set" && action !== "add-file" && action !== "compile" && action !== "diagnose" && action !== "show" && action !== "docs") {
+		return { kind: "error", message: `Unknown script subcommand "${action}". Use repl, get, set, add-file, compile, diagnose, show, or docs.` };
 	}
 
 	const rest = args.slice(2);
@@ -659,6 +799,10 @@ function parseScriptApiArgs(args: string[], output: CliOutputOptions): CliParseR
 
 	if (action === "show") {
 		return parseScriptShowApiArgs(rest, moduleId, useMock, output);
+	}
+
+	if (action === "docs") {
+		return parseScriptShowApiArgs(["docs", ...rest], moduleId, useMock, output);
 	}
 
 	const unexpected = findUnexpectedArgs(
@@ -839,6 +983,10 @@ function parseTimeoutMs(value: string): number | null {
 }
 
 function parseScriptShowApiArgs(rest: string[], moduleId: string, useMock: boolean, output: CliOutputOptions): CliParseResult {
+	if (rest[0] === "docs") {
+		const raw = `docs ${splitModuleAgnosticScriptShowArgs(rest.slice(1)).join(" ")}`.trim();
+		return { kind: "script-api", command: { action: "show", moduleId, target: "docs", filters: { symbolsOnly: false }, raw }, useMock, output };
+	}
 	const positional: Array<{ value: string; index: number }> = [];
 	for (let i = 0; i < rest.length; i++) {
 		const arg = rest[i]!;
@@ -876,6 +1024,19 @@ function parseScriptShowApiArgs(rest: string[], moduleId: string, useMock: boole
 	if (positionalSearch) filters.search = positionalSearch;
 	return { kind: "script-api", command: { action: "show", moduleId, target, filters }, useMock, output };
 }
+
+function splitModuleAgnosticScriptShowArgs(rest: string[]): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < rest.length; i++) {
+		const arg = rest[i]!;
+		if (arg === "--module-id") { i++; continue; }
+		if (arg.startsWith("--module-id=")) continue;
+		if (arg === "--mock") continue;
+		out.push(arg);
+	}
+	return out;
+}
+
 
 function assignScriptShowFilter(filters: ScriptShowFilters, flag: string, value: string): string | null {
 	if (flag === "--namespace") filters.namespace = value;

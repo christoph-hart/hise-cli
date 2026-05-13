@@ -50,6 +50,7 @@ import { compilerSettingsPath, parseHisePath } from "../tui/nodeHiseLauncher.js"
 import { extractStatusPayload } from "../engine/modes/inspect.js";
 import { isEnvelopeResponse, isErrorResponse, isSuccessResponse } from "../engine/hise.js";
 import { executeScriptShow } from "../engine/modes/script-symbols.js";
+import { ScriptMode } from "../engine/modes/script.js";
 import { RestMcpClient, mcpErrorPayload } from "../mcp/restClient.js";
 import { prepareMcpCommand } from "./mcp.js";
 import { McpMode } from "../engine/modes/mcp.js";
@@ -654,10 +655,19 @@ async function executeScriptApiCommand(
 
 		if (command.action === "show") {
 			const api = await dataLoader.loadScriptingApi().catch(() => null);
-			const showCommand = command.target === "tree"
-				? { kind: "tree" as const, filters: command.filters }
-				: { kind: "symbol" as const, expression: command.target };
-			const result = await executeScriptShow(connection, command.moduleId, showCommand, { forLlm: true, api });
+			const result = command.raw
+				? await new ScriptMode(command.moduleId, undefined, api).parse(command.raw, {
+					connection,
+					forLlm: true,
+					mcpClient: opts.mcpClient ?? createDefaultMcpClient(),
+					popMode: () => ({ type: "text", content: "" }),
+				})
+				: await executeScriptShow(
+					connection,
+					command.moduleId,
+					command.target === "tree" ? { kind: "tree" as const, filters: command.filters } : { kind: "symbol" as const, expression: command.target },
+					{ forLlm: true, api },
+				);
 			return finalizeJsonPayload(serializeCliOutput("script", result), output);
 		}
 

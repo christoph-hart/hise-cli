@@ -93,6 +93,8 @@ paths:
               value: query_scripting_api
             searchHise:
               value: search_hise
+            queryScriptnodeNode:
+              value: query_scriptnode_node
       requestBody:
         required: false
         content:
@@ -115,6 +117,14 @@ paths:
                   query: midi
                   domain: all
                   limit: 5
+              queryScriptnodeNode:
+                summary: Query a Scriptnode node
+                value:
+                  factoryPath: analyse.fft
+              listScriptnodeNodes:
+                summary: List Scriptnode nodes in a factory
+                value:
+                  factory: analyse
       responses:
         '200':
           description: Tool completed successfully.

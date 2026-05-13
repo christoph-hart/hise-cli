@@ -15,7 +15,10 @@ import { generateHelp } from "./help.js";
 import type { WizardAnswers } from "../wizard/types.js";
 import { isEnvelopeResponse, isErrorResponse } from "../hise.js";
 import { ScriptMode } from "../modes/script.js";
+import { parseSingleDspCommand } from "../modes/dsp-parser.js";
 import { stripQuotes } from "../string-utils.js";
+
+const DSP_CONTEXT_GUIDANCE = "Use /dsp, then cd <module> to select a DSP host module. Direct /dsp <module> context syntax was removed.";
 
 /**
  * Split mode args of the form `[.context] [command]` into the two parts.
@@ -23,10 +26,9 @@ import { stripQuotes } from "../string-utils.js";
  * stay intact.
  *
  * Without a leading dot, a single bareword starting with an uppercase
- * letter or a single quoted string is also treated as a context token,
- * so `/dsp "Script FX"` and `/dsp ScriptFX1` both enter mode with the
- * named host pre-selected. Verbs are lowercase by convention, so they
- * remain unambiguous as one-shot commands.
+ * letter or a single quoted string is also treated as a context token
+ * for modes that still support slash context entry. DSP disables
+ * context-only slash entry and selects host modules via `cd <module>`.
  */
 function splitModeArgs(args: string): { context?: string; commandInput?: string } {
 	if (args.startsWith(".")) {
@@ -186,6 +188,36 @@ function createModeHandler(modeId: ModeId): CommandHandler {
 		}
 	};
 	return handler;
+}
+
+function createDspModeHandler(): CommandHandler {
+	return async (args, session) => {
+		const trimmed = args.trim();
+		if (!trimmed) return createModeHandler("dsp")("", session);
+
+		if (trimmed.startsWith(".")) {
+			const { context, commandInput } = splitModeArgs(trimmed);
+			if (!commandInput) return errorResult(DSP_CONTEXT_GUIDANCE);
+			const mode = session.getOrCreateMode("dsp");
+			if (context && mode.setContext) mode.setContext(context);
+			return session.executeOneShot("dsp", commandInput);
+		}
+
+		if (isSingleToken(trimmed) && trimmed !== "docs") {
+			const parsed = parseSingleDspCommand(trimmed);
+			if ("error" in parsed) return errorResult(DSP_CONTEXT_GUIDANCE);
+		}
+
+		return session.executeOneShot("dsp", trimmed);
+	};
+}
+
+function isSingleToken(value: string): boolean {
+	if (value.startsWith('"')) {
+		const close = value.indexOf('"', 1);
+		return close !== -1 && value.slice(close + 1).trim() === "";
+	}
+	return !/\s/.test(value);
 }
 
 // ── Wizard command ──────────────────────────────────────────────────
@@ -1364,7 +1396,7 @@ export function registerBuiltinCommands(registry: CommandRegistry): void {
 	registry.register({
 		name: "dsp",
 		description: "Enter DSP mode (scriptnode)",
-		handler: createModeHandler("dsp"),
+		handler: createDspModeHandler(),
 		kind: "mode",
 	});
 

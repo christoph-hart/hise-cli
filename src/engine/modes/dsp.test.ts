@@ -62,6 +62,27 @@ const scriptnodeFixture: ScriptnodeList = {
 		properties: {},
 		interfaces: [],
 	},
+	"core.gain": {
+		id: "gain",
+		description: "",
+		type: "polyphonic",
+		subtype: "",
+		category: [],
+		hasChildren: false,
+		hasFX: false,
+		metadataType: "static",
+		parameters: [
+			{
+				parameterIndex: 0, id: "Gain", metadataType: "static",
+				description: "", type: "Slider", disabled: false,
+				range: { min: -100, max: 0, stepSize: 0.1 }, defaultValue: 0,
+			},
+		],
+		modulation: [],
+		hasMidi: false,
+		properties: {},
+		interfaces: [],
+	},
 };
 
 function makeSession(): { mode: DspMode; ctx: SessionContext; popped: { value: boolean } } {
@@ -159,6 +180,20 @@ describe("DspMode — integration", () => {
 		await mode.parse('add core.oscillator as "Osc1"', ctx);
 		const set = await mode.parse("set Osc1.Frequency 99999", ctx);
 		expect(set.type).toBe("error");
+	});
+
+	it("validates set values against updated live parameter ranges", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "RangeDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+		await mode.parse('add core.gain as "Gain1"', ctx);
+
+		const range = await mode.parse("set Gain1.Gain.range [-24, 6], Gain1.Gain.stepSize 0.1", ctx);
+		expect(range.type).not.toBe("error");
+
+		const set = await mode.parse("set Gain1.Gain 3", ctx);
+		expect(set.type).not.toBe("error");
 	});
 
 	it("rejects add with unknown factory path (local validation)", async () => {

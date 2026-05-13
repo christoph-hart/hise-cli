@@ -30,6 +30,7 @@ import {
 	BooleanLiteral,
 	To,
 	Tree,
+	Type,
 	Types,
 	builderLexer,
 	BUILDER_TOKENS,
@@ -97,7 +98,6 @@ export interface GetCommand {
 
 export type ShowCommand =
 	| { type: "show"; kind: "tree" }
-	| { type: "show"; kind: "types"; filter?: string }
 	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface CdCommand { type: "cd"; target: PathRef }
@@ -144,6 +144,7 @@ class BuilderParser extends CstParser {
 	public pathSegment = this.RULE("pathSegment", () => {
 		this.OR([
 			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(Type) },
 			{ ALT: () => this.CONSUME(QuotedString) },
 		]);
 	});
@@ -253,17 +254,6 @@ class BuilderParser extends CstParser {
 		this.CONSUME(Show);
 		this.OR([
 			{ ALT: () => this.CONSUME(Tree, { LABEL: "noun_tree" }) },
-			{
-				ALT: () => {
-					this.CONSUME(Types, { LABEL: "noun_types" });
-					this.OPTION(() => {
-						this.OR2([
-							{ ALT: () => this.CONSUME(QuotedString, { LABEL: "filterQuoted" }) },
-							{ ALT: () => this.CONSUME(Identifier, { LABEL: "filterBare" }) },
-						]);
-					});
-				},
-			},
 			{ ALT: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }) },
 		]);
 	});
@@ -314,6 +304,7 @@ const asToken = (el: import("chevrotain").CstElement): IToken => el as IToken;
 function extractPathSegmentImage(node: CstNode): string {
 	const c = node.children;
 	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.Type) return (c.Type[0] as IToken).image;
 	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
 	throw new Error("pathSegment: no Identifier or QuotedString");
 }
@@ -486,17 +477,6 @@ function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: 
 	const c = node.children;
 	if (c.noun_tree) {
 		return { command: { type: "show", kind: "tree" } };
-	}
-	if (c.noun_types) {
-		let filter: string | undefined;
-		if (c.filterQuoted) {
-			const r = parseQuotedString((c.filterQuoted[0] as IToken).image);
-			if (!r.ok || r.value.kind !== "string") return { error: "show: invalid filter" };
-			filter = r.value.s;
-		} else if (c.filterBare) {
-			filter = (c.filterBare[0] as IToken).image;
-		}
-		return { command: { type: "show", kind: "types", filter } };
 	}
 	const target = extractPathExpr(c.target![0] as CstNode);
 	if ("error" in target) return { error: target.error };

@@ -123,6 +123,14 @@ describe("dsp parser — set", () => {
 		expect(cmd.clauses[0]!.value.kind).toBe("hex");
 	});
 
+	it("parses direct node appearance attributes", () => {
+		const comment = parseOk<SetCommand>('set MicPairSelector.Comment "**Mic pair selector** - Routes one stereo pair into the FX chain."');
+		const folded = parseOk<SetCommand>("set CabGlueComp.Folded true");
+
+		expect(comment.clauses[0]!.value.kind).toBe("string");
+		expect(folded.clauses[0]!.value.kind).toBe("boolean");
+	});
+
 	it("rejects `to` keyword in set value (no longer optional)", () => {
 		// Old grammar accepted `set X.p to V`. New grammar treats `to` as
 		// a path identifier in value position.
@@ -298,6 +306,11 @@ describe("dsp parser — show", () => {
 		const cmd = parseOk<ShowCommand>("show networks foo");
 		if (cmd.kind === "networks") expect(cmd.filter).toBe("foo");
 		else throw new Error("expected networks kind");
+	});
+
+	it("rejects static docs through `show`", () => {
+		expect(parseErr("show types")).toMatch(/Parse error/);
+		expect(parseErr("show type filters.svf")).toMatch(/Parse error|Redundant input/);
 	});
 
 	it("rejects `list` verb (folded into show)", () => {

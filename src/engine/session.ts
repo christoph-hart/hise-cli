@@ -61,6 +61,7 @@ export class Session implements SessionContext, CommandSession {
 	readonly modeStack: Mode[];
 	readonly history: string[] = [];
 	readonly connection: HiseConnection | null;
+	mcpClient: import("./mcp/types.js").McpClient | null = null;
 	readonly registry: CommandRegistry;
 	readonly completionEngine: CompletionEngine | null;
 	wizardRegistry: WizardRegistry | null = null;

@@ -359,6 +359,42 @@ describe("ScriptMode", () => {
 			expect(result.message).toContain("raw callback body only");
 		}
 	});
+
+	it("routes docs api to MCP docs without a HISE connection", async () => {
+		const calls: Array<{ name: string; arguments?: unknown }> = [];
+		const mode = new ScriptMode();
+		const result = await mode.parse("docs api Console.print", {
+			connection: null,
+			mcpClient: {
+				async call() { return {}; },
+				async callTool(request) {
+					calls.push(request);
+					return { content: [{ type: "text", text: "Console.print docs" }] };
+				},
+			},
+			popMode: () => ({ type: "text", content: "Exited Script mode." }),
+		});
+		expect(result.type).toBe("markdown");
+		expect(calls).toEqual([{ name: "query_scripting_api", arguments: { apiCall: "Console.print" } }]);
+	});
+
+	it("routes docs laf component types to MCP docs", async () => {
+		const calls: Array<{ name: string; arguments?: unknown }> = [];
+		const mode = new ScriptMode();
+		const result = await mode.parse("docs laf --component ScriptButton", {
+			connection: null,
+			mcpClient: {
+				async call() { return {}; },
+				async callTool(request) {
+					calls.push(request);
+					return { content: [{ type: "text", text: "Button LAF" }] };
+				},
+			},
+			popMode: () => ({ type: "text", content: "Exited Script mode." }),
+		});
+		expect(result.type).toBe("markdown");
+		expect(calls).toEqual([{ name: "get_laf_functions_for_components", arguments: { componentTypes: ["ScriptButton"] } }]);
+	});
 });
 
 // ── formatReplResponse (pure function) ──────────────────────────────

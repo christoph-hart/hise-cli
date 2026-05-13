@@ -57,4 +57,13 @@ describe("executeWhich", () => {
 			expect(result.value[0]?.id).toBe("builder.set.routing");
 		}
 	});
+
+	it("finds DSP node parent moves", () => {
+		const result = executeWhich("move parent", 1);
+
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.value[0]?.id).toBe("dsp.move.parent");
+		}
+	});
 });

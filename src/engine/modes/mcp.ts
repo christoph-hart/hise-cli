@@ -1,5 +1,6 @@
 import type { McpClient, McpJsonValue } from "../mcp/types.js";
-import { errorResult, jsonResult, markdownResult, type CommandResult } from "../result.js";
+import { errorResult, markdownResult, type CommandResult } from "../result.js";
+import { renderMcpReferenceResult } from "../reference/mcpReference.js";
 import type { TokenSpan } from "../highlight/tokens.js";
 import type { CompletionItem, CompletionResult, Mode, SessionContext } from "./mode.js";
 import { MODE_ACCENTS } from "./mode.js";
@@ -8,8 +9,9 @@ const COMMON_TOOLS = [
 	"search_hise",
 	"explore_hise",
 	"query_scripting_api",
-	"query_ui_property",
-	"query_module_parameter",
+	"query_ui",
+	"query_module",
+	"query_scriptnode",
 	"search_examples",
 	"get_example",
 	"get_tutorial",
@@ -55,7 +57,7 @@ export class McpMode implements Mode {
 			const result = parsed.kind === "tool"
 				? await this.client.callTool({ name: parsed.target, arguments: parsed.args })
 				: await this.client.call({ method: parsed.target, params: parsed.args });
-			return renderMcpResult(result);
+			return renderMcpReferenceResult(result);
 		} catch (err) {
 			return errorResult("MCP request failed", err instanceof Error ? err.message : String(err));
 		}
@@ -99,37 +101,10 @@ function parseMcpModeArgs(target: string, rest: string): McpJsonValue {
 	if (target === "resources/read") return { uri: rest };
 	if (QUERY_ARG_TOOLS.has(target)) return { query: rest };
 	if (target === "query_scripting_api") return { apiCall: rest };
-	if (target === "query_ui_property") return { componentProperty: rest };
-	if (target === "query_module_parameter") return { moduleParameter: rest };
+	if (target === "query_ui" || target === "query_module" || target === "query_scriptnode") return { query: rest };
 	if (target === "get_doc_content") return rest.startsWith("/") ? { url: rest } : { id: rest };
 	if (ID_ARG_TOOLS.has(target)) return { id: rest };
 	throw new Error(`Pass JSON arguments for ${target}, e.g. ${target} {"query":"${escapeJson(rest)}"}`);
-}
-
-function renderMcpResult(result: McpJsonValue): CommandResult {
-	const text = extractTextBlocks(result);
-	if (text.length > 0) return markdownResult(text.join("\n\n---\n\n"));
-	return jsonResult(result, JSON.stringify(result, null, 2));
-}
-
-function extractTextBlocks(value: McpJsonValue): string[] {
-	const record = toRecord(value);
-	const out: string[] = [];
-	for (const item of asRecords(record.content)) {
-		if (item.type === "text" && typeof item.text === "string") out.push(item.text);
-	}
-	for (const item of asRecords(record.contents)) {
-		if (typeof item.text === "string") out.push(item.text);
-	}
-	return out;
-}
-
-function toRecord(value: unknown): Record<string, unknown> {
-	return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function asRecords(value: unknown): Record<string, unknown>[] {
-	return Array.isArray(value) ? value.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)) : [];
 }
 
 function escapeJson(value: string): string {

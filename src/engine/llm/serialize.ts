@@ -80,7 +80,7 @@ function serializeBuilder(c: StructuredCommand): string {
 			if (what === "tree") return "show tree";
 			if (what === "types") {
 				const filter = optionalString(c, "filter");
-				return filter ? `show types ${filter}` : "show types";
+				return filter ? `docs ${filter}` : "docs";
 			}
 			if (what === "target") {
 				const target = requireString(c, "target");

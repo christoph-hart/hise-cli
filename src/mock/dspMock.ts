@@ -297,14 +297,20 @@ function applySet(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): string | null
 	if (!parameterId) return "set: missing parameterId";
 	const node = findDspNode(tree, nodeId);
 	if (!node) return `set: node "${nodeId}" not found`;
-	const value = coerceNumeric(op.value);
 	let param = node.parameters.find((p) => p.parameterId === parameterId);
 	if (!param) {
+		const value = coerceNumeric(op.value, 0);
 		param = { parameterId, value };
 		node.parameters.push(param);
-	} else {
+	} else if (op.value !== undefined) {
+		const value = coerceNumeric(op.value);
 		param.value = value;
 	}
+	if (typeof op.min === "number") param.min = op.min;
+	if (typeof op.max === "number") param.max = op.max;
+	if (typeof op.stepSize === "number") param.stepSize = op.stepSize;
+	if (typeof op.middlePosition === "number") param.middlePosition = op.middlePosition;
+	if (typeof op.defaultValue === "number") param.defaultValue = op.defaultValue;
 	diff.push({ domain: "dsp", action: "*", target: nodeId });
 	return null;
 }

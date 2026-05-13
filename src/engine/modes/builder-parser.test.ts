@@ -267,22 +267,9 @@ describe("builder parser — show", () => {
 		expect(cmd.kind).toBe("tree");
 	});
 
-	it("parses `show types` without filter", () => {
-		const cmd = parseOk<ShowCommand>("show types");
-		expect(cmd.kind).toBe("types");
-		if (cmd.kind === "types") expect(cmd.filter).toBeUndefined();
-	});
-
-	it("parses `show types <filter>` (bare)", () => {
-		const cmd = parseOk<ShowCommand>("show types synth");
-		if (cmd.kind === "types") expect(cmd.filter).toBe("synth");
-		else throw new Error("expected types kind");
-	});
-
-	it("parses `show types <filter>` (quoted)", () => {
-		const cmd = parseOk<ShowCommand>('show types "Master Effects"');
-		if (cmd.kind === "types") expect(cmd.filter).toBe("Master Effects");
-		else throw new Error("expected types kind");
+	it("rejects static docs through `show`", () => {
+		expect(parseErr("show types")).toMatch(/Parse error/);
+		expect(parseErr("show type AHDSR")).toMatch(/Parse error|Redundant input/);
 	});
 
 	it("rejects `list` verb (folded into show)", () => {

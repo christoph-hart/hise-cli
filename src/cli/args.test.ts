@@ -26,6 +26,36 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct builder docs commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "builder", "docs", "AHDSR.Attack"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/builder docs AHDSR.Attack");
+		}
+	});
+
+	it("parses builder docs catalog commands", () => {
+		const types = parseCliArgs(["node", "hise-cli", "builder", "docs"], getCliCommands());
+		expect(types.kind).toBe("execute");
+		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/builder docs");
+	});
+
+	it("parses direct UI docs and live property commands", () => {
+		const docs = parseCliArgs(["node", "hise-cli", "ui", "docs", "ScriptSlider.mode"], getCliCommands());
+		expect(docs.kind).toBe("execute");
+		if (docs.kind === "execute") expect(docs.canonicalCommand).toBe("/ui docs ScriptSlider.mode");
+
+		const live = parseCliArgs(["node", "hise-cli", "ui", "show", "--component", "Cutoff", "--property", "mode"], getCliCommands());
+		expect(live.kind).toBe("execute");
+		if (live.kind === "execute") expect(live.canonicalCommand).toBe("/ui show Cutoff.mode");
+	});
+
+	it("parses UI docs catalog commands", () => {
+		const types = parseCliArgs(["node", "hise-cli", "ui", "docs"], getCliCommands());
+		expect(types.kind).toBe("execute");
+		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/ui docs");
+	});
+
 	it("parses direct DSP tree commands", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "tree", "--module", "Script FX1"], getCliCommands());
 		expect(result.kind).toBe("execute");
@@ -34,9 +64,40 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP docs commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "docs", "filters.svf.Frequency"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe("/dsp docs filters.svf.Frequency");
+		}
+	});
+
+	it("parses DSP docs catalog commands", () => {
+		const types = parseCliArgs(["node", "hise-cli", "dsp", "docs"], getCliCommands());
+		expect(types.kind).toBe("execute");
+		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/dsp docs");
+	});
+
+	it("parses leading DSP module flag before command", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "--module", "Interface", "docs", "filters.svf"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") expect(result.canonicalCommand).toBe("/dsp docs filters.svf");
+	});
+
+	it("parses direct script API and LAF docs commands", () => {
+		const api = parseCliArgs(["node", "hise-cli", "script", "docs", "api", "Console.print"], getCliCommands());
+		expect(api.kind).toBe("script-api");
+		if (api.kind === "script-api" && api.command.action === "show") expect(api.command.raw).toBe("docs api Console.print");
+
+		const laf = parseCliArgs(["node", "hise-cli", "script", "docs", "laf", "--component", "ScriptButton"], getCliCommands());
+		expect(laf.kind).toBe("script-api");
+		if (laf.kind === "script-api" && laf.command.action === "show") expect(laf.command.raw).toBe("docs laf --component ScriptButton");
+	});
+
 	it("rejects target on direct mode commands", () => {
 		const result = parseCliArgs(["node", "hise-cli", "-dsp", "show", "tree", "--target"], getCliCommands());
-		expect(result).toEqual({ kind: "error", message: "--module is required" });
+		expect(result.kind).toBe("error");
+		if (result.kind === "error") expect(result.message).toContain("dsp docs");
 	});
 
 	it("rejects missing one-shot tail for mode commands", () => {
@@ -340,6 +401,36 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP parameter range metadata flags", () => {
+		const range = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--param", "Frequency", "--range", "20,20000"], getCliCommands());
+		expect(range.kind).toBe("execute");
+		if (range.kind === "execute") {
+			expect(range.canonicalCommand).toBe('/dsp."Script FX1" set F1.Frequency.range [20,20000]');
+		}
+
+		const bracketed = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--param", "Frequency", "--range", "[20,20000]"], getCliCommands());
+		expect(bracketed.kind).toBe("execute");
+		if (bracketed.kind === "execute") {
+			expect(bracketed.canonicalCommand).toBe('/dsp."Script FX1" set F1.Frequency.range [20,20000]');
+		}
+	});
+
+	it("parses combined direct DSP parameter metadata flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--param", "Frequency", "--range", "20,20000", "--default", "1000", "--skewFactor", "0.3"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" set F1.Frequency.range [20,20000], F1.Frequency.default 1000, F1.Frequency.skewFactor 0.3');
+		}
+	});
+
+	it("rejects invalid direct DSP parameter metadata flags", () => {
+		const missingParam = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--range", "20,20000"], getCliCommands());
+		expect(missingParam).toEqual({ kind: "error", message: "dsp set parameter metadata flags require --param" });
+
+		const exclusive = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--param", "Frequency", "--middlePosition", "1000", "--skewFactor", "0.3"], getCliCommands());
+		expect(exclusive).toEqual({ kind: "error", message: "dsp set accepts --middlePosition or --skewFactor, not both" });
+	});
+
 	it("rejects mutually exclusive DSP source qualifiers", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "connect", "--module", "Script FX1", "--source", "Root", "--source-param", "Cutoff", "--source-output", "0", "--target", "F1", "--param", "Frequency"], getCliCommands());
 		expect(result).toEqual({ kind: "error", message: "dsp connect accepts --source-param or --source-output, not both" });
@@ -362,12 +453,17 @@ describe("parseCliArgs", () => {
 		const routing = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "Synth1", "--routing", "stereo", "--routing-send", "0,1"], getCliCommands());
 		expect(routing.kind).toBe("execute");
 		if (routing.kind === "execute") {
-			expect(routing.canonicalCommand).toBe("/builder set Synth1.routing stereo, Synth1.routing.send [0,1]");
+			expect(routing.canonicalCommand).toBe('/builder set Synth1.routing "stereo", Synth1.routing.send [0,1]');
 		}
 		const network = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "Script FX1", "--network", "my_dsp.xml"], getCliCommands());
 		expect(network.kind).toBe("execute");
 		if (network.kind === "execute") {
-			expect(network.canonicalCommand).toBe('/builder set "Script FX1".network my_dsp.xml');
+			expect(network.canonicalCommand).toBe('/builder set "Script FX1".network "my_dsp.xml"');
+		}
+		const bareNetwork = parseCliArgs(["node", "hise-cli", "builder", "set", "--module", "CabMicSelector", "--network", "cab_mic_selector"], getCliCommands());
+		expect(bareNetwork.kind).toBe("execute");
+		if (bareNetwork.kind === "execute") {
+			expect(bareNetwork.canonicalCommand).toBe('/builder set CabMicSelector.network "cab_mic_selector"');
 		}
 	});
 
@@ -411,9 +507,9 @@ describe("parseCliArgs", () => {
 	});
 
 	it("parses direct DSP types show add source-output rename remove and save commands", () => {
-		const types = parseCliArgs(["node", "hise-cli", "dsp", "types", "filter"], getCliCommands());
+		const types = parseCliArgs(["node", "hise-cli", "dsp", "docs", "filter"], getCliCommands());
 		expect(types.kind).toBe("execute");
-		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/dsp show types filter");
+		if (types.kind === "execute") expect(types.canonicalCommand).toBe("/dsp docs filter");
 		const show = parseCliArgs(["node", "hise-cli", "dsp", "show", "--module", "Script FX1", "--node", "F1"], getCliCommands());
 		expect(show.kind).toBe("execute");
 		if (show.kind === "execute") expect(show.canonicalCommand).toBe('/dsp."Script FX1" show F1');

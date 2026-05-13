@@ -144,11 +144,14 @@ function validateSetClause(
 
 	if (clause.value.kind === "number" || clause.value.kind === "hex") {
 		const v = clause.value.n;
-		if (v < param.range.min || v > param.range.max) {
+		const liveParam = node.parameters.find((p) => p.parameterId === fieldName);
+		const min = liveParam?.min ?? param.range.min;
+		const max = liveParam?.max ?? param.range.max;
+		if (v < min || v > max) {
 			return {
 				valid: false,
 				errors: [
-					`Value ${v} out of range for ${nodeId}.${fieldName} (${param.range.min}-${param.range.max}).`,
+					`Value ${v} out of range for ${nodeId}.${fieldName} (${min}-${max}).`,
 				],
 			};
 		}

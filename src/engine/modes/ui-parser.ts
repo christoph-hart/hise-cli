@@ -7,7 +7,7 @@ import { CstParser, type CstNode, type IToken } from "chevrotain";
 import { closest } from "fastest-levenshtein";
 import {
 	Add, Remove, Rename, Show, Set, Get, Connect, Cd, Ls, Pwd, Reset,
-	To, As, Tree, Types, BooleanLiteral,
+	To, As, Tree, Type, Types, BooleanLiteral,
 	Identifier, QuotedString, NumberLiteral, PercentLiteral, HexLiteral,
 	Dot, DoubleDot, Comma, LBracket, RBracket,
 	uiLexer, UI_TOKENS,
@@ -154,6 +154,7 @@ class UiParser extends CstParser {
 	public pathSegment = this.RULE("pathSegment", () => {
 		this.OR([
 			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(Type) },
 			{ ALT: () => this.CONSUME(QuotedString) },
 		]);
 	});
@@ -292,7 +293,7 @@ class UiParser extends CstParser {
 		]);
 		// Suppress unused-token warnings for tokens referenced only by
 		// the lexer (kept so future grammar growth can reach them).
-		void Types; void Reset;
+		void Reset;
 	});
 }
 
@@ -303,6 +304,7 @@ const parser = new UiParser();
 function extractPathSegmentImage(node: CstNode): string {
 	const c = node.children;
 	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.Type) return (c.Type[0] as IToken).image;
 	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
 	throw new Error("pathSegment: no Identifier or QuotedString");
 }

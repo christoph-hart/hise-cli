@@ -371,13 +371,26 @@ describe("mode handler one-shot execution", () => {
 		expect(session.modes).toContain("builder");
 	});
 
-	it("/dsp.\"Script FX\" enters mode with quoted context preserved", async () => {
+	it("/dsp.\"Script FX\" without command reports cd migration", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 
-		await registry.dispatch('/dsp."Script FX"', session);
-		expect(session.modes).toContain("dsp");
-		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "Script FX" }]);
+		const result = await registry.dispatch('/dsp."Script FX"', session);
+		expect(result.type).toBe("error");
+		if (result.type === "error") expect(result.message).toContain("Use /dsp, then cd <module>");
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([]);
+	});
+
+	it("/dsp.CabMicSelector without command reports cd migration", async () => {
+		const registry = createRegistry();
+		const session = createMockSession();
+
+		const result = await registry.dispatch("/dsp.CabMicSelector", session);
+		expect(result.type).toBe("error");
+		if (result.type === "error") expect(result.message).toContain("Use /dsp, then cd <module>");
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([]);
 	});
 
 	it("/dsp.\"Script FX\" save runs one-shot with quoted context", async () => {
@@ -399,22 +412,26 @@ describe("mode handler one-shot execution", () => {
 		expect(session.contextLog).toEqual([{ modeId: "builder", path: "Master Chain" }]);
 	});
 
-	it("/dsp \"Script FX\" (space form) enters mode with quoted context", async () => {
+	it("/dsp \"Script FX\" (space form) reports cd migration", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 
-		await registry.dispatch('/dsp "Script FX"', session);
-		expect(session.modes).toContain("dsp");
-		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "Script FX" }]);
+		const result = await registry.dispatch('/dsp "Script FX"', session);
+		expect(result.type).toBe("error");
+		if (result.type === "error") expect(result.message).toContain("Use /dsp, then cd <module>");
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([]);
 	});
 
-	it("/dsp ScriptFX (space form, PascalCase) enters mode with bare context", async () => {
+	it("/dsp ScriptFX (space form) reports cd migration", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 
-		await registry.dispatch("/dsp ScriptFX", session);
-		expect(session.modes).toContain("dsp");
-		expect(session.contextLog).toEqual([{ modeId: "dsp", path: "ScriptFX" }]);
+		const result = await registry.dispatch("/dsp ScriptFX", session);
+		expect(result.type).toBe("error");
+		if (result.type === "error") expect(result.message).toContain("Use /dsp, then cd <module>");
+		expect(session.modes).toHaveLength(0);
+		expect(session.contextLog).toEqual([]);
 	});
 
 	it("/dsp save (space form, lowercase verb) is treated as one-shot", async () => {
@@ -787,34 +804,37 @@ describe("/wizard subcommands", () => {
 // unexpected one-shot dispatch surfaces as a real assertion failure.
 
 describe("slash dispatcher → real modes", () => {
-	it("/dsp \"Script FX\" sets DspMode.moduleId to the unquoted name", async () => {
+	it("/dsp \"Script FX\" no longer sets DspMode.moduleId", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 		const dsp = new DspMode();
 		session.modeCache.set("dsp", dsp);
 
-		await registry.dispatch('/dsp "Script FX"', session);
-		expect(dsp.contextLabel).toBe("Script FX");
+		const result = await registry.dispatch('/dsp "Script FX"', session);
+		expect(result.type).toBe("error");
+		expect(dsp.contextLabel).toBe("");
 	});
 
-	it("/dsp.\"Script FX\" sets DspMode.moduleId without quote leakage", async () => {
+	it("/dsp.\"Script FX\" no longer sets DspMode.moduleId without a command", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 		const dsp = new DspMode();
 		session.modeCache.set("dsp", dsp);
 
-		await registry.dispatch('/dsp."Script FX"', session);
-		expect(dsp.contextLabel).toBe("Script FX");
+		const result = await registry.dispatch('/dsp."Script FX"', session);
+		expect(result.type).toBe("error");
+		expect(dsp.contextLabel).toBe("");
 	});
 
-	it("/dsp ScriptFX1 sets DspMode.moduleId from PascalCase bareword", async () => {
+	it("/dsp ScriptFX1 no longer sets DspMode.moduleId", async () => {
 		const registry = createRegistry();
 		const session = createMockSession();
 		const dsp = new DspMode();
 		session.modeCache.set("dsp", dsp);
 
-		await registry.dispatch("/dsp ScriptFX1", session);
-		expect(dsp.contextLabel).toBe("ScriptFX1");
+		const result = await registry.dispatch("/dsp ScriptFX1", session);
+		expect(result.type).toBe("error");
+		expect(dsp.contextLabel).toBe("");
 	});
 
 	it("/dsp save runs as one-shot, leaves moduleId empty", async () => {

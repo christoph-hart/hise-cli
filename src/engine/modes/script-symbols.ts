@@ -40,7 +40,12 @@ export interface ScriptShowFilters {
 
 export type ScriptShowCommand =
 	| { kind: "tree"; filters: ScriptShowFilters }
-	| { kind: "symbol"; expression: string };
+	| { kind: "symbol"; expression: string }
+	| { kind: "apiIndex" }
+	| { kind: "api"; apiCall: string }
+	| { kind: "lafIndex" }
+	| { kind: "lafFunction"; functionName: string }
+	| { kind: "lafComponent"; component: string };
 
 export function defaultScriptShowFilters(): ScriptShowFilters {
 	return { symbolsOnly: false };
@@ -50,6 +55,11 @@ export function parseScriptShowTokens(tokens: string[]): ScriptShowCommand | { e
 	if (tokens[0] !== "show") return { error: "script show command must start with show" };
 	const target = tokens[1];
 	if (!target) return { error: "script show requires tree or an expression" };
+	if (target === "api") {
+		const apiCall = tokens.slice(2).join(" ").trim();
+		return apiCall ? { kind: "api", apiCall } : { kind: "apiIndex" };
+	}
+	if (target === "laf") return parseScriptShowLafTokens(tokens.slice(2));
 	if (target !== "tree") return { kind: "symbol", expression: target };
 
 	const filters = defaultScriptShowFilters();
@@ -74,6 +84,27 @@ export function parseScriptShowTokens(tokens: string[]): ScriptShowCommand | { e
 	if (positionalSearch && filters.search) return { error: "script show tree accepts either a positional search or --search, not both" };
 	if (positionalSearch) filters.search = positionalSearch;
 	return { kind: "tree", filters };
+}
+
+function parseScriptShowLafTokens(tokens: string[]): ScriptShowCommand | { error: string } {
+	let functionName: string | undefined;
+	let component: string | undefined;
+	for (let i = 0; i < tokens.length; i++) {
+		const arg = tokens[i]!;
+		if (arg === "--component") {
+			const value = tokens[i + 1];
+			if (!value || value.startsWith("--")) return { error: "--component requires a value" };
+			component = value;
+			i++;
+			continue;
+		}
+		if (arg.startsWith("--")) return { error: `Unexpected argument for script docs laf: ${arg}` };
+		functionName = functionName ? `${functionName} ${arg}` : arg;
+	}
+	if (component && functionName) return { error: "script docs laf accepts a function name or --component, not both" };
+	if (component) return { kind: "lafComponent", component };
+	if (functionName) return { kind: "lafFunction", functionName };
+	return { kind: "lafIndex" };
 }
 
 function assignFilter(filters: ScriptShowFilters, flag: string, value: string): string | null {
@@ -109,6 +140,7 @@ export async function executeScriptShow(
 		return jsonResult(enriched);
 	}
 
+	if (command.kind !== "tree") return errorResult("Unsupported script show command");
 	const response = await fetchScriptTree(connection, moduleId, command.filters);
 	if ("error" in response) return errorResult(response.error);
 	const tree = scriptTreeToTreeNode(moduleId, response.value.tree ?? []);

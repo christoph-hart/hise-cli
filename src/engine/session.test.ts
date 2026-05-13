@@ -4,6 +4,7 @@ import { MockHiseConnection } from "./hise.js";
 import type { CommandResult } from "./result.js";
 import type { CompletionResult, Mode, ModeId, SessionContext } from "./modes/mode.js";
 import { CompletionEngine } from "./completion/engine.js";
+import { createSession as createBootstrappedSession } from "../session-bootstrap.js";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -156,6 +157,42 @@ describe("Session input dispatch", () => {
 		await session.handleInput("/script.Interface");
 		expect(session.currentMode().id).toBe("script");
 		// Context would be verified via mode.contextLabel (not mode.id)
+	});
+
+	it("/dsp then cd CabMicSelector selects the DSP host module", async () => {
+		const connection = new MockHiseConnection();
+		connection.onGet("/api/undo/diff", () => ({ success: true, groupName: "root", logs: [], errors: [] }));
+		connection.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: {
+				nodeId: "cab_mic_selector",
+				factoryPath: "container.chain",
+				bypassed: false,
+				parameters: [],
+				children: [],
+			},
+			logs: [],
+			errors: [],
+		}));
+		const { session } = createBootstrappedSession({ connection, enableLlm: false });
+
+		const enter = await session.handleInput("/dsp");
+		const result = await session.handleInput("cd CabMicSelector");
+
+		expect(enter).toMatchObject({ type: "text", content: "Entered dsp mode." });
+		expect(result).toMatchObject({ type: "text", content: "CabMicSelector" });
+		expect(session.currentMode().id).toBe("dsp");
+		expect(session.currentMode().contextLabel).toBe("CabMicSelector");
+	});
+
+	it("/dsp CabMicSelector reports the explicit cd migration", async () => {
+		const { session } = createBootstrappedSession({ connection: null, enableLlm: false });
+
+		const result = await session.handleInput("/dsp CabMicSelector");
+
+		expect(result.type).toBe("error");
+		if (result.type === "error") expect(result.message).toContain("Use /dsp, then cd <module>");
+		expect(session.currentMode().id).toBe("root");
 	});
 
 	it("/exit pops mode", async () => {

@@ -29,7 +29,7 @@ Identifier matching (paths, fields, type names) is **case-insensitive**. Storage
 - `add Synth as "Lead"` stores `Lead`; `get lead.bypassed` retrieves it; output reads `Lead`
 - Ambiguous case-fold (two entities differing only by case) is rare in HISE; parser errors with both candidates listed.
 
-Filters (`show types <filter>`) are case-insensitive substring matches — same as identifier matching.
+Static documentation lookup uses `docs` and is backed by MCP. Live inspection uses `show` and is backed by HISE.
 
 ## CLI invocation layer
 
@@ -145,7 +145,7 @@ Per-mode hierarchy and landing on mode entry:
 |------|--------------|------------|--------------------|------------------------|------------|
 | Builder | `Master` (sole project root) | `Master.<chain>.<module>` | `Master` | n/a | `cd`/`ls`/`pwd` |
 | UI | scripts | `<Script>.<components>` | `Interface` | `<X>` | `cd`/`ls`/`pwd` |
-| DSP | host modules with networks | `<ScriptFX>.<NetworkName>.<nodes>` (root container named after the assigned network) | host-module selection (no entity, reach by `cd ..` from inside) | `<X>.<NetworkName>` (inside the network) | `cd`/`ls`/`pwd` |
+| DSP | host modules with networks | `<ScriptFX>.<NetworkName>.<nodes>` (root container named after the assigned network) | host-module selection (no entity selected yet) | n/a | `cd <ScriptFX>` selects the host module; after selection, `cd`/`ls`/`pwd` navigate nodes |
 
 ## Core rules
 
@@ -181,7 +181,7 @@ Builder-specific `add` note: HISE automatically adds a `SimpleEnvelope` named `D
 | `scale` | render multiplier (1.0 = full size) | `scale <N>` |
 | `matched` | DSP normalize flag | trailing |
 
-Range/curve clauses for `create_parameter`: `default`, `step`, `mid`, `skew`.
+Range/curve clauses for `create_parameter`: `default`, `stepSize`, `middlePosition`, `skewFactor`.
 
 ## Numeric arrays
 
@@ -227,7 +227,7 @@ set core1.NodeColour 0xFFAA00      # ERROR: 6 digits, alpha missing
 
 ## Builder mode
 
-Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `show types`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
+Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `ScriptFX`, …). Discover with `docs`. Builder edits persist live to the project — no `save` verb. (`save` is DSP-only, for network persistence.)
 
 | Verb | Syntax |
 |------|--------|
@@ -237,7 +237,8 @@ Lands at `Master`. Type names are HISE module classes (`SineSynth`, `Filter`, `S
 | `rename` | `rename <target> as "<name>"` |
 | `set` | `set <target>.<field>[.<subfield>] <value>` |
 | `get` | `get <target>.<field>[.<subfield>]` (single scalar; for structural exploration use `show`) |
-| `show` | `show tree` \| `show types [<filter>]` \| `show <target>` \| `show <target>.<param>` (filter is greedy: case-insensitive substring matched against any displayed column — id, type, path) |
+| `show` | `show tree` \| `show <target>` \| `show <target>.<param>` (live HISE state only) |
+| `docs` | `docs` \| `docs <moduleType>` \| `docs <moduleType>.<param>` (static MCP documentation) |
 | `cd` / `ls` / `pwd` | navigation |
 | `reset` | `reset` (clears project to empty Master) |
 
@@ -287,7 +288,8 @@ set Synth1.routing "stereo"
 set Synth1.routing [-1, -1]                        # clear all connections
 get Synth1.routing
 get Synth1.routing.routable
-show types filter
+docs
+docs AHDSR.Attack
 show tree
 show Master.Lead                                   # module summary
 show Master.Lead.Volume                            # parameter detail
@@ -307,7 +309,8 @@ Auto-lands inside `Interface` (the default UI script). Power user: `/ui OtherScr
 | `get` | `get <target>.<field>` (field required) |
 | `connect` | `connect <component> to <processor>.<parameter> [matched]` |
 | `rename` | `rename <target> as "<name>"` |
-| `show` | `show tree` \| `show <target>` \| `show <target>.<prop>` (greedy substring on id/type/path for `show tree` filter) |
+| `show` | `show tree [<filter>]` \| `show <target>` \| `show <target>.<prop>` (live HISE state only) |
+| `docs` | `docs` \| `docs <componentType>` \| `docs <componentType>.<prop>` (static MCP documentation) |
 | `cd` / `ls` / `pwd` | navigation |
 | `reset` | `reset` (returns cwd to `Interface`; component tree is unaffected — use `remove` to delete components) |
 
@@ -333,11 +336,14 @@ connect Cutoff to MainFilter.Frequency matched
 connect Waveform to LFO.WaveformType matched
 connect EnableFilter to MainFilter.Enabled matched
 rename Play as "PlayBtn"
+docs
+docs ScriptSlider.mode
+show Play.text
 ```
 
 ## DSP mode
 
-Operates on a scriptnode network. Enter via `/dsp <ScriptFX>` (the host module's network must already be assigned in builder via `set <ScriptFX>.network "..."`). The network's root container is named after the network itself (`set MyFX.network "my_dsp"` → root container is `my_dsp`).
+Operates on a scriptnode network. Enter DSP mode with `/dsp`, then select the host module with `cd <ScriptFX>` (the host module's network must already be assigned in builder via `set <ScriptFX>.network "..."`). The network's root container is named after the network itself (`set MyFX.network "my_dsp"` → root container is `my_dsp`). Direct `/dsp <ScriptFX>` and `/dsp.<ScriptFX>` context entry syntax is not valid; use `/dsp` followed by `cd <ScriptFX>`.
 
 `add` uses `<factory>.<node>` syntax — factory is a node library namespace (`core`, `math`, `filters`, …); node is the type within that library.
 
@@ -351,20 +357,22 @@ Operates on a scriptnode network. Enter via `/dsp <ScriptFX>` (the host module's
 | `remove` | `remove <nodeId>` (containers remove children recursively; removing cwd jumps to root; removing root is an error) |
 | `connect` | `connect <src>[.<output>] to <targetNode>[.<paramName>] [matched]` (for modulation/parameter targets, path ends in the parameter name (`gain.Gain`); for routing targets (`routing.send` → `routing.receive`), `.<paramName>` may be omitted. Source `.<output>` may be omitted only when source has a single output) |
 | `disconnect` | `disconnect <nodeId>.<paramName>` (path ends in the parameter name; each param target has at most one source, so source never specified) |
-| `set` | `set <id>.<field> <value>` \| `set <id>.<param> <value>` \| `set <id>.<param>.<field> <value>` (node fields ∈ {`parent`, `index`, `bypassed`, `name`}; param fields ∈ {`range`, `min`, `max`, `step`, `mid`, `skew`}) |
+| `set` | `set <id>.<field> <value>` \| `set <id>.<param> <value>` \| `set <id>.<param>.<field> <value>` (node fields include `parent`, `index`, `bypassed`, `name`, `NodeColour`, `Comment`, `Folded`; param fields ∈ {`range`, `min`, `max`, `stepSize`, `middlePosition`, `skewFactor`}) |
 | `get` | same path shapes as `set` plus read-only `<id>.<param>.<source>`, `<id>.<param>.<parent>` |
 | `rename` | `rename <nodeId> as "<newId>"` |
 | `save` | `save` (writes current network to disk if file-backed; embeds in project if in-memory) |
 | `reset` | `reset` (clears network to empty `root`) |
 | `screenshot` | `screenshot scale <N> file "<path>"` |
-| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show <nodeId>` \| `show <nodeId>.<param>` (greedy: filter is case-insensitive substring matched against any displayed column — id, type, path, source, target, file name) |
-| `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [step <s>] [mid <m>] [skew <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
+| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
+| `docs` | `docs` \| `docs <factory>` \| `docs <factory.node>` \| `docs <factory.node>.<param>` (static MCP documentation) |
+| `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m>] [skewFactor <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
 | `cd` / `ls` / `pwd` | navigation |
 
 Examples:
 
 ```
-                                                                      # entered via `/dsp MyScriptFX`; cwd is MyScriptFX.my_dsp
+/dsp
+cd MyScriptFX                                                         # selects host module; cwd is MyScriptFX.my_dsp
 add core.gain as "g1"
 add core.osc as "osc1"
 set osc1.index 0
@@ -372,8 +380,11 @@ connect osc1 to g1.Gain matched
 disconnect g1.Gain
 set g1.Gain 1.5
 set g1.Gain.range [0, 2]
-set g1.Gain.skew 0.3
-set g1.Gain.range [0, 2], g1.Gain.skew 0.3, g1.Gain.step 0.01
+set g1.Gain.skewFactor 0.3
+set g1.Gain.range [0, 2], g1.Gain.skewFactor 0.3, g1.Gain.stepSize 0.01
+set MicPairSelector.NodeColour 0xFF2F80ED
+set MicPairSelector.Comment "**Mic pair selector** - Routes one stereo pair into the FX chain."
+set CabGlueComp.Folded true
 set g1.parent root2
 set g1.index 0
 set g1.bypassed 1
@@ -382,11 +393,13 @@ get g1.Gain.source
 get g1.Gain.parent
 get g1.Gain.max
 show networks
+docs filters
+docs filters.svf.Frequency
 show connections
 show g1                                           # node summary
 show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"
-create_parameter root.Cutoff [20, 20000] default 1000 skew 0.3
+create_parameter root.Cutoff [20, 20000] default 1000 stepSize 1 skewFactor 0.3
 ```
 
 ## Quoting
@@ -407,7 +420,7 @@ Verbs that support chaining: `set`, `get`, `add`, `remove`, `connect`, `disconne
 ```
 set Master.Volume -6, Master.Pan 0
 set Play.x 120, Play.y 220
-set g1.Gain.range [0, 2], g1.Gain.skew 0.3, g1.Gain.step 0.01
+set g1.Gain.range [0, 2], g1.Gain.skewFactor 0.3, g1.Gain.stepSize 0.01
 connect lfo to g1.Gain, lfo to g2.Pan
 add Synth as "A", Synth as "B"
 set A.bypassed 1, B.bypassed 1
@@ -422,14 +435,15 @@ Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `cd`, `
 
 Catalog nouns following `show` (mode-restricted): `tree`, `types`, `networks`, `modules`, `connections`. These are reserved as direct arguments to `show` only — they may still appear inside dotted paths after a quoted segment escape.
 
-Role keywords: `as`, `to`, `file`, `scale`, `matched`, `default`, `step`, `mid`, `skew`.
+Role keywords: `as`, `to`, `file`, `scale`, `matched`, `default`, `stepSize`, `middlePosition`, `skewFactor`.
 
 Field names (after dot in `set`/`get` paths), grouped by scope:
 
 - **Universal** (any entity): `parent`, `index` (zero-based sibling order; `-1` = append at end), `bypassed`, `name` (display label only — to change identity use `rename`; `id` is the path itself, not a field)
 - **Builder** (HISE modules): `samplemap`, `network`, `effect`, `routing` (with subfield `routing.send` and read-only `routing.resizable`, `routing.routable`, `routing.numDestinationChannels`), plus module-type-specific properties (e.g. `Volume`, `Pan`)
 - **UI** (components): `bounds`, `position`, `size`, `x`, `y`, `width`, `height`, `text`, plus type-specific properties
-- **DSP** (parameter subfields): `range`, `min`, `max`, `step`, `mid`, `skew`, `source` (read-only)
+- **DSP** (node attributes): `NodeColour`, `Comment`, `Folded`, plus supported node-specific direct attributes such as `IsVertical` and `ShowParameters` where present. These are written with `set <node>.<field> <value>` and are primarily used for graph layout, comments, and screenshot styling.
+- **DSP** (parameter subfields): `range`, `min`, `max`, `stepSize`, `middlePosition`, `skewFactor`, `source` (read-only)
 
 ## Grammar (BNF)
 
@@ -474,8 +488,8 @@ DisconnectStmt       := 'disconnect' DottedPath (',' DottedPath)*
 ScreenshotStmt       := 'screenshot' 'scale' ScalarValue 'file' QuotedString
 
 CreateParameterStmt  := 'create_parameter' DottedPath Array2
-                        ['default' Number] ['step' Number]
-                        ['mid' Number] ['skew' Number]
+                        ['default' Number] ['stepSize' Number]
+                        ['middlePosition' Number] ['skewFactor' Number]
 
 TypeRef              := Identifier ['.' Identifier]          ; 2-segment for DSP factory.node
 BuilderShowNoun      := 'types' | 'tree'

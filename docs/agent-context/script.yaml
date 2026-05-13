@@ -269,3 +269,44 @@ capabilities:
     help:
       visibility: common
       order: 100
+  - id: script.show.api
+    title: Show HiseScript API docs
+    purpose: Query static HiseScript API docs from MCP without colliding with live symbol lookup.
+    command:
+      argv: [hise-cli, script, docs, api, Console.print, --agent]
+    examples:
+      - title: List scripting namespaces
+        argv: [hise-cli, script, docs, api, --agent]
+      - title: Show one API call
+        argv: [hise-cli, script, docs, api, Console.print, --agent]
+    tags: [script, api, docs, mcp, read-only]
+    aliases:
+      - hise script api docs
+      - Console.print docs
+      - scripting namespace docs
+    help:
+      visibility: common
+      order: 110
+  - id: script.show.laf
+    title: Show LAF docs
+    purpose: Query static LookAndFeel function docs from MCP, optionally scoped to a component type or live component ID.
+    command:
+      argv: [hise-cli, script, docs, laf, --component, ScriptButton, --agent]
+    examples:
+      - title: Show LAF style guide
+        argv: [hise-cli, script, docs, laf, --agent]
+      - title: Show one LAF function
+        argv: [hise-cli, script, docs, laf, drawToggleButton, --agent]
+      - title: Show LAF functions for a component
+        argv: [hise-cli, script, docs, laf, --component, ScriptButton, --agent]
+    tags: [script, laf, docs, mcp, read-only]
+    aliases:
+      - look and feel docs
+      - laf function docs
+      - component laf functions
+    notes:
+      - --component accepts known component type names or live component IDs.
+      - ScriptFloatingTile live IDs resolve to ContentType when HISE exposes it.
+    help:
+      visibility: common
+      order: 120

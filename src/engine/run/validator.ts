@@ -9,6 +9,9 @@ import type { Session } from "../session.js";
 import type { ParsedScript, ParseError, ValidationResult } from "./types.js";
 import { parseExpect, parseWait } from "./parser.js";
 import { parseBuilderInput } from "../modes/builder.js";
+import { parseSingleDspCommand } from "../modes/dsp-parser.js";
+
+const DSP_CONTEXT_GUIDANCE = "Use /dsp, then cd <module> to select a DSP host module. Direct /dsp <module> context syntax was removed.";
 
 const MODE_IDS = SLASH_MODE_IDS;
 
@@ -64,9 +67,14 @@ export function validateScript(
 			// Mode entry
 			if (MODE_IDS.has(cmd.name)) {
 				const modeId = (cmd.name === "export" ? "compile" : cmd.name) as ModeId;
-				if (cmd.args) {
+				if (modeId === "dsp" && cmd.args && isRemovedDspContextSyntax(cmd.args)) {
+					errors.push({ line: line.lineNumber, message: DSP_CONTEXT_GUIDANCE });
+				} else if (cmd.args) {
 					// One-shot: validate the command in that mode's context
-					validateModeCommand(cmd.args, modeId, line.lineNumber, session, errors);
+					const input = modeId === "dsp" && cmd.args.startsWith(".")
+						? stripDottedContext(cmd.args)
+						: cmd.args;
+					validateModeCommand(input, modeId, line.lineNumber, session, errors);
 				} else {
 					// Enter mode
 					modeStack.push(modeId);
@@ -222,4 +230,35 @@ function extractSlashName(content: string): { name: string; args: string } {
 
 	// If args starts with a dot, it's dot-notation context — still part of args
 	return { name, args };
+}
+
+function isRemovedDspContextSyntax(args: string): boolean {
+	const trimmed = args.trim();
+	if (!trimmed) return false;
+	if (trimmed.startsWith(".")) return stripDottedContext(trimmed) === "";
+	if (trimmed === "docs") return false;
+	if (!isSingleToken(trimmed)) return false;
+	const parsed = parseSingleDspCommand(trimmed);
+	return "error" in parsed;
+}
+
+function stripDottedContext(args: string): string {
+	const rest = args.slice(1);
+	let endIdx: number;
+	if (rest.startsWith('"')) {
+		const close = rest.indexOf('"', 1);
+		endIdx = close === -1 ? rest.length : close + 1;
+	} else {
+		const sp = rest.indexOf(" ");
+		endIdx = sp === -1 ? rest.length : sp;
+	}
+	return rest.slice(endIdx).trim();
+}
+
+function isSingleToken(value: string): boolean {
+	if (value.startsWith('"')) {
+		const close = value.indexOf('"', 1);
+		return close !== -1 && value.slice(close + 1).trim() === "";
+	}
+	return !/\s/.test(value);
 }

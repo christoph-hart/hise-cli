@@ -196,6 +196,11 @@ describe("ui parser — show", () => {
 		else throw new Error("expected tree kind");
 	});
 
+	it("rejects static docs through `show`", () => {
+		expect(parseErr("show types")).toMatch(/Parse error/);
+		expect(parseErr("show type ScriptSlider")).toMatch(/Parse error|Redundant input/);
+	});
+
 	it("rejects `list` verb (folded into show)", () => {
 		expect(parseErr("list tree")).toMatch(/Parse error/);
 	});

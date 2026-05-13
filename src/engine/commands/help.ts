@@ -125,6 +125,17 @@ Content.getComponent("Knob1").getValue()
 - \`Content.\` — UI component access
 - \`Math.\`, \`Array.\`, \`String.\` — utility classes
 
+## Show
+
+| Command | Description |
+|---------|-------------|
+| \`show tree [filters]\` | Live script symbol tree from HISE |
+| \`show <expression>\` | Live symbol lookup from HISE |
+| \`docs api [Namespace.method]\` | Static HiseScript API docs from MCP |
+| \`docs laf\` | Static LAF style guide from MCP |
+| \`docs laf <function>\` | Static LAF function docs from MCP |
+| \`docs laf --component <type-or-id>\` | LAF functions for a component type or live component ID |
+
 ## Callback Compiler
 
 - \`/callback onInit\` — start collecting raw \`onInit\` body lines
@@ -165,7 +176,7 @@ Module tree editor — add, configure, and inspect the HISE module tree.
 | \`set <target>.index <n>\` | Reorder within current parent (move op) |
 | \`get <target>.<param> [, ...]\` | Read a parameter value (single scalar) |
 | \`show tree\` | Display the full module tree |
-| \`show types [<filter>]\` | List module types (substring filter on id/type/subtype) |
+| \`docs [<type>[.<param>]]\` | Static module catalog, module docs, or parameter docs from MCP |
 | \`show <target>\` | Module instance summary (parameter IDs, mod chains) |
 | \`show <target>.<param>\` | Parameter detail (range, default, value) |
 | \`reset\` | Wipe the module tree and clear undo history |
@@ -258,13 +269,13 @@ network. Each host has at most one active network.
 
 ## Entering
 
-- \`/dsp.<moduleId>\` — dot-context (e.g. \`/dsp.ScriptFX1\`)
-- \`/dsp <ModuleId>\` — space form, PascalCase host id (e.g. \`/dsp ScriptFX1\`)
-- \`/dsp "Script FX"\` — quote the host name when it contains spaces
-- \`/dsp\` — enter without a host. Selecting a host happens from builder.
+- \`/dsp\` — enter DSP mode
+- \`cd <moduleId>\` — select the script processor hosting the network
+- \`cd <nodeId>\` — after module selection, navigate inside the network
 
-Verbs are lowercase, so \`/dsp save\` runs the \`save\` one-shot rather
-than entering a host called \`save\`.
+Direct \`/dsp <moduleId>\` and \`/dsp.<moduleId>\` context entry was removed.
+Use \`/dsp\` followed by \`cd <moduleId>\` so lowercase and arbitrary module IDs
+are unambiguous.
 
 ## Network lifecycle
 
@@ -276,7 +287,7 @@ set "Script FX1".network "my_dsp"          # mode: create — fails if my_dsp.xm
 set "Script FX1".network "my_dsp.xml"      # mode: load   — fails if missing
 \`\`\`
 
-Once a network is loaded on a host, enter DSP mode against that host:
+Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 
 | Command | Description |
 |---------|-------------|
@@ -284,6 +295,7 @@ Once a network is loaded on a host, enter DSP mode against that host:
 | \`show networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
 | \`show modules\` | List \`DspNetwork\`-capable script processors |
 | \`show connections\` | Modulation edges in the network |
+| \`docs [<factory>[.<node>[.<param>]]]\` | Static scriptnode catalog, factory list, node docs, or parameter docs from MCP |
 | \`show <nodeId>\` | Header, properties, parameters, modulation edges |
 | \`show <nodeId>.<param>\` | Parameter detail (range, default, value) |
 | \`save\` | Save the loaded network to its \`.xml\` file |
@@ -421,7 +433,9 @@ interface components.
 | \`get <target>.<prop> [, ...]\` | Read a property value |
 | \`rename <target> as "<name>"\` | Rename a component |
 | \`show tree\` | Display the full component tree |
+| \`docs [<component>[.<prop>]]\` | Static component catalog, component docs, or property docs from MCP |
 | \`show <target>\` | Show all properties with current values |
+| \`show <target>.<prop>\` | Show one live property value/detail |
 | \`reset\` | Reset the component tree |
 | \`cd <path>\` / \`ls\` / \`pwd\` | Navigate the component tree |
 

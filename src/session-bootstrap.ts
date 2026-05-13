@@ -73,6 +73,7 @@ export function createSession({
 	enableLlm,
 }: CreateSessionOptions): { session: Session; completionEngine: CompletionEngine } {
 	const session = new Session(connection, completionEngine);
+	session.mcpClient = mcpClient ?? null;
 	if (handlerRegistry) session.handlerRegistry = handlerRegistry;
 	session.forLlm = forLlm ?? false;
 	session.cwd = cwd ?? (typeof process !== "undefined" && typeof process.cwd === "function" ? process.cwd() : null);

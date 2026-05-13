@@ -133,6 +133,42 @@ commands:
     examples:
       - title: Inspect a slider
         argv: [hise-cli, ui, show, --component, Cutoff, --agent]
+      - title: Inspect one live property
+        argv: [hise-cli, ui, show, --component, Cutoff, --property, mode, --agent]
+  - id: ui.show.types
+    syntax: ui docs
+    title: Show UI component types
+    purpose: List static UI component types from MCP docs, optionally filtered locally.
+    command:
+      argv: [hise-cli, ui, docs, --agent]
+    aliases: [list ui types, component docs, find component type]
+    tags: [ui, docs, types, mcp, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 25
+    examples:
+      - title: List component types
+        argv: [hise-cli, ui, docs, --agent]
+  - id: ui.show.type
+    syntax: ui docs <component-type>[.<property>]
+    title: Show UI type docs
+    purpose: Show static MCP reference docs for a component type or property without inspecting a live component.
+    command:
+      argv: [hise-cli, ui, docs, ScriptSlider.mode, --agent]
+    aliases: [ui property docs, component type docs, show static ui reference]
+    tags: [ui, type, docs, mcp, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 26
+    examples:
+      - title: Show component docs
+        argv: [hise-cli, ui, docs, ScriptSlider, --agent]
+      - title: Show property docs
+        argv: [hise-cli, ui, docs, ScriptSlider.mode, --agent]
   - id: ui.add.component
     syntax: ui add --type <component-type> --id <id> [--parent <component>] [--module <module>]
     title: Add UI component
@@ -187,6 +223,24 @@ commands:
         argv: [hise-cli, ui, set, --component, Cutoff, --parent, ControlsPanel, --agent]
       - title: Reparent using property metadata name
         argv: [hise-cli, ui, set, --component, Cutoff, --parentComponent, ControlsPanel, --agent]
+  - id: ui.get.property
+    syntax: ui get --component <id-or-path> --property <property> [--module <module>]
+    title: Get UI component property
+    purpose: Read one live ScriptComponent property value.
+    command:
+      argv: [hise-cli, ui, get, --component, Cutoff, --property, text, --agent]
+    aliases: [get ui property, read component property, inspect property value]
+    tags: [ui, get, property, component, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - Use docs for static property reference and get for live component values.
+    help:
+      visibility: common
+      order: 45
+    examples:
+      - title: Read component text
+        argv: [hise-cli, ui, get, --component, Cutoff, --property, text, --agent]
   - id: ui.connect.control
     syntax: ui connect (--source <component> | --component <component>) --target <module> --param <param> [--matched] [--module <module>]
     title: Connect UI control to module parameter

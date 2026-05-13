@@ -148,20 +148,33 @@ function validateRawParameter(value: unknown, path: string): RawDspParameter {
 		? 0
 		: typeof raw.value === "number"
 			? raw.value
-			: null;
+			: typeof raw.value === "string" && raw.value.trim() !== "" && Number.isFinite(Number(raw.value))
+				? Number(raw.value)
+				: null;
 	if (numericValue === null) {
-		throw new Error(`DSP parameter "${raw.parameterId}" at ${path} "value" must be number or null`);
+		throw new Error(`DSP parameter "${raw.parameterId}" at ${path} "value" must be number, numeric string, or null`);
 	}
 	const out: RawDspParameter = {
 		parameterId: raw.parameterId,
 		value: numericValue,
 	};
-	if (typeof raw.min === "number") out.min = raw.min;
-	if (typeof raw.max === "number") out.max = raw.max;
-	if (typeof raw.stepSize === "number") out.stepSize = raw.stepSize;
-	if (typeof raw.middlePosition === "number") out.middlePosition = raw.middlePosition;
-	if (typeof raw.defaultValue === "number") out.defaultValue = raw.defaultValue;
+	const min = numericOptional(raw.min);
+	const max = numericOptional(raw.max);
+	const stepSize = numericOptional(raw.stepSize);
+	const middlePosition = numericOptional(raw.middlePosition);
+	const defaultValue = numericOptional(raw.defaultValue);
+	if (min !== undefined) out.min = min;
+	if (max !== undefined) out.max = max;
+	if (stepSize !== undefined) out.stepSize = stepSize;
+	if (middlePosition !== undefined) out.middlePosition = middlePosition;
+	if (defaultValue !== undefined) out.defaultValue = defaultValue;
 	return out;
+}
+
+function numericOptional(value: unknown): number | undefined {
+	if (typeof value === "number" && Number.isFinite(value)) return value;
+	if (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) return Number(value);
+	return undefined;
 }
 
 function validateConnections(value: unknown, nodeId: string): RawDspConnection[] {

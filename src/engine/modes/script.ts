@@ -13,6 +13,9 @@ import type { CompletionEngine } from "../completion/engine.js";
 import type { ScriptingApi } from "../data.js";
 import type { TreeNode } from "../result.js";
 import { defaultScriptShowFilters, executeScriptShow, fetchScriptTree, parseScriptShowTokens, scriptTreeToTreeNode, splitScriptShowInput } from "./script-symbols.js";
+import type { ScriptShowCommand } from "./script-symbols.js";
+import { callMcpReference } from "../reference/mcpReference.js";
+import { VALID_COMPONENT_TYPES } from "./ui-parser.js";
 
 const MIDI_PROCESSOR_CALLBACKS = [
 	"onNoteOn",
@@ -78,22 +81,32 @@ export class ScriptMode implements Mode {
 		input: string,
 		session: SessionContext,
 	): Promise<CommandResult> {
-		if (!session.connection) {
-			return errorResult(
-				"No HISE connection. Connect to HISE before using script mode.",
-			);
-		}
-
 		const activeCallback = session.getActiveScriptCallback?.(this.processorId) ?? null;
 		const trimmed = input.trim();
-		if (!activeCallback && /^show(?:\s|$)/.test(trimmed)) {
-			const parsedShow = parseScriptShowTokens(splitScriptShowInput(trimmed));
+		if (!activeCallback && /^(show|docs)(?:\s|$)/.test(trimmed)) {
+			const showInput = trimmed.startsWith("docs") ? `show ${trimmed.slice(4).trim()}` : trimmed;
+			const parsedShow = parseScriptShowTokens(splitScriptShowInput(showInput));
 			if ("error" in parsedShow) return errorResult(parsedShow.error);
+			if (isScriptDocsShow(parsedShow)) {
+				if (!trimmed.startsWith("docs")) return errorResult("Static script documentation uses `docs`, for example `docs api Console.print` or `docs laf --component ScriptButton`.");
+				return this.executeScriptDocsShow(parsedShow, session);
+			}
+			if (trimmed.startsWith("docs")) return errorResult("script docs supports `api` and `laf` only. Use `show tree` or `show <symbol>` for live script symbols.");
+			if (!session.connection) {
+				return errorResult(
+					"No HISE connection. Connect to HISE before using script mode.",
+				);
+			}
 			return executeScriptShow(session.connection, this.processorId, parsedShow, {
 				forLlm: session.forLlm,
 				api: this.scriptingApi,
 				updateTree: (tree) => { this.symbolTreeRoot = tree; },
 			});
+		}
+		if (!session.connection) {
+			return errorResult(
+				"No HISE connection. Connect to HISE before using script mode.",
+			);
 		}
 		if (activeCallback) {
 			if (/^function\s+[A-Za-z_]\w*\s*\(/.test(input.trim())) {
@@ -180,6 +193,49 @@ export class ScriptMode implements Mode {
 			label: "Callbacks",
 		};
 	}
+
+	private async executeScriptDocsShow(command: ScriptShowCommand, session: SessionContext): Promise<CommandResult> {
+		switch (command.kind) {
+			case "apiIndex": return callMcpReference(session.mcpClient, "list_scripting_namespaces");
+			case "api": return callMcpReference(session.mcpClient, "query_scripting_api", { apiCall: command.apiCall });
+			case "lafIndex": return callMcpReference(session.mcpClient, "get_resource", { id: "laf-functions-style" });
+			case "lafFunction": return callMcpReference(session.mcpClient, "query_laf_function", { functionName: command.functionName });
+			case "lafComponent": {
+				const componentType = await this.resolveLafComponentType(command.component, session);
+				if ("error" in componentType) return errorResult(componentType.error);
+				return callMcpReference(session.mcpClient, "get_laf_functions_for_components", { componentTypes: [componentType.type] });
+			}
+			default: return errorResult("Unsupported script docs command");
+		}
+	}
+
+	private async resolveLafComponentType(component: string, session: SessionContext): Promise<{ type: string } | { error: string }> {
+		const knownType = VALID_COMPONENT_TYPES.find((type) => type.toLowerCase() === component.toLowerCase());
+		if (knownType) return { type: knownType };
+		if (!session.connection) return { error: `Cannot resolve component "${component}" without a HISE connection` };
+		const response = await session.connection.get(
+			`/api/get_component_properties?moduleId=${encodeURIComponent(this.processorId)}&id=${encodeURIComponent(component)}`,
+		);
+		if (isErrorResponse(response)) return { error: response.message };
+		const data = response as unknown as Record<string, unknown>;
+		if (!data.success) return { error: `Could not fetch properties for "${component}"` };
+		const type = typeof data.type === "string" ? data.type : null;
+		if (type === "ScriptFloatingTile") {
+			const properties = data.properties as Array<{ id: string; value: unknown }> | undefined;
+			const contentType = properties?.find((p) => p.id.toLowerCase() === "contenttype");
+			if (typeof contentType?.value === "string" && contentType.value) return { type: contentType.value };
+		}
+		if (!type) return { error: `Component "${component}" has no type` };
+		return { type };
+	}
+}
+
+function isScriptDocsShow(command: ScriptShowCommand): boolean {
+	return command.kind === "apiIndex"
+		|| command.kind === "api"
+		|| command.kind === "lafIndex"
+		|| command.kind === "lafFunction"
+		|| command.kind === "lafComponent";
 }
 
 export function getAvailableCallbacksForProcessor(processorId: string): readonly string[] {

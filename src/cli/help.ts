@@ -172,10 +172,10 @@ EXAMPLES
   hise-cli mcp tools/list --agent
 
 TUI MODE
-  Type /mcp, then enter calls like:
-    explore_hise sampler
-    search_hise Content.addKnob
-    query_module_parameter WaveSynth.Gain`,
+	Type /mcp, then enter calls like:
+	  explore_hise sampler
+	  search_hise Content.addKnob
+	  query_module WaveSynth.Gain`,
 
 	project: `hise-cli -project — project lifecycle (list, switch, save, settings, snippets)
 

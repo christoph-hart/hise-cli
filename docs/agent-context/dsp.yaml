@@ -94,14 +94,62 @@ commands:
     examples:
       - title: Inspect a filter node
         argv: [hise-cli, dsp, show, --module, "Script FX1", --node, F1, --agent]
-  - id: dsp.show.types
-    syntax: dsp types [<filter>]
-    title: Show DSP node types
-    purpose: List available scriptnode factory types, optionally filtered by substring.
+  - id: dsp.show.networks
+    syntax: dsp networks --module <module> [filter]
+    title: Show DSP network files
+    purpose: List available DspNetwork XML files in the current project.
     command:
-      argv: [hise-cli, dsp, types, --agent]
+      argv: [hise-cli, dsp, networks, --module, "Script FX1", --agent]
+    aliases: [show dsp networks, list scriptnode networks, list dsp files]
+    tags: [dsp, show, networks, scriptnode, read-only]
+    contexts: [cli]
+    agentRelevance: medium
+    help:
+      visibility: common
+      order: 22
+    examples:
+      - title: List DSP networks
+        argv: [hise-cli, dsp, networks, --module, "Script FX1", --agent]
+  - id: dsp.show.modules
+    syntax: dsp modules --module <module> [filter]
+    title: Show DSP-capable modules
+    purpose: List builder modules that can host a DspNetwork.
+    command:
+      argv: [hise-cli, dsp, modules, --module, "Script FX1", --agent]
+    aliases: [show dsp modules, list scriptnode hosts, find dsp host modules]
+    tags: [dsp, show, modules, hosts, read-only]
+    contexts: [cli]
+    agentRelevance: medium
+    help:
+      visibility: common
+      order: 24
+    examples:
+      - title: List DSP host modules
+        argv: [hise-cli, dsp, modules, --module, "Script FX1", --agent]
+  - id: dsp.show.connections
+    syntax: dsp connections --module <module> [filter]
+    title: Show DSP connections
+    purpose: List live modulation and parameter connections in a scriptnode network.
+    command:
+      argv: [hise-cli, dsp, connections, --module, "Script FX1", --agent]
+    aliases: [show dsp connections, list modulation edges, inspect node connections]
+    tags: [dsp, show, connections, modulation, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 26
+    examples:
+      - title: List network connections
+        argv: [hise-cli, dsp, connections, --module, "Script FX1", --agent]
+  - id: dsp.show.types
+    syntax: dsp docs [<factory>]
+    title: Show DSP node types
+    purpose: List available scriptnode factory types from MCP docs, optionally filtered locally.
+    command:
+      argv: [hise-cli, dsp, docs, --agent]
     aliases: [list dsp types, find scriptnode type, search dsp nodes]
-    tags: [dsp, types, scriptnode, inspect, read-only]
+    tags: [dsp, docs, scriptnode, inspect, read-only]
     contexts: [cli]
     agentRelevance: high
     help:
@@ -109,9 +157,27 @@ commands:
       order: 30
     examples:
       - title: Show all node types
-        argv: [hise-cli, dsp, types, --agent]
+        argv: [hise-cli, dsp, docs, --agent]
       - title: Filter node types
-        argv: [hise-cli, dsp, types, filter, --agent]
+        argv: [hise-cli, dsp, docs, filters, --agent]
+  - id: dsp.show.type
+    syntax: dsp docs <factory.node>[.<param>]
+    title: Show scriptnode type docs
+    purpose: Show static MCP reference docs for a scriptnode type or parameter without inspecting a live node.
+    command:
+      argv: [hise-cli, dsp, docs, filters.svf.Frequency, --agent]
+    aliases: [scriptnode docs, dsp type docs, node parameter docs]
+    tags: [dsp, type, docs, mcp, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 35
+    examples:
+      - title: Show node type docs
+        argv: [hise-cli, dsp, docs, filters.svf, --agent]
+      - title: Show node parameter docs
+        argv: [hise-cli, dsp, docs, filters.svf.Frequency, --agent]
   - id: dsp.add.node
     syntax: dsp add --module <module> --type <node-type> --id <id> [--parent <node>]
     title: Add DSP node
@@ -150,6 +216,85 @@ commands:
     examples:
       - title: Set filter frequency
         argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --value, "1000", --agent]
+  - id: dsp.set.parameterRange
+    syntax: dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]
+    title: Set DSP parameter range
+    purpose: Update a live scriptnode parameter range and curve metadata.
+    command:
+      argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
+    aliases: [set dsp parameter range, change node parameter range, set scriptnode parameter metadata]
+    tags: [dsp, set, parameter, range, metadata, node, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --range accepts x,y style shorthand like UI --bounds; use "20,20000" or "[20,20000]".
+      - Metadata flags require --param because they target a node parameter, not the node itself.
+      - middlePosition and skewFactor are alternatives; do not use both.
+    help:
+      visibility: common
+      order: 52
+    examples:
+      - title: Set frequency range
+        argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --range, "20,20000", --agent]
+      - title: Set range and skew
+        argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
+  - id: dsp.move.parent
+    syntax: dsp set --module <module> --node <id-or-path> --parent <container-node>
+    title: Move DSP node to parent
+    purpose: Reparent a scriptnode node into another container node.
+    command:
+      argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --parent, root, --agent]
+    aliases: [move dsp node, reparent dsp node, move node parent, move parent, change dsp parent]
+    tags: [dsp, move, parent, reparent, node, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --parent must name an existing container node in the current DSP network.
+      - Use dsp tree first to inspect valid container IDs.
+    help:
+      visibility: common
+      order: 54
+    examples:
+      - title: Move node to root container
+        argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --parent, root, --agent]
+  - id: dsp.move.index
+    syntax: dsp set --module <module> --node <id-or-path> --index <n>
+    title: Reorder DSP node
+    purpose: Reorder a scriptnode node within its current parent container.
+    command:
+      argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --index, "0", --agent]
+    aliases: [reorder dsp node, move dsp index, change node order]
+    tags: [dsp, move, index, reorder, node, mutation]
+    contexts: [cli]
+    agentRelevance: medium
+    notes:
+      - Index is zero-based within the current parent container.
+    help:
+      visibility: common
+      order: 56
+    examples:
+      - title: Move node to first position
+        argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --index, "0", --agent]
+  - id: dsp.get.parameter
+    syntax: dsp get --module <module> --node <id-or-path> --param <param> [--field <field>]
+    title: Get DSP node parameter
+    purpose: Read a live node parameter value or parameter metadata field.
+    command:
+      argv: [hise-cli, dsp, get, --module, "Script FX1", --node, F1, --param, Frequency, --agent]
+    aliases: [get dsp parameter, read node value, read node parameter metadata]
+    tags: [dsp, get, parameter, node, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - Use --field for metadata such as source, parent, min, max, range, step, mid, skew, or default.
+    help:
+      visibility: common
+      order: 55
+    examples:
+      - title: Read filter frequency
+        argv: [hise-cli, dsp, get, --module, "Script FX1", --node, F1, --param, Frequency, --agent]
+      - title: Read connected source
+        argv: [hise-cli, dsp, get, --module, "Script FX1", --node, F1, --param, Frequency, --field, source, --agent]
   - id: dsp.connect.node
     syntax: dsp connect --module <module> --source <source> --target <node> --param <param> [--matched]
     title: Connect DSP source to node parameter
@@ -174,6 +319,46 @@ commands:
         argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, Root, --source-param, Cutoff, --target, F1, --param, Frequency, --agent]
       - title: Connect a source output channel
         argv: [hise-cli, dsp, connect, --module, "Script FX1", --source, MultiOut, --source-output, "0", --target, F1, --param, Frequency, --agent]
+  - id: dsp.disconnect.node
+    syntax: dsp disconnect --module <module> --target <node.param> [--target <node.param>...]
+    title: Disconnect DSP parameter
+    purpose: Remove one or more modulation connections by target parameter.
+    command:
+      argv: [hise-cli, dsp, disconnect, --module, "Script FX1", --target, F1.Frequency, --agent]
+    aliases: [disconnect dsp node, remove modulation connection, unlink node parameter]
+    tags: [dsp, disconnect, node, parameter, modulation, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - Targets must include the destination parameter name.
+      - Repeat --target to disconnect multiple parameters.
+    help:
+      visibility: common
+      order: 65
+    examples:
+      - title: Disconnect filter modulation
+        argv: [hise-cli, dsp, disconnect, --module, "Script FX1", --target, F1.Frequency, --agent]
+  - id: dsp.create_parameter
+    syntax: dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]
+    title: Create scriptnode macro parameter
+    purpose: Create a top-level or container dynamic parameter with range and curve metadata.
+    command:
+      argv: [hise-cli, dsp, create_parameter, --module, "Script FX1", --container, root, --id, Cutoff, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
+    aliases: [create macro parameter, create dynamic parameter, create scriptnode parameter, set macro range]
+    tags: [dsp, create_parameter, macro, parameter, range, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    notes:
+      - --container is the scriptnode container path; root targets the network root container.
+      - --id is the new dynamic parameter ID.
+      - --range accepts min,max and maps to [min, max].
+      - middlePosition and skewFactor are alternatives; do not use both.
+    help:
+      visibility: common
+      order: 68
+    examples:
+      - title: Create a cutoff macro parameter
+        argv: [hise-cli, dsp, create_parameter, --module, "Script FX1", --container, root, --id, Cutoff, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
   - id: dsp.rename.node
     syntax: dsp rename --module <module> --node <id-or-path> --id <new-id>
     title: Rename DSP node
@@ -209,6 +394,25 @@ commands:
     examples:
       - title: Remove a node
         argv: [hise-cli, dsp, remove, --module, "Script FX1", --node, F1, --agent]
+  - id: dsp.screenshot
+    syntax: dsp screenshot --module <module> [--scale <n|percent>] --output <png>
+    title: Capture DSP graph screenshot
+    purpose: Render the current scriptnode graph to a PNG through HISE.
+    command:
+      argv: [hise-cli, dsp, screenshot, --module, "Script FX1", --scale, "50%", --output, patch.png, --agent]
+    aliases: [capture dsp screenshot, screenshot scriptnode graph, export dsp graph png]
+    tags: [dsp, screenshot, graph, testing, read-only]
+    contexts: [cli]
+    agentRelevance: medium
+    notes:
+      - --output must be a PNG path; relative paths resolve according to the DSP screenshot endpoint.
+      - --scale accepts decimals or percentages.
+    help:
+      visibility: common
+      order: 85
+    examples:
+      - title: Capture graph screenshot
+        argv: [hise-cli, dsp, screenshot, --module, "Script FX1", --scale, "50%", --output, patch.png, --agent]
   - id: dsp.save.network
     syntax: dsp save --module <module>
     title: Save DSP network
@@ -227,6 +431,25 @@ commands:
     examples:
       - title: Save a network
         argv: [hise-cli, dsp, save, --module, "Script FX1", --agent]
+  - id: dsp.reset
+    syntax: dsp reset --module <module>
+    title: Reset DSP network
+    purpose: Clear the current DSP network to an empty root.
+    command:
+      argv: [hise-cli, dsp, reset, --module, "Script FX1", --agent]
+    aliases: [reset dsp network, clear scriptnode graph, empty dsp network]
+    tags: [dsp, reset, destructive, mutation]
+    contexts: [cli]
+    agentRelevance: low
+    danger: true
+    notes:
+      - Destructive; only run when explicitly requested.
+    help:
+      visibility: hidden
+      order: 910
+    examples:
+      - title: Reset network
+        argv: [hise-cli, dsp, reset, --module, "Script FX1", --agent]
 
 types:
   hostModuleTypes: [ScriptFX, ScriptSynth, ScriptModulator]

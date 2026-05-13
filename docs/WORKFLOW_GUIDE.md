@@ -323,7 +323,7 @@ assertions.
 | `get Module.Param` | Single parameter value | Yes — exact value |
 | `show Module` | All parameters, multi-line | No — too much text |
 | `show tree` | Full tree dump | No — multi-line |
-| `show types` | All module types | No — multi-line |
+| `docs` | Static module type documentation/catalog | No — multi-line |
 
 ### Immediate state queries
 
@@ -653,7 +653,7 @@ play "smoke_test"
 |---|---|
 | Calling `Synth.addNoteOn()` via `-script` | Use `/sequence` mode — handles note-off automatically |
 | Using CLI undo plans for routine automation | Run direct commands and verify after logical steps; reserve plan groups for TUI / `.hsc` workflows |
-| Guessing module type names | Query with `show types` or the MCP `list_module_types` tool |
+| Guessing module type names | Query with `docs` or the MCP `list_module_types` tool |
 | Guessing parameter names | Use `show <module>` or MCP `query_module_parameter` |
 | Setting values without checking ranges | Check range first — `50` on a 0-1 param means +34dB |
 | Using `show` for `/expect` assertions | Use `get Module.Param` — `show` returns multi-line text |

@@ -53,12 +53,20 @@ import {
 	validateSetCommand,
 } from "./dsp-validate.js";
 import { resolvePath } from "../grammar/path-resolver.js";
+import { stripQuotes } from "../string-utils.js";
 import {
 	pathRefSegments,
-	pathRefToString,
 	type PathRef,
 } from "../grammar/path-parser.js";
 import { duplicateAliasesInRequest } from "./duplicate-id.js";
+import { callMcpReference, listMcpReference } from "../reference/mcpReference.js";
+
+function parseDocsInput(input: string): { query?: string } | null {
+	const trimmed = input.trim();
+	if (trimmed === "docs") return {};
+	const match = trimmed.match(/^docs\s+(.+)$/);
+	return match ? { query: stripQuotes(match[1]!.trim()) } : null;
+}
 
 // ── Re-exports ────────────────────────────────────────────────────
 
@@ -196,7 +204,9 @@ export class DspMode implements Mode {
 		if (this.moduleId && session.connection) {
 			await this.fetchTree(session.connection);
 			this.treeFetched = true;
-			if (!this.rawTree) {
+			if (!this.rawTree && this.lastTreeError?.startsWith("tree normalization failed:")) {
+				this.noNetworkError = this.lastTreeError;
+			} else if (!this.rawTree) {
 				this.noNetworkError = `No network loaded on "${this.moduleId}". Assign one first via builder: \`set ${this.moduleId}.network "<name>"\`.`;
 			}
 		}
@@ -206,13 +216,16 @@ export class DspMode implements Mode {
 
 	async fetchTree(connection: HiseConnection): Promise<void> {
 		if (!this.moduleId) return;
+		this.rawTree = null;
+		this.treeRoot = null;
+		this.lastTreeError = null;
 		let inPlan = false;
 		const diffResp = await connection.get("/api/undo/diff?scope=group");
 		if (isEnvelopeResponse(diffResp) && diffResp.success) {
 			const groupName = diffResp.groupName as string | undefined;
 			inPlan = typeof groupName === "string" && groupName !== "root" && groupName !== "";
 		}
-		const endpoint = `/api/dsp/tree?moduleId=${encodeURIComponent(this.moduleId)}${inPlan ? "&group=current" : ""}`;
+		const endpoint = `/api/dsp/tree?moduleId=${encodeURIComponent(this.moduleId)}&verbose=true${inPlan ? "&group=current" : ""}`;
 		const response = await connection.get(endpoint);
 		if (isErrorResponse(response)) {
 			this.lastTreeError = `tree fetch failed: ${response.message}`;
@@ -255,6 +268,12 @@ export class DspMode implements Mode {
 
 		const trimmed = input.trim();
 		if (!trimmed) return textResult("");
+		const docs = parseDocsInput(trimmed);
+		if (docs) {
+			if (!docs.query) return listMcpReference(session.mcpClient, "list_scriptnode_nodes");
+			if (docs.query.includes(".")) return callMcpReference(session.mcpClient, "query_scriptnode", { query: docs.query });
+			return listMcpReference(session.mcpClient, "list_scriptnode_nodes", undefined, { factory: docs.query });
+		}
 
 		const result = parseDspInput(input);
 		if ("error" in result) return errorResult(result.error);
@@ -292,6 +311,10 @@ export class DspMode implements Mode {
 			return textResult(this.currentPath.length > 0 ? this.currentPath.join("/") : "/");
 		}
 
+		if (!this.moduleId) {
+			return this.selectModuleWithCd(cmd, session);
+		}
+
 		// Refresh tree before navigating; template-spawning factories may
 		// expand server-side after the apply op returns.
 		if (session.connection) await this.fetchTree(session.connection);
@@ -312,13 +335,39 @@ export class DspMode implements Mode {
 		return textResult(this.currentPath.length > 0 ? this.currentPath.join("/") : "/");
 	}
 
+	private async selectModuleWithCd(cmd: CdCommand, session: SessionContext): Promise<CommandResult> {
+		const moduleId = pathRefSegments(cmd.target).map((seg) => seg.id).join(".");
+		if (!moduleId) return errorResult("cd: module id is required.");
+		if (!session.connection) return errorResult("cd <module> requires a HISE connection to select a DSP host module.");
+
+		this.moduleId = moduleId;
+		this.currentPath = [];
+		this.treeFetched = true;
+		await this.fetchTree(session.connection);
+
+		if (this.lastTreeError) {
+			const message = this.lastTreeError;
+			this.moduleId = null;
+			this.treeFetched = false;
+			return errorResult(`cd ${moduleId}: ${message}`);
+		}
+
+		if (!this.rawTree) {
+			this.moduleId = null;
+			this.treeFetched = false;
+			return errorResult(`No network loaded on "${moduleId}". Assign one first via builder: \`set ${moduleId}.network "<name>"\`.`);
+		}
+
+		return textResult(moduleId);
+	}
+
 	private async handleLs(session: SessionContext): Promise<CommandResult> {
 		if (session.connection) await this.fetchTree(session.connection);
 		if (this.lastTreeError) return errorResult(this.lastTreeError);
 		if (!this.rawTree) {
 			return textResult(this.moduleId
 				? "(no network loaded)"
-				: "(no module context — enter via /dsp.<moduleId>)");
+				: "(no module context — use cd <moduleId>)");
 		}
 		const node = this.currentPath.length === 0
 			? this.rawTree
@@ -549,7 +598,7 @@ export class DspMode implements Mode {
 		session: SessionContext,
 	): Promise<CommandResult> {
 		if (!this.moduleId) {
-			return errorResult("No module context. Enter mode via /dsp.<moduleId>.");
+			return errorResult("No module context. Use cd <moduleId> after entering /dsp.");
 		}
 
 		// Local validation
@@ -887,4 +936,3 @@ const DSP_SHOW_NOUNS = [
 // is exercised but parseSingleDspCommand is only used by the shared
 // parseDspInput export.
 void parseSingleDspCommand;
-void pathRefToString;

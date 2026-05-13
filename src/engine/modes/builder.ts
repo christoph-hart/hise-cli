@@ -32,6 +32,7 @@ import {
 	cleanBuilderParameterForLlm,
 	cleanBuilderTreeForLlm,
 } from "../../mock/contracts/builder.js";
+import { callMcpReference, listMcpReference } from "../reference/mcpReference.js";
 
 interface RawParameter {
 	id: string;
@@ -114,6 +115,13 @@ import {
 	renderTreeBox,
 } from "./builder-ops.js";
 import { duplicateAliasesInRequest, duplicateIdCandidates } from "./duplicate-id.js";
+
+function parseDocsInput(input: string): { query?: string } | null {
+	const trimmed = input.trim();
+	if (trimmed === "docs") return {};
+	const match = trimmed.match(/^docs\s+(.+)$/);
+	return match ? { query: stripQuotes(match[1]!.trim()) } : null;
+}
 
 // ── Chain color constants (FX and MIDI are always fixed) ────────────
 
@@ -582,6 +590,10 @@ export class BuilderMode implements Mode {
 		session: SessionContext,
 	): Promise<CommandResult> {
 		await this.ensureTree(session);
+		const docs = parseDocsInput(input);
+		if (docs) return docs.query
+			? callMcpReference(session.mcpClient, "query_module", { query: docs.query })
+			: listMcpReference(session.mcpClient, "list_module_types");
 
 		const result = parseBuilderInput(input);
 		if ("error" in result) {
@@ -772,7 +784,7 @@ export class BuilderMode implements Mode {
 
 		for (const op of initOps) {
 			const moduleId = op.moduleId as string;
-			const body = { name: op.name as string, mode: op.mode as "create" | "load" };
+			const body = { moduleId, name: op.name as string, mode: op.mode as "create" | "load" };
 			const response = await connection.post(
 				`/api/dsp/init?moduleId=${encodeURIComponent(moduleId)}`,
 				body,
@@ -904,33 +916,8 @@ export class BuilderMode implements Mode {
 		cmd: ShowCommand,
 		session: SessionContext,
 	): Promise<CommandResult> {
-		if (cmd.kind === "types") return this.handleShowTypes(cmd.filter);
 		if (cmd.kind === "tree") return this.handleShowTree(session);
 		return this.handleShowTarget(cmd.target, session);
-	}
-
-	private handleShowTypes(filter: string | undefined): CommandResult {
-		if (!this.moduleList) return errorResult("Module data not loaded");
-		let modules = this.moduleList.modules;
-		if (filter) {
-			const f = filter.toLowerCase();
-			modules = modules.filter((m) =>
-				m.id.toLowerCase().includes(f)
-				|| m.type.toLowerCase().includes(f)
-				|| m.subtype.toLowerCase().includes(f),
-			);
-		}
-		if (modules.length === 0) {
-			return textResult(
-				filter
-					? `(no module types match "${filter}" — try \`show types\` without a filter)`
-					: "(no module types available)",
-			);
-		}
-		return tableResult(
-			["Module", "Type", "Subtype", "Category"],
-			modules.map((m) => [m.id, m.type, m.subtype, m.category.join(", ")]),
-		);
 	}
 
 	private handleShowTree(session: SessionContext): CommandResult {

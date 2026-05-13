@@ -26,6 +26,7 @@ import {
 	pathRefToString,
 	type PathRef,
 } from "../grammar/path-parser.js";
+import { callMcpReference, listMcpReference } from "../reference/mcpReference.js";
 
 // ── Re-exports ──────────────────────────────────────────────────
 
@@ -78,6 +79,13 @@ import {
 import type { UiOp } from "./ui-ops.js";
 import { commandToOps } from "./ui-ops.js";
 import { duplicateAliasesInRequest, duplicateIdCandidates } from "./duplicate-id.js";
+
+function parseDocsInput(input: string): { query?: string } | null {
+	const trimmed = input.trim();
+	if (trimmed === "docs") return {};
+	const match = trimmed.match(/^docs\s+(.+)$/);
+	return match ? { query: stripQuotes(match[1]!.trim()) } : null;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -613,6 +621,10 @@ export class UiMode implements Mode {
 
 	async parse(input: string, session: SessionContext): Promise<CommandResult> {
 		await this.ensureTree(session);
+		const docs = parseDocsInput(input);
+		if (docs) return docs.query
+			? callMcpReference(session.mcpClient, "query_ui", { query: docs.query })
+			: listMcpReference(session.mcpClient, "list_ui_components");
 		const screenshot = parseUiScreenshotInput(input);
 		if (screenshot) {
 			if ("error" in screenshot) return errorResult(screenshot.error);
@@ -865,10 +877,14 @@ export class UiMode implements Mode {
 	private async handleShow(cmd: UiShowCommand, session: SessionContext): Promise<CommandResult> {
 		if (cmd.kind === "tree") return this.handleShowTree(session);
 		const connection = session.connection ?? null;
-		const r = this.resolveRefForRead(cmd.target);
+		const segs = pathRefSegments(cmd.target);
+		const componentRef: PathRef = segs.length === 0 ? cmd.target : { kind: "bare", segment: segs[0] };
+		const r = this.resolveRefForRead(componentRef);
 		if ("error" in r) return errorResult(r.error);
+		const propertyName = segs.length >= 2 ? segs[1].id : null;
+		if (segs.length > 2) return errorResult("show: property detail does not support sub-fields");
 
-		if (!connection) return textResult(`show ${r.id} (no HISE connection)`);
+		if (!connection) return textResult(`show ${propertyName ? `${r.id}.${propertyName}` : r.id} (no HISE connection)`);
 
 		const response = await connection.get(
 			`/api/get_component_properties?moduleId=${encodeURIComponent(this.moduleId)}&id=${encodeURIComponent(r.id)}`,
@@ -882,12 +898,23 @@ export class UiMode implements Mode {
 			return errorResult(msg);
 		}
 
-		if (session.forLlm) {
+		if (session.forLlm && !propertyName) {
 			return jsonResult(cleanUiPropertiesForLlm(data));
 		}
 
 		const properties = data.properties as Array<{ id: string; value: unknown; isDefault: boolean }> | undefined;
 		if (!properties || !Array.isArray(properties)) return textResult(`${r.id}: no properties`);
+
+		if (propertyName) {
+			if (propertyName === "type") {
+				if (typeof data.type !== "string") return errorResult(`Component "${r.id}" has no type`);
+				return tableResult(["Field", "Value"], [["type", data.type]]);
+			}
+			const prop = properties.find((p) => p.id.toLowerCase() === propertyName.toLowerCase());
+			if (!prop) return errorResult(`Property "${propertyName}" not found on "${r.id}"`);
+			if (session.forLlm) return jsonResult(prop);
+			return tableResult(["Field", "Value"], [[prop.id, String(prop.value)], ["default", prop.isDefault ? "yes" : "no"]]);
+		}
 
 		const rows = properties.map((p) => [p.id, String(p.value), p.isDefault ? "" : "*"]);
 		return tableResult(["Property", "Value", ""], rows);

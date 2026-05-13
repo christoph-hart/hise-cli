@@ -122,6 +122,12 @@ export const Types = createToken({
 	longer_alt: Identifier,
 });
 
+export const Type = createToken({
+	name: "Type",
+	pattern: /type/i,
+	longer_alt: Identifier,
+});
+
 // Navigation verbs (builder, UI, DSP all gain cd/ls/pwd).
 export const Cd = createToken({
 	name: "Cd",
@@ -248,6 +254,7 @@ export const BUILDER_TOKENS = [
 	As,
 	Tree,
 	Types,
+	Type,
 	BooleanLiteral,
 	Comma,
 	DoubleDot,
@@ -290,6 +297,7 @@ export const UI_TOKENS = [
 	As,
 	Tree,
 	Types,
+	Type,
 	BooleanLiteral,
 	Comma,
 	DoubleDot,
@@ -382,6 +390,7 @@ export const DSP_TOKENS = [
 	As,
 	Tree,
 	Types,
+	Type,
 	Scale,
 	File,
 	BooleanLiteral,

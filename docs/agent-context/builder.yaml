@@ -22,7 +22,7 @@ quickStart:
   - title: Inspect the module tree
     argv: [hise-cli, builder, tree, --agent]
   - title: Search module types
-    argv: [hise-cli, builder, types, script, --agent]
+    argv: [hise-cli, builder, docs, ScriptFX, --agent]
   - title: Add and configure an effect
     argv: [hise-cli, builder, add, --type, SimpleGain, --id, Drive, --agent]
   - title: Set a parameter
@@ -109,13 +109,13 @@ commands:
       - title: Inspect current modules
         argv: [hise-cli, builder, tree, --agent]
   - id: builder.show.types
-    syntax: builder types [<filter>]
+    syntax: builder docs
     title: Show module types
-    purpose: List available module types, optionally filtered by case-insensitive substring across module ID, type, and subtype.
+    purpose: List available module types from MCP docs, optionally filtered locally by case-insensitive substring.
     command:
-      argv: [hise-cli, builder, types, --agent]
+      argv: [hise-cli, builder, docs, --agent]
     aliases: [list module types, find module type, search builder types]
-    tags: [builder, show, types, inspect, read-only]
+    tags: [builder, docs, types, inspect, read-only]
     contexts: [cli]
     agentRelevance: high
     help:
@@ -123,9 +123,25 @@ commands:
       order: 20
     examples:
       - title: Show all module types
-        argv: [hise-cli, builder, types, --agent]
-      - title: Filter module types
-        argv: [hise-cli, builder, types, Envelope, --agent]
+        argv: [hise-cli, builder, docs, --agent]
+  - id: builder.show.type
+    syntax: builder docs <module-type>[.<param>]
+    title: Show module type docs
+    purpose: Show static MCP reference docs for a module type or parameter without inspecting a live instance.
+    command:
+      argv: [hise-cli, builder, docs, AHDSR.Attack, --agent]
+    aliases: [module type docs, parameter docs, show static module reference]
+    tags: [builder, show, types, docs, mcp, read-only]
+    contexts: [cli]
+    agentRelevance: high
+    help:
+      visibility: common
+      order: 25
+    examples:
+      - title: Show module docs
+        argv: [hise-cli, builder, docs, AHDSR, --agent]
+      - title: Show parameter docs
+        argv: [hise-cli, builder, docs, AHDSR.Attack, --agent]
   - id: builder.show.module
     syntax: builder show --module <id-or-path>
     title: Show module summary

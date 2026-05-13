@@ -169,11 +169,11 @@ export const GENERATED_AGENT_CONTEXT = {
 					"argv": [
 						"hise-cli",
 						"builder",
-						"types",
-						"script",
+						"docs",
+						"ScriptFX",
 						"--agent"
 					],
-					"display": "hise-cli builder types script --agent"
+					"display": "hise-cli builder docs ScriptFX --agent"
 				},
 				{
 					"title": "Add and configure an effect",
@@ -345,20 +345,20 @@ export const GENERATED_AGENT_CONTEXT = {
 				{
 					"id": "builder.show.types",
 					"title": "Show module types",
-					"purpose": "List available module types, optionally filtered by case-insensitive substring across module ID, type, and subtype.",
-					"syntax": "builder types [<filter>]",
+					"purpose": "List available module types from MCP docs, optionally filtered locally by case-insensitive substring.",
+					"syntax": "builder docs",
 					"command": {
 						"argv": [
 							"hise-cli",
 							"builder",
-							"types",
+							"docs",
 							"--agent"
 						],
-						"display": "hise-cli builder types --agent"
+						"display": "hise-cli builder docs --agent"
 					},
 					"tags": [
 						"builder",
-						"show",
+						"docs",
 						"types",
 						"inspect",
 						"read-only"
@@ -383,21 +383,72 @@ export const GENERATED_AGENT_CONTEXT = {
 							"argv": [
 								"hise-cli",
 								"builder",
-								"types",
+								"docs",
 								"--agent"
 							],
-							"display": "hise-cli builder types --agent"
-						},
+							"display": "hise-cli builder docs --agent"
+						}
+					]
+				},
+				{
+					"id": "builder.show.type",
+					"title": "Show module type docs",
+					"purpose": "Show static MCP reference docs for a module type or parameter without inspecting a live instance.",
+					"syntax": "builder docs <module-type>[.<param>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"builder",
+							"docs",
+							"AHDSR.Attack",
+							"--agent"
+						],
+						"display": "hise-cli builder docs AHDSR.Attack --agent"
+					},
+					"tags": [
+						"builder",
+						"show",
+						"types",
+						"docs",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"module type docs",
+						"parameter docs",
+						"show static module reference"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 25
+					},
+					"examples": [
 						{
-							"title": "Filter module types",
+							"title": "Show module docs",
 							"argv": [
 								"hise-cli",
 								"builder",
-								"types",
-								"Envelope",
+								"docs",
+								"AHDSR",
 								"--agent"
 							],
-							"display": "hise-cli builder types Envelope --agent"
+							"display": "hise-cli builder docs AHDSR --agent"
+						},
+						{
+							"title": "Show parameter docs",
+							"argv": [
+								"hise-cli",
+								"builder",
+								"docs",
+								"AHDSR.Attack",
+								"--agent"
+							],
+							"display": "hise-cli builder docs AHDSR.Attack --agent"
 						}
 					]
 				},
@@ -1689,22 +1740,178 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
-					"id": "dsp.show.types",
-					"title": "Show DSP node types",
-					"purpose": "List available scriptnode factory types, optionally filtered by substring.",
-					"syntax": "dsp types [<filter>]",
+					"id": "dsp.show.networks",
+					"title": "Show DSP network files",
+					"purpose": "List available DspNetwork XML files in the current project.",
+					"syntax": "dsp networks --module <module> [filter]",
 					"command": {
 						"argv": [
 							"hise-cli",
 							"dsp",
-							"types",
+							"networks",
+							"--module",
+							"Script FX1",
 							"--agent"
 						],
-						"display": "hise-cli dsp types --agent"
+						"display": "hise-cli dsp networks --module \"Script FX1\" --agent"
 					},
 					"tags": [
 						"dsp",
-						"types",
+						"show",
+						"networks",
+						"scriptnode",
+						"read-only"
+					],
+					"aliases": [
+						"show dsp networks",
+						"list scriptnode networks",
+						"list dsp files"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 22
+					},
+					"examples": [
+						{
+							"title": "List DSP networks",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"networks",
+								"--module",
+								"Script FX1",
+								"--agent"
+							],
+							"display": "hise-cli dsp networks --module \"Script FX1\" --agent"
+						}
+					]
+				},
+				{
+					"id": "dsp.show.modules",
+					"title": "Show DSP-capable modules",
+					"purpose": "List builder modules that can host a DspNetwork.",
+					"syntax": "dsp modules --module <module> [filter]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"modules",
+							"--module",
+							"Script FX1",
+							"--agent"
+						],
+						"display": "hise-cli dsp modules --module \"Script FX1\" --agent"
+					},
+					"tags": [
+						"dsp",
+						"show",
+						"modules",
+						"hosts",
+						"read-only"
+					],
+					"aliases": [
+						"show dsp modules",
+						"list scriptnode hosts",
+						"find dsp host modules"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 24
+					},
+					"examples": [
+						{
+							"title": "List DSP host modules",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"modules",
+								"--module",
+								"Script FX1",
+								"--agent"
+							],
+							"display": "hise-cli dsp modules --module \"Script FX1\" --agent"
+						}
+					]
+				},
+				{
+					"id": "dsp.show.connections",
+					"title": "Show DSP connections",
+					"purpose": "List live modulation and parameter connections in a scriptnode network.",
+					"syntax": "dsp connections --module <module> [filter]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"connections",
+							"--module",
+							"Script FX1",
+							"--agent"
+						],
+						"display": "hise-cli dsp connections --module \"Script FX1\" --agent"
+					},
+					"tags": [
+						"dsp",
+						"show",
+						"connections",
+						"modulation",
+						"read-only"
+					],
+					"aliases": [
+						"show dsp connections",
+						"list modulation edges",
+						"inspect node connections"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 26
+					},
+					"examples": [
+						{
+							"title": "List network connections",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"connections",
+								"--module",
+								"Script FX1",
+								"--agent"
+							],
+							"display": "hise-cli dsp connections --module \"Script FX1\" --agent"
+						}
+					]
+				},
+				{
+					"id": "dsp.show.types",
+					"title": "Show DSP node types",
+					"purpose": "List available scriptnode factory types from MCP docs, optionally filtered locally.",
+					"syntax": "dsp docs [<factory>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"docs",
+							"--agent"
+						],
+						"display": "hise-cli dsp docs --agent"
+					},
+					"tags": [
+						"dsp",
+						"docs",
 						"scriptnode",
 						"inspect",
 						"read-only"
@@ -1729,21 +1936,82 @@ export const GENERATED_AGENT_CONTEXT = {
 							"argv": [
 								"hise-cli",
 								"dsp",
-								"types",
+								"docs",
 								"--agent"
 							],
-							"display": "hise-cli dsp types --agent"
+							"display": "hise-cli dsp docs --agent"
 						},
 						{
 							"title": "Filter node types",
 							"argv": [
 								"hise-cli",
 								"dsp",
-								"types",
-								"filter",
+								"docs",
+								"filters",
 								"--agent"
 							],
-							"display": "hise-cli dsp types filter --agent"
+							"display": "hise-cli dsp docs filters --agent"
+						}
+					]
+				},
+				{
+					"id": "dsp.show.type",
+					"title": "Show scriptnode type docs",
+					"purpose": "Show static MCP reference docs for a scriptnode type or parameter without inspecting a live node.",
+					"syntax": "dsp docs <factory.node>[.<param>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"docs",
+							"filters.svf.Frequency",
+							"--agent"
+						],
+						"display": "hise-cli dsp docs filters.svf.Frequency --agent"
+					},
+					"tags": [
+						"dsp",
+						"type",
+						"docs",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"scriptnode docs",
+						"dsp type docs",
+						"node parameter docs"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 35
+					},
+					"examples": [
+						{
+							"title": "Show node type docs",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"docs",
+								"filters.svf",
+								"--agent"
+							],
+							"display": "hise-cli dsp docs filters.svf --agent"
+						},
+						{
+							"title": "Show node parameter docs",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"docs",
+								"filters.svf.Frequency",
+								"--agent"
+							],
+							"display": "hise-cli dsp docs filters.svf.Frequency --agent"
 						}
 					]
 				},
@@ -1880,6 +2148,315 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
+					"id": "dsp.set.parameterRange",
+					"title": "Set DSP parameter range",
+					"purpose": "Update a live scriptnode parameter range and curve metadata.",
+					"syntax": "dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"set",
+							"--module",
+							"Script FX1",
+							"--node",
+							"F1",
+							"--param",
+							"Frequency",
+							"--range",
+							"20,20000",
+							"--default",
+							"1000",
+							"--skewFactor",
+							"0.3",
+							"--agent"
+						],
+						"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --param Frequency --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+					},
+					"tags": [
+						"dsp",
+						"set",
+						"parameter",
+						"range",
+						"metadata",
+						"node",
+						"mutation"
+					],
+					"aliases": [
+						"set dsp parameter range",
+						"change node parameter range",
+						"set scriptnode parameter metadata"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 52
+					},
+					"examples": [
+						{
+							"title": "Set frequency range",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--param",
+								"Frequency",
+								"--range",
+								"20,20000",
+								"--agent"
+							],
+							"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --param Frequency --range \"20,20000\" --agent"
+						},
+						{
+							"title": "Set range and skew",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--param",
+								"Frequency",
+								"--range",
+								"20,20000",
+								"--default",
+								"1000",
+								"--skewFactor",
+								"0.3",
+								"--agent"
+							],
+							"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --param Frequency --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+						}
+					],
+					"notes": [
+						"--range accepts x,y style shorthand like UI --bounds; use \"20,20000\" or \"[20,20000]\".",
+						"Metadata flags require --param because they target a node parameter, not the node itself.",
+						"middlePosition and skewFactor are alternatives; do not use both."
+					]
+				},
+				{
+					"id": "dsp.move.parent",
+					"title": "Move DSP node to parent",
+					"purpose": "Reparent a scriptnode node into another container node.",
+					"syntax": "dsp set --module <module> --node <id-or-path> --parent <container-node>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"set",
+							"--module",
+							"Script FX1",
+							"--node",
+							"F1",
+							"--parent",
+							"root",
+							"--agent"
+						],
+						"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --parent root --agent"
+					},
+					"tags": [
+						"dsp",
+						"move",
+						"parent",
+						"reparent",
+						"node",
+						"mutation"
+					],
+					"aliases": [
+						"move dsp node",
+						"reparent dsp node",
+						"move node parent",
+						"move parent",
+						"change dsp parent"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 54
+					},
+					"examples": [
+						{
+							"title": "Move node to root container",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--parent",
+								"root",
+								"--agent"
+							],
+							"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --parent root --agent"
+						}
+					],
+					"notes": [
+						"--parent must name an existing container node in the current DSP network.",
+						"Use dsp tree first to inspect valid container IDs."
+					]
+				},
+				{
+					"id": "dsp.move.index",
+					"title": "Reorder DSP node",
+					"purpose": "Reorder a scriptnode node within its current parent container.",
+					"syntax": "dsp set --module <module> --node <id-or-path> --index <n>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"set",
+							"--module",
+							"Script FX1",
+							"--node",
+							"F1",
+							"--index",
+							"0",
+							"--agent"
+						],
+						"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --index 0 --agent"
+					},
+					"tags": [
+						"dsp",
+						"move",
+						"index",
+						"reorder",
+						"node",
+						"mutation"
+					],
+					"aliases": [
+						"reorder dsp node",
+						"move dsp index",
+						"change node order"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 56
+					},
+					"examples": [
+						{
+							"title": "Move node to first position",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--index",
+								"0",
+								"--agent"
+							],
+							"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --index 0 --agent"
+						}
+					],
+					"notes": [
+						"Index is zero-based within the current parent container."
+					]
+				},
+				{
+					"id": "dsp.get.parameter",
+					"title": "Get DSP node parameter",
+					"purpose": "Read a live node parameter value or parameter metadata field.",
+					"syntax": "dsp get --module <module> --node <id-or-path> --param <param> [--field <field>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"get",
+							"--module",
+							"Script FX1",
+							"--node",
+							"F1",
+							"--param",
+							"Frequency",
+							"--agent"
+						],
+						"display": "hise-cli dsp get --module \"Script FX1\" --node F1 --param Frequency --agent"
+					},
+					"tags": [
+						"dsp",
+						"get",
+						"parameter",
+						"node",
+						"read-only"
+					],
+					"aliases": [
+						"get dsp parameter",
+						"read node value",
+						"read node parameter metadata"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 55
+					},
+					"examples": [
+						{
+							"title": "Read filter frequency",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"get",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--param",
+								"Frequency",
+								"--agent"
+							],
+							"display": "hise-cli dsp get --module \"Script FX1\" --node F1 --param Frequency --agent"
+						},
+						{
+							"title": "Read connected source",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"get",
+								"--module",
+								"Script FX1",
+								"--node",
+								"F1",
+								"--param",
+								"Frequency",
+								"--field",
+								"source",
+								"--agent"
+							],
+							"display": "hise-cli dsp get --module \"Script FX1\" --node F1 --param Frequency --field source --agent"
+						}
+					],
+					"notes": [
+						"Use --field for metadata such as source, parent, min, max, range, step, mid, skew, or default."
+					]
+				},
+				{
 					"id": "dsp.connect.node",
 					"title": "Connect DSP source to node parameter",
 					"purpose": "Connect a DSP node source to a target node parameter and optionally copy matching metadata.",
@@ -1990,6 +2567,147 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--source-param and --source-output are optional source qualifiers and are mutually exclusive.",
 						"Use --source-param when the source is a parameter on another node.",
 						"Use --source-output when the source is an output channel index."
+					]
+				},
+				{
+					"id": "dsp.disconnect.node",
+					"title": "Disconnect DSP parameter",
+					"purpose": "Remove one or more modulation connections by target parameter.",
+					"syntax": "dsp disconnect --module <module> --target <node.param> [--target <node.param>...]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"disconnect",
+							"--module",
+							"Script FX1",
+							"--target",
+							"F1.Frequency",
+							"--agent"
+						],
+						"display": "hise-cli dsp disconnect --module \"Script FX1\" --target F1.Frequency --agent"
+					},
+					"tags": [
+						"dsp",
+						"disconnect",
+						"node",
+						"parameter",
+						"modulation",
+						"mutation"
+					],
+					"aliases": [
+						"disconnect dsp node",
+						"remove modulation connection",
+						"unlink node parameter"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 65
+					},
+					"examples": [
+						{
+							"title": "Disconnect filter modulation",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"disconnect",
+								"--module",
+								"Script FX1",
+								"--target",
+								"F1.Frequency",
+								"--agent"
+							],
+							"display": "hise-cli dsp disconnect --module \"Script FX1\" --target F1.Frequency --agent"
+						}
+					],
+					"notes": [
+						"Targets must include the destination parameter name.",
+						"Repeat --target to disconnect multiple parameters."
+					]
+				},
+				{
+					"id": "dsp.create_parameter",
+					"title": "Create scriptnode macro parameter",
+					"purpose": "Create a top-level or container dynamic parameter with range and curve metadata.",
+					"syntax": "dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"create_parameter",
+							"--module",
+							"Script FX1",
+							"--container",
+							"root",
+							"--id",
+							"Cutoff",
+							"--range",
+							"20,20000",
+							"--default",
+							"1000",
+							"--skewFactor",
+							"0.3",
+							"--agent"
+						],
+						"display": "hise-cli dsp create_parameter --module \"Script FX1\" --container root --id Cutoff --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+					},
+					"tags": [
+						"dsp",
+						"create_parameter",
+						"macro",
+						"parameter",
+						"range",
+						"mutation"
+					],
+					"aliases": [
+						"create macro parameter",
+						"create dynamic parameter",
+						"create scriptnode parameter",
+						"set macro range"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 68
+					},
+					"examples": [
+						{
+							"title": "Create a cutoff macro parameter",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"create_parameter",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--id",
+								"Cutoff",
+								"--range",
+								"20,20000",
+								"--default",
+								"1000",
+								"--skewFactor",
+								"0.3",
+								"--agent"
+							],
+							"display": "hise-cli dsp create_parameter --module \"Script FX1\" --container root --id Cutoff --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+						}
+					],
+					"notes": [
+						"--container is the scriptnode container path; root targets the network root container.",
+						"--id is the new dynamic parameter ID.",
+						"--range accepts min,max and maps to [min, max].",
+						"middlePosition and skewFactor are alternatives; do not use both."
 					]
 				},
 				{
@@ -2109,6 +2827,70 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
+					"id": "dsp.screenshot",
+					"title": "Capture DSP graph screenshot",
+					"purpose": "Render the current scriptnode graph to a PNG through HISE.",
+					"syntax": "dsp screenshot --module <module> [--scale <n|percent>] --output <png>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"screenshot",
+							"--module",
+							"Script FX1",
+							"--scale",
+							"50%",
+							"--output",
+							"patch.png",
+							"--agent"
+						],
+						"display": "hise-cli dsp screenshot --module \"Script FX1\" --scale 50% --output patch.png --agent"
+					},
+					"tags": [
+						"dsp",
+						"screenshot",
+						"graph",
+						"testing",
+						"read-only"
+					],
+					"aliases": [
+						"capture dsp screenshot",
+						"screenshot scriptnode graph",
+						"export dsp graph png"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "medium",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 85
+					},
+					"examples": [
+						{
+							"title": "Capture graph screenshot",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"screenshot",
+								"--module",
+								"Script FX1",
+								"--scale",
+								"50%",
+								"--output",
+								"patch.png",
+								"--agent"
+							],
+							"display": "hise-cli dsp screenshot --module \"Script FX1\" --scale 50% --output patch.png --agent"
+						}
+					],
+					"notes": [
+						"--output must be a PNG path; relative paths resolve according to the DSP screenshot endpoint.",
+						"--scale accepts decimals or percentages."
+					]
+				},
+				{
 					"id": "dsp.save.network",
 					"title": "Save DSP network",
 					"purpose": "Persist the current DSP network state for a module.",
@@ -2159,6 +2941,60 @@ export const GENERATED_AGENT_CONTEXT = {
 					],
 					"notes": [
 						"Save writes network state; use only after intended edits are complete."
+					]
+				},
+				{
+					"id": "dsp.reset",
+					"title": "Reset DSP network",
+					"purpose": "Clear the current DSP network to an empty root.",
+					"syntax": "dsp reset --module <module>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"reset",
+							"--module",
+							"Script FX1",
+							"--agent"
+						],
+						"display": "hise-cli dsp reset --module \"Script FX1\" --agent"
+					},
+					"tags": [
+						"dsp",
+						"reset",
+						"destructive",
+						"mutation"
+					],
+					"aliases": [
+						"reset dsp network",
+						"clear scriptnode graph",
+						"empty dsp network"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "low",
+					"danger": true,
+					"help": {
+						"visibility": "hidden",
+						"order": 910
+					},
+					"examples": [
+						{
+							"title": "Reset network",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"reset",
+								"--module",
+								"Script FX1",
+								"--agent"
+							],
+							"display": "hise-cli dsp reset --module \"Script FX1\" --agent"
+						}
+					],
+					"notes": [
+						"Destructive; only run when explicitly requested."
 					]
 				}
 			],
@@ -3411,6 +4247,150 @@ export const GENERATED_AGENT_CONTEXT = {
 					],
 					"agentRelevance": "high",
 					"danger": false
+				},
+				{
+					"id": "script.show.api",
+					"title": "Show HiseScript API docs",
+					"purpose": "Query static HiseScript API docs from MCP without colliding with live symbol lookup.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"docs",
+							"api",
+							"Console.print",
+							"--agent"
+						],
+						"display": "hise-cli script docs api Console.print --agent"
+					},
+					"tags": [
+						"script",
+						"api",
+						"docs",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"hise script api docs",
+						"Console.print docs",
+						"scripting namespace docs"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 110
+					},
+					"examples": [
+						{
+							"title": "List scripting namespaces",
+							"argv": [
+								"hise-cli",
+								"script",
+								"docs",
+								"api",
+								"--agent"
+							],
+							"display": "hise-cli script docs api --agent"
+						},
+						{
+							"title": "Show one API call",
+							"argv": [
+								"hise-cli",
+								"script",
+								"docs",
+								"api",
+								"Console.print",
+								"--agent"
+							],
+							"display": "hise-cli script docs api Console.print --agent"
+						}
+					],
+					"syntax": "hise-cli script docs api Console.print --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
+				},
+				{
+					"id": "script.show.laf",
+					"title": "Show LAF docs",
+					"purpose": "Query static LookAndFeel function docs from MCP, optionally scoped to a component type or live component ID.",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"script",
+							"docs",
+							"laf",
+							"--component",
+							"ScriptButton",
+							"--agent"
+						],
+						"display": "hise-cli script docs laf --component ScriptButton --agent"
+					},
+					"tags": [
+						"script",
+						"laf",
+						"docs",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"look and feel docs",
+						"laf function docs",
+						"component laf functions"
+					],
+					"help": {
+						"visibility": "common",
+						"order": 120
+					},
+					"examples": [
+						{
+							"title": "Show LAF style guide",
+							"argv": [
+								"hise-cli",
+								"script",
+								"docs",
+								"laf",
+								"--agent"
+							],
+							"display": "hise-cli script docs laf --agent"
+						},
+						{
+							"title": "Show one LAF function",
+							"argv": [
+								"hise-cli",
+								"script",
+								"docs",
+								"laf",
+								"drawToggleButton",
+								"--agent"
+							],
+							"display": "hise-cli script docs laf drawToggleButton --agent"
+						},
+						{
+							"title": "Show LAF functions for a component",
+							"argv": [
+								"hise-cli",
+								"script",
+								"docs",
+								"laf",
+								"--component",
+								"ScriptButton",
+								"--agent"
+							],
+							"display": "hise-cli script docs laf --component ScriptButton --agent"
+						}
+					],
+					"notes": [
+						"--component accepts known component type names or live component IDs.",
+						"ScriptFloatingTile live IDs resolve to ContentType when HISE exposes it."
+					],
+					"syntax": "hise-cli script docs laf --component ScriptButton --agent",
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false
 				}
 			],
 			"types": {}
@@ -3755,6 +4735,129 @@ export const GENERATED_AGENT_CONTEXT = {
 								"--agent"
 							],
 							"display": "hise-cli ui show --component Cutoff --agent"
+						},
+						{
+							"title": "Inspect one live property",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"show",
+								"--component",
+								"Cutoff",
+								"--property",
+								"mode",
+								"--agent"
+							],
+							"display": "hise-cli ui show --component Cutoff --property mode --agent"
+						}
+					]
+				},
+				{
+					"id": "ui.show.types",
+					"title": "Show UI component types",
+					"purpose": "List static UI component types from MCP docs, optionally filtered locally.",
+					"syntax": "ui docs",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"ui",
+							"docs",
+							"--agent"
+						],
+						"display": "hise-cli ui docs --agent"
+					},
+					"tags": [
+						"ui",
+						"docs",
+						"types",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"list ui types",
+						"component docs",
+						"find component type"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 25
+					},
+					"examples": [
+						{
+							"title": "List component types",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"docs",
+								"--agent"
+							],
+							"display": "hise-cli ui docs --agent"
+						}
+					]
+				},
+				{
+					"id": "ui.show.type",
+					"title": "Show UI type docs",
+					"purpose": "Show static MCP reference docs for a component type or property without inspecting a live component.",
+					"syntax": "ui docs <component-type>[.<property>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"ui",
+							"docs",
+							"ScriptSlider.mode",
+							"--agent"
+						],
+						"display": "hise-cli ui docs ScriptSlider.mode --agent"
+					},
+					"tags": [
+						"ui",
+						"type",
+						"docs",
+						"mcp",
+						"read-only"
+					],
+					"aliases": [
+						"ui property docs",
+						"component type docs",
+						"show static ui reference"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 26
+					},
+					"examples": [
+						{
+							"title": "Show component docs",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"docs",
+								"ScriptSlider",
+								"--agent"
+							],
+							"display": "hise-cli ui docs ScriptSlider --agent"
+						},
+						{
+							"title": "Show property docs",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"docs",
+								"ScriptSlider.mode",
+								"--agent"
+							],
+							"display": "hise-cli ui docs ScriptSlider.mode --agent"
 						}
 					]
 				},
@@ -3945,6 +5048,65 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--index reorders the component within its current parent.",
 						"Other property flags map to ScriptComponent property names.",
 						"Use --dry-run before committing broad property edits."
+					]
+				},
+				{
+					"id": "ui.get.property",
+					"title": "Get UI component property",
+					"purpose": "Read one live ScriptComponent property value.",
+					"syntax": "ui get --component <id-or-path> --property <property> [--module <module>]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"ui",
+							"get",
+							"--component",
+							"Cutoff",
+							"--property",
+							"text",
+							"--agent"
+						],
+						"display": "hise-cli ui get --component Cutoff --property text --agent"
+					},
+					"tags": [
+						"ui",
+						"get",
+						"property",
+						"component",
+						"read-only"
+					],
+					"aliases": [
+						"get ui property",
+						"read component property",
+						"inspect property value"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 45
+					},
+					"examples": [
+						{
+							"title": "Read component text",
+							"argv": [
+								"hise-cli",
+								"ui",
+								"get",
+								"--component",
+								"Cutoff",
+								"--property",
+								"text",
+								"--agent"
+							],
+							"display": "hise-cli ui get --component Cutoff --property text --agent"
+						}
+					],
+					"notes": [
+						"Use docs for static property reference and get for live component values."
 					]
 				},
 				{

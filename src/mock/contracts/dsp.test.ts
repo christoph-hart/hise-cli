@@ -1,5 +1,26 @@
 import { describe, expect, it } from "vitest";
-import { cleanDspParameterForLlm } from "./dsp.js";
+import { cleanDspParameterForLlm, normalizeDspTreeResponse } from "./dsp.js";
+
+describe("normalizeDspTreeResponse", () => {
+	it("accepts numeric string parameter values from live HISE", () => {
+		const { raw } = normalizeDspTreeResponse({
+			nodeId: "network",
+			factoryPath: "container.chain",
+			bypassed: false,
+			parameters: [],
+			children: [{
+				nodeId: "Filter1",
+				factoryPath: "filters.svf",
+				bypassed: false,
+				parameters: [{ parameterId: "Frequency", value: "3500", min: "20.0", max: "20000.0" }],
+				children: [],
+			}],
+		});
+		expect(raw.children[0]!.parameters[0]!.value).toBe(3500);
+		expect(raw.children[0]!.parameters[0]!.min).toBe(20);
+		expect(raw.children[0]!.parameters[0]!.max).toBe(20000);
+	});
+});
 
 describe("cleanDspParameterForLlm", () => {
 	it("emits id, range, defaultValue, value", () => {

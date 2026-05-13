@@ -147,8 +147,8 @@ describe("BuilderMode — with mock connection", () => {
 		const initCall = mock.calls.find((c) => c.endpoint.startsWith("/api/dsp/init"));
 		expect(initCall).toBeDefined();
 		expect(initCall!.endpoint).toMatch(/moduleId=Lead/);
-		const body = initCall!.body as { name: string; mode: string };
-		expect(body).toEqual({ name: "my_dsp", mode: "create" });
+		const body = initCall!.body as { moduleId: string; name: string; mode: string };
+		expect(body).toEqual({ moduleId: "Lead", name: "my_dsp", mode: "create" });
 	});
 
 	it("set X.network with .xml dispatches /api/dsp/init (load)", async () => {
@@ -157,8 +157,8 @@ describe("BuilderMode — with mock connection", () => {
 		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
 		await mode.parse('set Lead.network "my_dsp.xml"', session);
 		const initCall = mock.calls.find((c) => c.endpoint.startsWith("/api/dsp/init"));
-		const body = initCall!.body as { name: string; mode: string };
-		expect(body).toEqual({ name: "my_dsp", mode: "load" });
+		const body = initCall!.body as { moduleId: string; name: string; mode: string };
+		expect(body).toEqual({ moduleId: "Lead", name: "my_dsp", mode: "load" });
 	});
 
 	it("set routing matrix dispatches set_routing op", async () => {
@@ -228,12 +228,16 @@ describe("BuilderMode — with mock connection", () => {
 		expect(r.type).toBe("table");
 	});
 
-	it("show types returns table", async () => {
+	it("docs returns MCP markdown", async () => {
 		const tree = makeTree();
 		const { session } = makeMock(tree);
+		Object.assign(session, { mcpClient: {
+			async call() { return {}; },
+			async callTool() { return { content: [{ type: "text", text: "SineSynth\nGain" }] }; },
+		} });
 		const mode = new BuilderMode(moduleList, undefined, undefined, tree);
-		const r = await mode.parse("show types", session);
-		expect(r.type).toBe("table");
+		const r = await mode.parse("docs", session);
+		expect(r.type).toBe("markdown");
 	});
 
 	it("show <Module>.<Param> returns parameter detail (forLlm → minimal JSON)", async () => {
