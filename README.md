@@ -57,8 +57,8 @@ detects what your system already has, installs only what's missing, then
 clones, configures, and builds HISE end-to-end.
 
 ```bash
-hise-cli              # then run /setup, or:
-hise-cli -wizard run setup
+hise-cli              # then
+> /setup
 ```
 
 What the wizard takes care of for you:
