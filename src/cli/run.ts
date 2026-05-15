@@ -71,7 +71,7 @@ export async function executeCliCommand(
 	commands: CommandEntry[],
 	dataLoader: DataLoader,
 	connectionOrOptions?: HiseConnection | CliCommandOptions,
-): Promise<{ kind: "tui"; args: string[] } | { kind: "help"; scope?: string } | { kind: "error"; message: string } | { kind: "diagnose"; filePath: string } | { kind: "update"; check: boolean } | { kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
+): Promise<{ kind: "tui"; args: string[] } | { kind: "help"; scope?: string } | { kind: "error"; message: string } | { kind: "diagnose"; filePath: string } | { kind: "update"; check: boolean } | { kind: "text"; text: string } | { kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
 	// Backward compat: accept either a connection directly or an options object
 	const opts: CliCommandOptions = connectionOrOptions && "probe" in connectionOrOptions
 		? { connectionOverride: connectionOrOptions }
@@ -197,7 +197,9 @@ export async function executeCliCommand(
 			payload = serializeCliOutput("run", result);
 		} else {
 			result = await session.handleInput(canonicalCommand);
-			payload = serializeCliOutput(parsed.mode, result, connection.getLastReplResponse());
+			payload = result.type === "json" && result.fallbackText && !parsed.output.json
+				? { ok: true, result }
+				: serializeCliOutput(parsed.mode, result, connection.getLastReplResponse());
 		}
 
 		await observer.emit({
@@ -270,7 +272,22 @@ async function executeRunCommand(
 	parsed: Extract<import("./args.js").CliParseResult, { kind: "run" }>,
 	dataLoader: DataLoader,
 	opts: CliCommandOptions,
-): Promise<{ kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
+): Promise<{ kind: "text"; text: string } | { kind: "json"; payload: CliOutputPayload; output: import("./args.js").CliOutputOptions }> {
+	if (parsed.toCli) {
+		let source: string;
+		try {
+			source = await readRunSource(parsed.source);
+		} catch (err) {
+			return finalizeJsonPayload(cliError("execution_error", `Failed to load script: ${err instanceof Error ? err.message : String(err)}`), parsed.output);
+		}
+		const { translateHscToCli } = await import("../engine/run/to-cli.js");
+		const translated = translateHscToCli(source);
+		if (parsed.output.json) {
+			return finalizeJsonPayload({ ok: true, value: translated }, parsed.output);
+		}
+		return { kind: "text", text: translated.lines.join("\n") };
+	}
+
 	// Watch mode: enter long-running loop (never returns via normal path)
 	if (parsed.watch && parsed.source.type === "file") {
 		await runWatchMode(parsed, dataLoader, opts);

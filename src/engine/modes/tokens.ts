@@ -357,6 +357,12 @@ export const Screenshot = createToken({
 	longer_alt: Identifier,
 });
 
+export const Trace = createToken({
+	name: "Trace",
+	pattern: /trace/i,
+	longer_alt: Identifier,
+});
+
 // DSP token order — keywords before Identifier. CreateParameter must
 // come before Connect to avoid prefix conflicts: lexer tries tokens
 // in array order, so the longer multi-char keyword wins on inputs
@@ -375,6 +381,7 @@ export const DSP_TOKENS = [
 	Networks,
 	Modules,
 	Screenshot,
+	Trace,
 	Add,
 	Remove,
 	Rename,
@@ -403,7 +410,7 @@ export const DSP_TOKENS = [
 ];
 
 export const DSP_VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"set", "get", "add", "remove", "connect", "disconnect",
+	"set", "get", "add", "remove", "connect", "disconnect", "trace",
 ]);
 
 export const dspLexer = new Lexer(DSP_TOKENS);

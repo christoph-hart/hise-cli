@@ -126,6 +126,11 @@ async function main(): Promise<void> {
 		return;
 	}
 
+	if (cliResult.kind === "text") {
+		if (cliResult.text) console.log(cliResult.text);
+		return;
+	}
+
 	if (cliResult.kind === "diagnose") {
 		// Should not reach here — handled by fast-path above
 		console.error("diagnose must be handled before session bootstrap");

@@ -393,12 +393,41 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP routing connect without parameter", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "connect", "--module", "Script FX1", "--source", "SEND", "--target", "RCV"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" connect SEND to RCV');
+		}
+	});
+
 	it("parses direct DSP dynamic parameter flags exactly", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--skewFactor", "0.3", "--middlePosition", "1000"], getCliCommands());
 		expect(result.kind).toBe("execute");
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe('/dsp."Script FX1" set F1.skewFactor 0.3, F1.middlePosition 1000');
 		}
+	});
+
+	it("parses direct DSP trace flags", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "trace", "--module", "Script FX1", "--container", "root", "--inject", "dirac", "--gain", "0.25", "--inject-before", "gain", "--probe-after", "delay", "--agent"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" trace root inject dirac gain 0.25 before "gain" probe after "delay"');
+		}
+	});
+
+	it("parses direct DSP trace parameter probes", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "trace", "--module", "Script FX1", "--inject-param", "Root.Value=0.5", "--probe-param", "add.Value", "--probe-param", "mul.Value", "--trace-compact", "--no-specs"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" trace inject param Root.Value 0.5 probe param add.Value probe param mul.Value compact no_specs');
+		}
+	});
+
+	it("rejects mutually exclusive direct DSP trace parameter probes", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "trace", "--module", "Script FX1", "--probe-changed-parameters", "--probe-param", "add.Value"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "dsp trace accepts --probe-changed-parameters or --probe-param, not both" });
 	});
 
 	it("parses direct DSP parameter range metadata flags", () => {
@@ -820,6 +849,20 @@ describe("--run subcommand", () => {
 		if (result.kind === "run") {
 			expect(result.dryRun).toBe(true);
 		}
+	});
+
+	it("supports --to-cli flag", () => {
+		const result = parseCliArgs(["node", "hise-cli", "run", "--to-cli", "test.hsc"], getCliCommands());
+		expect(result.kind).toBe("run");
+		if (result.kind === "run") {
+			expect(result.source).toEqual({ type: "file", path: "test.hsc" });
+			expect(result.toCli).toBe(true);
+		}
+	});
+
+	it("rejects --to-cli with runtime flags", () => {
+		expect(parseCliArgs(["node", "hise-cli", "run", "--to-cli", "test.hsc", "--watch"], getCliCommands())).toEqual({ kind: "error", message: "--to-cli cannot be used with --watch" });
+		expect(parseCliArgs(["node", "hise-cli", "run", "--to-cli", "test.hsc", "--dry-run"], getCliCommands())).toEqual({ kind: "error", message: "--to-cli cannot be used with --dry-run" });
 	});
 
 	it("errors on --inline without content", () => {

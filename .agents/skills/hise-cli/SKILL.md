@@ -20,7 +20,7 @@ hise-cli -status --agent
 hise-cli agent-context --agent
 ```
 
-For documentation lookup, use `hise-cli mcp` so the workflow stays inside the CLI surface.
+For static documentation lookup, use mode-local `docs` first. Use `hise-cli mcp` for broad exploration, examples, tutorials, forum search, or docs not exposed through a mode-local `docs` command.
 
 ## Discovery
 
@@ -43,16 +43,38 @@ Use full mode context only when compact context and command recipes are insuffic
 hise-cli agent-context ui --full --agent
 ```
 
-## MCP Documentation
+## Static Documentation
 
-Use `explore_hise` when unsure. Use exact query tools only when you already know the symbol or API class.
+Use mode-local `docs` commands for exact static reference lookup. These commands query the MCP docs backend while keeping the workflow inside the hise-cli mode surface.
+
+```bash
+hise-cli builder docs AHDSR.Attack --agent
+hise-cli ui docs ScriptSlider.mode --agent
+hise-cli dsp docs core.ramp --agent
+hise-cli script docs api Console.print --agent
+hise-cli script docs laf --component ScriptButton --agent
+```
+
+Use `docs` with no query to list the catalog for builder, UI, and DSP:
+
+```bash
+hise-cli builder docs --agent
+hise-cli ui docs --agent
+hise-cli dsp docs --agent
+```
+
+`show` is live inspection only. Do not use `show` for static type, property, parameter, API, or LAF documentation. If `show` reports that a live module, component, node, or `--module` is required, switch to `docs` for static lookup.
+
+## MCP Exploration
+
+Use `hise-cli mcp` for broad documentation exploration, tutorials, examples, forum search, or when mode-local `docs` does not cover the query.
 
 ```bash
 hise-cli mcp explore_hise --query "slider callback" --agent
-hise-cli mcp query_scripting_api --api-call ScriptSlider.setControlCallback --agent
+hise-cli mcp search_hise --query "Content.addKnob" --agent
 ```
 
-Do not invent HiseScript APIs, UI properties, module parameters, or LAF functions from JavaScript knowledge. Look them up with `hise-cli mcp` first. If the current agent already has native HISE MCP access, that is equivalent for docs lookup.
+Do not invent HiseScript APIs, UI properties, module parameters, scriptnode nodes, or LAF functions from JavaScript knowledge. Look them up with mode-local `docs` first, or with `hise-cli mcp` for broad searches. If the current agent already has native HISE MCP access, that is equivalent for docs lookup.
 
 ## Script Workflow
 
@@ -87,6 +109,10 @@ hise-cli script show tree Knob --module-id Interface --format flat --limit 20 --
 
 Use direct flag-style commands for builder, UI, and DSP automation.
 
+For non-trivial ScriptNode DSP authoring or runtime validation, use the
+`hise-dsp` skill. It adds the ScriptNode mental model and trace-based signal /
+parameter validation workflow on top of these direct commands.
+
 ### Inspect Before Mutating
 
 ```bash
@@ -95,6 +121,14 @@ hise-cli builder show --module Drive --agent
 hise-cli builder show --module Drive --param Gain --agent
 hise-cli ui tree --agent
 hise-cli dsp tree --module "Script FX1" --agent
+```
+
+For static reference before choosing a type, property, or parameter, use `docs`:
+
+```bash
+hise-cli builder docs SimpleGain.Gain --agent
+hise-cli ui docs ScriptSlider.mode --agent
+hise-cli dsp docs filters.svf.Frequency --agent
 ```
 
 ### Builder: Add And Configure Modules
@@ -185,7 +219,8 @@ Agent errors use stable `code` values. Exit codes are:
 ## Decision Rules
 
 - Start with `hise-cli which "<intent>" --agent --select value[0]`; use `agent-context --command <id>` only for full command details.
-- Use `hise-cli mcp explore_hise` before guessing, and exact MCP query tools only when you know the symbol.
+- Use mode-local `docs` before guessing static names, parameters, properties, scriptnode nodes, API calls, or LAF functions.
+- Use `hise-cli mcp explore_hise` only for broad search, examples, tutorials, forum results, or docs not available through `docs`.
 - Use direct `builder`, `ui`, and `dsp` commands for project mutations.
 - Use dynamic exact HISE flags for normal property and parameter writes. Use `--param/--value` only if `which` or `agent-context` specifically recommends it.
 - Use `--dry-run` before uncertain builder/UI/DSP mutations.

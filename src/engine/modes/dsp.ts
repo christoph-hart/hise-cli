@@ -38,6 +38,7 @@ import type {
 	GetCommand,
 	ScreenshotCommand,
 	ShowCommand,
+	TraceCommand,
 } from "./dsp-parser.js";
 import { parseDspInput, findLastUnquotedComma, parseSingleDspCommand } from "./dsp-parser.js";
 import type { DspOp } from "./dsp-ops.js";
@@ -56,8 +57,10 @@ import { resolvePath } from "../grammar/path-resolver.js";
 import { stripQuotes } from "../string-utils.js";
 import {
 	pathRefSegments,
+	pathRefToString,
 	type PathRef,
 } from "../grammar/path-parser.js";
+import type { Value } from "../grammar/value-parser.js";
 import { duplicateAliasesInRequest } from "./duplicate-id.js";
 import { callMcpReference, listMcpReference } from "../reference/mcpReference.js";
 
@@ -297,6 +300,7 @@ export class DspMode implements Mode {
 			case "show": return this.handleShow(cmd, session);
 			case "get": return this.handleGet(cmd);
 			case "screenshot": return this.handleScreenshot(cmd, session);
+			case "trace": return this.handleTrace(cmd, session);
 			default:
 				return this.handleMutation(cmd, session);
 		}
@@ -435,6 +439,34 @@ export class DspMode implements Mode {
 		const height = data.height ?? "?";
 		const filePath = typeof data.filePath === "string" ? data.filePath : cmd.file;
 		return textResult(`Screenshot saved to ${filePath} (${width}x${height})`);
+	}
+
+	// ── Trace ────────────────────────────────────────────────────
+
+	private async handleTrace(cmd: TraceCommand, session: SessionContext): Promise<CommandResult> {
+		if (!this.moduleId) return errorResult("trace: no module context.");
+		if (!session.connection) return errorResult("trace requires a HISE connection");
+
+		const parent = this.resolveTraceParent(cmd);
+		if ("error" in parent) return errorResult(parent.error);
+
+		const body = buildTraceRequest(this.moduleId, parent.id, cmd);
+		const response = await session.connection.post("/api/dsp/probe", body);
+		if (isErrorResponse(response)) return errorResult(response.message);
+		if (!isEnvelopeResponse(response) || !response.success) {
+			return errorResult(envelopeError(response, "DSP trace failed"));
+		}
+
+		const summary = summarizeTraceResponse(response, parent.id);
+		const payload = { summary, trace: response };
+		return jsonResult(payload, renderTraceSummary(summary));
+	}
+
+	private resolveTraceParent(cmd: TraceCommand): { id: string } | { error: string } {
+		if (cmd.container) return this.resolveRefForRead(cmd.container);
+		if (this.currentPath.length > 0) return { id: this.currentPath[this.currentPath.length - 1]! };
+		if (this.rawTree?.nodeId) return { id: this.rawTree.nodeId };
+		return { id: "root" };
 	}
 
 	// ── Show ────────────────────────────────────────────────────
@@ -804,6 +836,137 @@ function normalizeScreenshotPath(raw: string): string {
 	return forward.replace(/^\/+/, "");
 }
 
+function buildTraceRequest(moduleId: string, parent: string, cmd: TraceCommand): Record<string, unknown> {
+	const body: Record<string, unknown> = { moduleId, parent };
+	if (cmd.signalType) body.signalType = cmd.signalType;
+	if (cmd.gain !== undefined) body.gain = cmd.gain;
+	if (cmd.seed !== undefined) body.seed = cmd.seed;
+	if (cmd.delayMs !== undefined) body.delayMs = cmd.delayMs;
+	if (cmd.injectBefore) body.injectId = cmd.injectBefore;
+	if (cmd.probeAfter) body.probeId = cmd.probeAfter;
+	if (cmd.recursive) body.recursive = true;
+
+	const parameters: Record<string, unknown> = {};
+	if (cmd.injectParams.length > 0) {
+		parameters.inject = Object.fromEntries(cmd.injectParams.map((p) => [pathRefToString(p.path), valueToJson(p.value)]));
+	}
+	if (cmd.changedParameters) {
+		parameters.probe = "*";
+	} else if (cmd.probeParams.length > 0) {
+		parameters.probe = cmd.probeParams.map(pathRefToString);
+	}
+	if (Object.keys(parameters).length > 0) body.parameters = parameters;
+
+	const filter: Record<string, unknown> = {};
+	if (cmd.compact) filter.compact = true;
+	if (cmd.recursive) filter.tree = true;
+	if (cmd.noSpecs) filter.specs = false;
+	if (cmd.noSignal) filter.signal = false;
+	if (Object.keys(filter).length > 0) body.filter = filter;
+	return body;
+}
+
+function valueToJson(value: Value): unknown {
+	switch (value.kind) {
+		case "number": return value.n;
+		case "string": return value.s;
+		case "boolean": return value.b;
+		case "hex": return value.n;
+		case "array2": return value.n;
+		case "array4": return value.n;
+		case "arrayN": return value.n;
+		case "path": return pathRefToString(value.ref);
+	}
+}
+
+interface TraceSummary {
+	moduleId?: unknown;
+	container?: unknown;
+	signalType?: unknown;
+	recursive: boolean;
+	injectedParameters: number;
+	probedParameters: number;
+	touchedEdges: number;
+	containers: number;
+	signalPeaks: number[];
+	silent?: boolean;
+}
+
+function summarizeTraceResponse(response: Record<string, unknown>, fallbackContainer?: string): TraceSummary {
+	const parameters = objectField(response.parameters);
+	const probed = objectField(parameters?.probed);
+	const injected = objectField(parameters?.injected);
+	const touchedEdges = objectField(parameters?.touchedEdges);
+	const containers = objectField(response.containers);
+	const signal = Array.isArray(response.signal) ? response.signal : [];
+	const signalPeaks = signal.map(signalPeak).filter((v): v is number => typeof v === "number");
+	return {
+		moduleId: response.moduleId,
+		container: response.parent ?? fallbackContainer,
+		signalType: response.signalType,
+		recursive: response.recursive === true,
+		injectedParameters: injected ? Object.keys(injected).length : 0,
+		probedParameters: probed ? Object.keys(probed).length : 0,
+		touchedEdges: touchedEdges ? countTouchedEdges(touchedEdges) : 0,
+		containers: containers ? Object.keys(containers).length : 0,
+		signalPeaks: signalPeaks.length > 0 ? signalPeaks : aggregateRecursiveSignalPeaks(containers),
+		silent: signal.length > 0 ? signal.every((ch) => objectField(ch)?.silence === true) : undefined,
+	};
+}
+
+function objectField(value: unknown): Record<string, unknown> | null {
+	return value !== null && typeof value === "object" && !Array.isArray(value)
+		? value as Record<string, unknown>
+		: null;
+}
+
+function signalPeak(value: unknown): number | null {
+	if (typeof value === "number") return value;
+	const obj = objectField(value);
+	if (!obj) return null;
+	const max = typeof obj.max === "number" ? Math.abs(obj.max) : null;
+	const min = typeof obj.min === "number" ? Math.abs(obj.min) : null;
+	if (max === null && min === null) return null;
+	return Math.max(max ?? 0, min ?? 0);
+}
+
+function countTouchedEdges(edges: Record<string, unknown>): number {
+	let total = 0;
+	for (const value of Object.values(edges)) total += Array.isArray(value) ? value.length : 1;
+	return total;
+}
+
+function aggregateRecursiveSignalPeaks(containers: Record<string, unknown> | null): number[] {
+	const peaks: number[] = [];
+	if (!containers) return peaks;
+	for (const container of Object.values(containers)) {
+		const children = objectField(container)?.children;
+		if (!Array.isArray(children)) continue;
+		for (const child of children) {
+			const signal = objectField(child)?.signal;
+			if (!Array.isArray(signal)) continue;
+			for (let i = 0; i < signal.length; i++) {
+				const peak = signalPeak(signal[i]);
+				if (typeof peak !== "number") continue;
+				peaks[i] = Math.max(peaks[i] ?? 0, peak);
+			}
+		}
+	}
+	return peaks;
+}
+
+function renderTraceSummary(summary: TraceSummary): string {
+	const lines = [
+		`Trace: ${String(summary.moduleId ?? "?")}/${String(summary.container ?? "?")}${summary.recursive ? " recursive" : ""}`,
+	];
+	if (summary.signalType) lines.push(`Signal: ${String(summary.signalType)}`);
+	if (summary.signalPeaks.length > 0) lines.push(`Peaks: ${summary.signalPeaks.map((v, i) => `ch${i}=${v}`).join(" ")}`);
+	if (summary.silent !== undefined) lines.push(`Silent: ${summary.silent}`);
+	if (summary.containers > 0) lines.push(`Containers: ${summary.containers}`);
+	lines.push(`Parameters: injected=${summary.injectedParameters} probed=${summary.probedParameters} touchedEdges=${summary.touchedEdges}`);
+	return lines.join("\n");
+}
+
 function collectConnections(node: RawDspNode, rows: string[][]): void {
 	if (node.connections) {
 		for (const c of node.connections) {
@@ -920,6 +1083,7 @@ const DSP_KEYWORDS = [
 	{ label: "get", detail: "Get a parameter value or universal field" },
 	{ label: "create_parameter", detail: "Create a dynamic parameter on a container" },
 	{ label: "screenshot", detail: "screenshot scale <s> file \"<path>\"" },
+	{ label: "trace", detail: "Runtime signal / parameter probe" },
 	{ label: "cd", detail: "Navigate into a container" },
 	{ label: "ls", detail: "List children at current path" },
 	{ label: "pwd", detail: "Print current path" },

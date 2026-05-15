@@ -8,10 +8,12 @@ const DSP_KEYWORDS = new Set([
 	"save", "reset",
 	"add", "remove", "rename", "connect", "disconnect",
 	"set", "get",
-	"create_parameter", "screenshot",
+	"create_parameter", "screenshot", "trace",
 	"to", "as",
 	"default", "stepsize", "middleposition", "skewfactor", "matched",
-	"scale", "file",
+	"scale", "file", "inject", "probe", "silence", "dirac", "noise", "dc",
+	"gain", "seed", "before", "after", "recursive", "changed_parameters",
+	"delay", "compact", "no_specs", "no_signal", "param",
 	"cd", "ls", "pwd", "help",
 ]);
 

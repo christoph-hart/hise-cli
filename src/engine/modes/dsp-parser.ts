@@ -40,6 +40,7 @@ import {
 	Show,
 	To,
 	Tree,
+	Trace,
 	Type,
 	Types,
 	dspLexer,
@@ -133,6 +134,24 @@ export interface ScreenshotCommand {
 	file: string;
 }
 
+export interface TraceCommand {
+	type: "trace";
+	container?: PathRef;
+	signalType?: "silence" | "dirac" | "noise" | "dc";
+	gain?: number;
+	seed?: number;
+	injectBefore?: string;
+	probeAfter?: string;
+	delayMs?: number;
+	recursive: boolean;
+	changedParameters: boolean;
+	compact: boolean;
+	noSpecs: boolean;
+	noSignal: boolean;
+	injectParams: Array<{ path: PathRef; value: Value }>;
+	probeParams: PathRef[];
+}
+
 export type ShowCommand =
 	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree"; filter?: string }
 	| { type: "show"; kind: "target"; target: PathRef };
@@ -154,6 +173,7 @@ export type DspCommand =
 	| DisconnectCommand
 	| CreateParameterCommand
 	| ScreenshotCommand
+	| TraceCommand
 	| ShowCommand
 	| CdCommand
 	| LsCommand
@@ -329,6 +349,52 @@ class DspParser extends CstParser {
 		this.CONSUME(QuotedString, { LABEL: "file" });
 	});
 
+	public traceToken = this.RULE("traceToken", () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(QuotedString) },
+			{ ALT: () => this.CONSUME(HexLiteral) },
+			{ ALT: () => this.CONSUME(PercentLiteral) },
+			{ ALT: () => this.CONSUME(NumberLiteral) },
+			{ ALT: () => this.CONSUME(BooleanLiteral) },
+			{ ALT: () => this.CONSUME(Add) },
+			{ ALT: () => this.CONSUME(Remove) },
+			{ ALT: () => this.CONSUME(Rename) },
+			{ ALT: () => this.CONSUME(Show) },
+			{ ALT: () => this.CONSUME(Set) },
+			{ ALT: () => this.CONSUME(Get) },
+			{ ALT: () => this.CONSUME(Connect) },
+			{ ALT: () => this.CONSUME(Disconnect) },
+			{ ALT: () => this.CONSUME(CreateParameter) },
+			{ ALT: () => this.CONSUME(Screenshot) },
+			{ ALT: () => this.CONSUME(Trace) },
+			{ ALT: () => this.CONSUME(Cd) },
+			{ ALT: () => this.CONSUME(Ls) },
+			{ ALT: () => this.CONSUME(Pwd) },
+			{ ALT: () => this.CONSUME(Reset) },
+			{ ALT: () => this.CONSUME(Save) },
+			{ ALT: () => this.CONSUME(To) },
+			{ ALT: () => this.CONSUME(As) },
+			{ ALT: () => this.CONSUME(Tree) },
+			{ ALT: () => this.CONSUME(Types) },
+			{ ALT: () => this.CONSUME(Scale) },
+			{ ALT: () => this.CONSUME(File) },
+			{ ALT: () => this.CONSUME(Networks) },
+			{ ALT: () => this.CONSUME(Modules) },
+			{ ALT: () => this.CONSUME(Connections) },
+			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(Type) },
+			{ ALT: () => this.CONSUME(DoubleDot) },
+			{ ALT: () => this.CONSUME(Dot) },
+		]);
+	});
+
+	public traceCommand = this.RULE("traceCommand", () => {
+		this.CONSUME(Trace);
+		this.MANY(() => {
+			this.SUBRULE(this.traceToken);
+		});
+	});
+
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
 		this.OR([
@@ -373,6 +439,7 @@ class DspParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.disconnectCommand) },
 			{ ALT: () => this.SUBRULE(this.createParameterCommand) },
 			{ ALT: () => this.SUBRULE(this.screenshotCommand) },
+			{ ALT: () => this.SUBRULE(this.traceCommand) },
 			{ ALT: () => this.SUBRULE(this.showCommand) },
 			{ ALT: () => this.SUBRULE(this.cdCommand) },
 			{ ALT: () => this.SUBRULE(this.lsCommand) },
@@ -663,6 +730,188 @@ function extractScreenshotCommand(node: CstNode): { command: ScreenshotCommand }
 	return { command: { type: "screenshot", scale, file: fileRes.value.s } };
 }
 
+function extractTraceTokenImages(node: CstNode): string[] {
+	const out: string[] = [];
+	for (const child of (node.children.traceToken ?? []) as CstNode[]) {
+		const c = child.children;
+		for (const key of ["QuotedString", "HexLiteral", "PercentLiteral", "NumberLiteral", "BooleanLiteral", "Add", "Remove", "Rename", "Show", "Set", "Get", "Connect", "Disconnect", "CreateParameter", "Screenshot", "Trace", "Cd", "Ls", "Pwd", "Reset", "Save", "To", "As", "Tree", "Types", "Scale", "File", "Networks", "Modules", "Connections", "Identifier", "Type", "DoubleDot", "Dot"] as const) {
+			const tokens = c[key] as IToken[] | undefined;
+			if (tokens?.[0]) out.push(tokens[0].image);
+		}
+	}
+	return out;
+}
+
+const TRACE_CLAUSE_START = new globalThis.Set(["inject", "probe", "delay", "compact", "no_specs", "no_signal"]);
+const TRACE_SIGNALS = new globalThis.Set(["silence", "dirac", "noise", "dc"]);
+
+function isTraceClauseStart(image: string | undefined): boolean {
+	return image !== undefined && TRACE_CLAUSE_START.has(image.toLowerCase());
+}
+
+function parseTraceNumber(image: string | undefined, label: string): { value: number } | { error: string } {
+	if (!image) return { error: `trace: ${label} requires a number` };
+	const r = parseNumberLiteral(image);
+	if (!r.ok || r.value.kind !== "number") return { error: `trace: invalid ${label}` };
+	return { value: r.value.n };
+}
+
+function parseTraceValue(image: string | undefined): { value: Value } | { error: string } {
+	if (!image) return { error: "trace: parameter injection requires a value" };
+	if (image.startsWith("\"")) {
+		const r = parseQuotedString(image);
+		if (!r.ok) return { error: r.error };
+		return { value: r.value };
+	}
+	if (/^(true|false)$/i.test(image)) {
+		const r = parseBooleanLiteral(image);
+		if (!r.ok) return { error: r.error };
+		return { value: r.value };
+	}
+	if (image.endsWith("%")) {
+		const r = parsePercentLiteral(image);
+		if (!r.ok) return { error: r.error };
+		return { value: r.value };
+	}
+	if (image.startsWith("0x")) {
+		const r = parseHexLiteral(image);
+		if (!r.ok) return { error: r.error };
+		return { value: r.value };
+	}
+	const n = parseNumberLiteral(image);
+	if (n.ok) return { value: n.value };
+	const p = buildPathFromSegments([image]);
+	if (!p.ok) return { error: p.error };
+	return { value: { kind: "path", ref: p.ref } };
+}
+
+function readTracePath(tokens: string[], start: number): { ref: PathRef; next: number } | { error: string } {
+	if (tokens[start] === "..") return { ref: { kind: "parent" }, next: start + 1 };
+	const segments: string[] = [];
+	let i = start;
+	if (!tokens[i] || tokens[i] === ".") return { error: "trace: expected path" };
+	segments.push(tokens[i]!);
+	i++;
+	while (tokens[i] === ".") {
+		const next = tokens[i + 1];
+		if (!next || next === ".") return { error: "trace: invalid dotted path" };
+		segments.push(next);
+		i += 2;
+	}
+	const r = buildPathFromSegments(segments);
+	if (!r.ok) return { error: r.error };
+	return { ref: r.ref, next: i };
+}
+
+function parseTraceQuotedId(image: string | undefined, clause: string): { id: string } | { error: string } {
+	if (!image?.startsWith("\"")) return { error: `trace: ${clause} requires a quoted node id` };
+	const r = parseQuotedString(image);
+	if (!r.ok || r.value.kind !== "string") return { error: `trace: invalid quoted node id for ${clause}` };
+	return { id: r.value.s };
+}
+
+function extractTraceCommand(node: CstNode): { command: TraceCommand } | { error: string } {
+	const tokens = extractTraceTokenImages(node);
+	const cmd: TraceCommand = {
+		type: "trace",
+		recursive: false,
+		changedParameters: false,
+		compact: false,
+		noSpecs: false,
+		noSignal: false,
+		injectParams: [],
+		probeParams: [],
+	};
+	let i = 0;
+	if (tokens[i] && !isTraceClauseStart(tokens[i])) {
+		const container = readTracePath(tokens, i);
+		if ("error" in container) return container;
+		cmd.container = container.ref;
+		i = container.next;
+	}
+	while (i < tokens.length) {
+		const clause = tokens[i]?.toLowerCase();
+		if (clause === "delay") {
+			const delay = parseTraceNumber(tokens[i + 1], "delay");
+			if ("error" in delay) return delay;
+			cmd.delayMs = delay.value;
+			i += 2;
+			continue;
+		}
+		if (clause === "compact") { cmd.compact = true; i++; continue; }
+		if (clause === "no_specs") { cmd.noSpecs = true; i++; continue; }
+		if (clause === "no_signal") { cmd.noSignal = true; i++; continue; }
+		if (clause === "inject") {
+			const kind = tokens[i + 1]?.toLowerCase();
+			if (kind === "param") {
+				const path = readTracePath(tokens, i + 2);
+				if ("error" in path) return path;
+				if (pathRefSegmentCount(path.ref) < 2) return { error: "trace: inject param path must be dotted" };
+				const value = parseTraceValue(tokens[path.next]);
+				if ("error" in value) return value;
+				cmd.injectParams.push({ path: path.ref, value: value.value });
+				i = path.next + 1;
+				continue;
+			}
+			if (!kind || !TRACE_SIGNALS.has(kind)) return { error: "trace: inject requires silence, dirac, noise, dc, or param" };
+			cmd.signalType = kind as TraceCommand["signalType"];
+			i += 2;
+			while (i < tokens.length && !isTraceClauseStart(tokens[i])) {
+				const option = tokens[i]?.toLowerCase();
+				if (option === "gain") {
+					const gain = parseTraceNumber(tokens[i + 1], "gain");
+					if ("error" in gain) return gain;
+					cmd.gain = gain.value;
+					i += 2;
+					continue;
+				}
+				if (option === "seed") {
+					const seed = parseTraceNumber(tokens[i + 1], "seed");
+					if ("error" in seed) return seed;
+					cmd.seed = seed.value;
+					i += 2;
+					continue;
+				}
+				if (option === "before") {
+					const id = parseTraceQuotedId(tokens[i + 1], "before");
+					if ("error" in id) return id;
+					cmd.injectBefore = id.id;
+					i += 2;
+					continue;
+				}
+				return { error: `trace: unexpected inject option "${tokens[i]}"` };
+			}
+			continue;
+		}
+		if (clause === "probe") {
+			const kind = tokens[i + 1]?.toLowerCase();
+			if (kind === "recursive") { cmd.recursive = true; i += 2; continue; }
+			if (kind === "changed_parameters") { cmd.changedParameters = true; i += 2; continue; }
+			if (kind === "after") {
+				const id = parseTraceQuotedId(tokens[i + 2], "after");
+				if ("error" in id) return id;
+				cmd.probeAfter = id.id;
+				i += 3;
+				continue;
+			}
+			if (kind === "param") {
+				const path = readTracePath(tokens, i + 2);
+				if ("error" in path) return path;
+				if (pathRefSegmentCount(path.ref) < 2) return { error: "trace: probe param path must be dotted" };
+				cmd.probeParams.push(path.ref);
+				i = path.next;
+				continue;
+			}
+			return { error: "trace: probe requires recursive, changed_parameters, after, or param" };
+		}
+		return { error: `trace: unexpected clause "${tokens[i]}"` };
+	}
+	if (cmd.changedParameters && cmd.probeParams.length > 0) {
+		return { error: "trace: probe changed_parameters and probe param are mutually exclusive" };
+	}
+	return { command: cmd };
+}
+
 function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: string } {
 	const c = node.children;
 	const kind = c.noun_networks
@@ -707,6 +956,7 @@ function extractCommand(cst: CstNode): { command: DspCommand } | { error: string
 	if (c.disconnectCommand) return extractDisconnectCommand(c.disconnectCommand[0] as CstNode);
 	if (c.createParameterCommand) return extractCreateParameterCommand(c.createParameterCommand[0] as CstNode);
 	if (c.screenshotCommand) return extractScreenshotCommand(c.screenshotCommand[0] as CstNode);
+	if (c.traceCommand) return extractTraceCommand(c.traceCommand[0] as CstNode);
 	if (c.showCommand) return extractShowCommand(c.showCommand[0] as CstNode);
 	if (c.cdCommand) return extractCdCommand(c.cdCommand[0] as CstNode);
 	if (c.lsCommand) return { command: { type: "ls" } };

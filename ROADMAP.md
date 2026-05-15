@@ -343,7 +343,7 @@ HISE `builder/apply` operations. Updated grammar spec in
 - `set <target>.<param> [to] <value>`
 - `load "<source>" into <target>`
 - `bypass <target>` / `enable <target>`
-- `show tree` / `show types [filter]` / `show <target>`
+- `show tree` / `show <target>` / `docs [type-or-field]`
 
 **Key features:**
 - Multi-word targets via greedy `AT_LEAST_ONE(Identifier)` or `QuotedString`

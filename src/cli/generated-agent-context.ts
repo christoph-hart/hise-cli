@@ -1578,6 +1578,23 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--agent"
 					],
 					"display": "hise-cli dsp connect --module \"Script FX1\" --source LFO1 --target F1 --param Frequency --matched --agent"
+				},
+				{
+					"title": "Trace signal flow",
+					"argv": [
+						"hise-cli",
+						"dsp",
+						"trace",
+						"--module",
+						"Script FX1",
+						"--container",
+						"root",
+						"--inject",
+						"dirac",
+						"--probe-recursive",
+						"--agent"
+					],
+					"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject dirac --probe-recursive --agent"
 				}
 			],
 			"concepts": [
@@ -1627,6 +1644,18 @@ export const GENERATED_AGENT_CONTEXT = {
 					"body": [
 						"DSP --dry-run executes the requested mutation inside a temporary HISE undo plan and always discards that plan.",
 						"This validates against HISE's actual constraints without leaving project state changed."
+					]
+				},
+				{
+					"id": "trace-validation",
+					"title": "Trace validation",
+					"body": [
+						"dsp trace combines a temporary runtime stimulus with signal and parameter probes.",
+						"Use --inject for signal stimuli and --inject-param for temporary parameter values.",
+						"Use --probe-recursive for recursive signal tracing; it includes the topology tree automatically.",
+						"Use --probe-changed-parameters to report changed runtime parameters and touched edges.",
+						"Use repeated --probe-param flags when suspected parameter targets are known.",
+						"--trace-compact changes the trace payload shape; global --compact only compacts the CLI output envelope."
 					]
 				}
 			],
@@ -1893,6 +1922,165 @@ export const GENERATED_AGENT_CONTEXT = {
 							],
 							"display": "hise-cli dsp connections --module \"Script FX1\" --agent"
 						}
+					]
+				},
+				{
+					"id": "dsp.trace",
+					"title": "Trace DSP runtime behavior",
+					"purpose": "Inject a temporary signal or parameter value and capture signal or parameter effects at runtime.",
+					"syntax": "dsp trace --module <module> [--container <container>] [--inject <silence|dirac|noise|dc>] [--gain <n>] [--seed <n>] [--inject-before <node>] [--inject-param <node.param=value>...] [--probe-recursive] [--probe-changed-parameters] [--probe-param <node.param>...] [--probe-after <node>] [--delay-ms <n>] [--trace-compact] [--no-specs] [--no-signal]",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"trace",
+							"--module",
+							"Script FX1",
+							"--container",
+							"root",
+							"--inject",
+							"dirac",
+							"--probe-recursive",
+							"--agent"
+						],
+						"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject dirac --probe-recursive --agent"
+					},
+					"tags": [
+						"dsp",
+						"trace",
+						"probe",
+						"signal",
+						"parameter",
+						"runtime",
+						"validation",
+						"read-only"
+					],
+					"aliases": [
+						"trace dsp",
+						"validate signal flow",
+						"probe scriptnode",
+						"inspect runtime parameters",
+						"trace parameter flow"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 28
+					},
+					"examples": [
+						{
+							"title": "Trace recursive impulse response",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"trace",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--inject",
+								"dirac",
+								"--probe-recursive",
+								"--agent"
+							],
+							"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject dirac --probe-recursive --agent"
+						},
+						{
+							"title": "Trace between two nodes",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"trace",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--inject",
+								"dirac",
+								"--gain",
+								"0.25",
+								"--inject-before",
+								"gain",
+								"--probe-after",
+								"delay",
+								"--agent"
+							],
+							"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject dirac --gain 0.25 --inject-before gain --probe-after delay --agent"
+						},
+						{
+							"title": "Trace explicit parameters",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"trace",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--inject-param",
+								"Root.Value=0.5",
+								"--probe-param",
+								"add.Value",
+								"--probe-param",
+								"mul.Value",
+								"--agent"
+							],
+							"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject-param Root.Value=0.5 --probe-param add.Value --probe-param mul.Value --agent"
+						},
+						{
+							"title": "Discover changed parameters",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"trace",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--inject-param",
+								"Root.Value=0.5",
+								"--probe-changed-parameters",
+								"--agent"
+							],
+							"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject-param Root.Value=0.5 --probe-changed-parameters --agent"
+						},
+						{
+							"title": "Compact recursive noise trace",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"trace",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--inject",
+								"noise",
+								"--gain",
+								"0.25",
+								"--seed",
+								"1234",
+								"--probe-recursive",
+								"--trace-compact",
+								"--agent"
+							],
+							"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject noise --gain 0.25 --seed 1234 --probe-recursive --trace-compact --agent"
+						}
+					],
+					"notes": [
+						"--inject accepts silence, dirac, noise, or dc. Use --gain and --seed for signal options.",
+						"--inject-before and --probe-after target node IDs only; index targeting is not exposed.",
+						"Repeat --inject-param for multiple temporary parameter values. Values use node.Param=value form.",
+						"Repeat --probe-param for multiple explicit parameter probes.",
+						"--probe-changed-parameters reports changed runtime parameters and touched edges; it is not a complete dependency graph.",
+						"--probe-changed-parameters and --probe-param are mutually exclusive.",
+						"--probe-recursive includes recursive topology automatically.",
+						"--trace-compact is trace payload compaction. Global --compact is output-envelope compaction only.",
+						"Agent JSON returns a computed summary plus the preserved HISE trace payload under trace."
 					]
 				},
 				{
@@ -3030,7 +3218,21 @@ export const GENERATED_AGENT_CONTEXT = {
 					"--source-param",
 					"--source-output",
 					"--target",
-					"--matched"
+					"--matched",
+					"--container",
+					"--inject",
+					"--gain",
+					"--seed",
+					"--inject-before",
+					"--inject-param",
+					"--probe-recursive",
+					"--probe-changed-parameters",
+					"--probe-param",
+					"--probe-after",
+					"--delay-ms",
+					"--trace-compact",
+					"--no-specs",
+					"--no-signal"
 				]
 			}
 		},

@@ -3,6 +3,7 @@ import { DspMode } from "./dsp.js";
 import { createDefaultMockRuntime } from "../../mock/runtime.js";
 import type { SessionContext } from "./mode.js";
 import type { ScriptnodeList } from "../data.js";
+import { MockHiseConnection } from "../hise.js";
 
 const scriptnodeFixture: ScriptnodeList = {
 	"core.oscillator": {
@@ -233,6 +234,39 @@ describe("DspMode — integration", () => {
 		expect(out.type).toBe("table");
 		if (out.type !== "table") return;
 		expect(out.rows).toContainEqual(["LFO1", "0", "Filter1", "Frequency"]);
+	});
+
+	it("posts trace requests to dsp probe", async () => {
+		const conn = new MockHiseConnection();
+		conn.onPost("/api/dsp/probe", (body) => ({
+			success: true,
+			logs: [],
+			errors: [],
+			moduleId: "ScriptFX1",
+			parent: "root",
+			signalType: "dirac",
+			recursive: true,
+			signal: [{ channelIndex: 0, min: 0, max: 1, avg: 0, peakIndex: 0, silence: false }],
+			parameters: { injected: {}, probed: {}, touchedEdges: {} },
+			request: body,
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+
+		const out = await mode.parse('trace root inject dirac gain 0.25 before "gain" probe recursive probe after "delay" compact', ctx);
+
+		expect(out.type).toBe("json");
+		const call = conn.calls.find((c) => c.method === "POST" && c.endpoint === "/api/dsp/probe");
+		expect(call?.body).toMatchObject({
+			moduleId: "ScriptFX1",
+			parent: "root",
+			signalType: "dirac",
+			gain: 0.25,
+			injectId: "gain",
+			probeId: "delay",
+			recursive: true,
+			filter: { compact: true, tree: true },
+		});
 	});
 
 	it("cd/ls navigate the graph", async () => {

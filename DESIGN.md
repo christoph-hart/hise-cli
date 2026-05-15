@@ -490,7 +490,7 @@ load "<source>" into <target>
   load "MyReverb" into ScriptFX1
 
 # Inspection
-show tree | show <target> | show types [synth|mod|fx|midi]
+show tree | show <target> | docs [type-or-field]
 
 # Bypass
 bypass <target> | enable <target>

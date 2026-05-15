@@ -296,6 +296,7 @@ Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 | \`show modules\` | List \`DspNetwork\`-capable script processors |
 | \`show connections\` | Modulation edges in the network |
 | \`docs [<factory>[.<node>[.<param>]]]\` | Static scriptnode catalog, factory list, node docs, or parameter docs from MCP |
+| \`trace [<container>] <clauses...>\` | Runtime signal / parameter probe |
 | \`show <nodeId>\` | Header, properties, parameters, modulation edges |
 | \`show <nodeId>.<param>\` | Parameter detail (range, default, value) |
 | \`save\` | Save the loaded network to its \`.xml\` file |
@@ -333,6 +334,22 @@ Long-form HISE property IDs are canonical:
 project's \`Images/\` folder (or absolute) and must end in \`.png\`. Scale
 accepts percentage (\`50%\`) or decimal (\`0.5\`); valid values are \`0.5\`,
 \`1.0\`, \`2.0\`. Requires the HISE IDE UI to be open (returns 503 otherwise).
+
+## Trace
+
+\`trace\` validates runtime behaviour by combining temporary stimuli and probes:
+
+\`\`\`
+trace root inject dirac gain 0.25 before "gain" probe after "delay"
+trace root inject dirac probe recursive compact
+trace root inject param Root.Value 0.5 probe param add.Value probe param mul.Value
+trace root inject param Root.Value 0.5 probe changed_parameters
+\`\`\`
+
+Boundary node IDs after \`before\` / \`after\` are quoted to avoid keyword
+ambiguity. Parameter paths use normal dotted syntax. \`probe recursive\` includes
+the recursive topology tree automatically. \`compact\` changes the trace payload;
+global CLI \`--compact\` only changes output envelope formatting.
 
 ## Local queries
 

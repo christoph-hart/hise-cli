@@ -71,6 +71,7 @@ export function commandToDspOps(
 		case "pwd":
 		case "save":
 		case "screenshot":
+		case "trace":
 			return { ops: [] };
 	}
 }

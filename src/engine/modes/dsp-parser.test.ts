@@ -15,6 +15,7 @@ import {
 	type ScreenshotCommand,
 	type SetCommand,
 	type ShowCommand,
+	type TraceCommand,
 } from "./dsp-parser.js";
 
 function parseOk<T extends DspCommand = DspCommand>(input: string): T {
@@ -316,6 +317,48 @@ describe("dsp parser — show", () => {
 	it("rejects `list` verb (folded into show)", () => {
 		expect(parseErr("list networks")).toMatch(/Parse error/);
 		expect(parseErr("list tree")).toMatch(/Parse error/);
+	});
+});
+
+// ── trace ──────────────────────────────────────────────────────────
+
+describe("dsp parser — trace", () => {
+	it("parses recursive signal trace", () => {
+		const cmd = parseOk<TraceCommand>("trace root inject dirac gain 0.25 before \"gain\" probe after \"delay\" probe recursive compact");
+		expect(cmd.type).toBe("trace");
+		expect(cmd.signalType).toBe("dirac");
+		expect(cmd.gain).toBe(0.25);
+		expect(cmd.injectBefore).toBe("gain");
+		expect(cmd.probeAfter).toBe("delay");
+		expect(cmd.recursive).toBe(true);
+		expect(cmd.compact).toBe(true);
+	});
+
+	it("parses parameter inject and explicit probes", () => {
+		const cmd = parseOk<TraceCommand>("trace root inject param Root.Value 0.5 probe param add.Value probe param mul.Value no_specs no_signal");
+		expect(cmd.injectParams).toHaveLength(1);
+		expect(cmd.probeParams).toHaveLength(2);
+		expect(cmd.noSpecs).toBe(true);
+		expect(cmd.noSignal).toBe(true);
+	});
+
+	it("parses changed parameter discovery", () => {
+		const cmd = parseOk<TraceCommand>("trace inject param Root.Value 0.5 probe changed_parameters");
+		expect(cmd.container).toBeUndefined();
+		expect(cmd.changedParameters).toBe(true);
+	});
+
+	it("rejects unquoted boundary ids", () => {
+		expect(parseErr("trace root inject dirac before gain")).toMatch(/quoted node id/);
+		expect(parseErr("trace root probe after delay")).toMatch(/quoted node id/);
+	});
+
+	it("rejects changed parameters mixed with explicit parameter probes", () => {
+		expect(parseErr("trace root probe changed_parameters probe param add.Value")).toMatch(/mutually exclusive/);
+	});
+
+	it("rejects comma chaining for trace", () => {
+		expect(parseErr("trace root inject dirac, trace root inject dc")).toMatch(/Parse error|Redundant input/);
 	});
 });
 

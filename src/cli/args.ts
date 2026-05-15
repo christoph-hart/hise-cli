@@ -6,7 +6,7 @@ export type CliParseResult =
 	| { kind: "help"; scope?: string }
 	| { kind: "error"; message: string }
 	| { kind: "diagnose"; filePath: string }
-	| { kind: "run"; source: { type: "file"; path: string } | { type: "stdin" } | { type: "inline"; content: string }; dryRun: boolean; useMock: boolean; watch: boolean; verbosity: import("../engine/run/executor.js").RunReportVerbosity; output: CliOutputOptions }
+	| { kind: "run"; source: { type: "file"; path: string } | { type: "stdin" } | { type: "inline"; content: string }; dryRun: boolean; useMock: boolean; watch: boolean; toCli: boolean; verbosity: import("../engine/run/executor.js").RunReportVerbosity; output: CliOutputOptions }
 	| { kind: "script-api"; command: ScriptApiCommand; useMock: boolean; output: CliOutputOptions }
 	| { kind: "update"; check: boolean }
 	| { kind: "version"; output: CliOutputOptions }
@@ -532,6 +532,56 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		const path = field ? `${joinTargetParam(node, param)}.${formatDslSegment(field)}` : joinTargetParam(node, param);
 		return `${prefix}get ${path}`;
 	}
+	if (command === "trace") {
+		const clauses: string[] = [];
+		const container = readOptionalFlag(rest, "--container");
+		if (typeof container !== "string" && container !== undefined) return container;
+		const inject = readOptionalFlag(rest, "--inject");
+		if (typeof inject !== "string" && inject !== undefined) return inject;
+		if (inject !== undefined) {
+			if (!new Set(["silence", "dirac", "noise", "dc"]).has(inject)) {
+				return directUsage("dsp trace --inject must be silence, dirac, noise, or dc");
+			}
+			const parts = ["inject", inject];
+			const gain = readOptionalFlag(rest, "--gain");
+			if (typeof gain !== "string" && gain !== undefined) return gain;
+			if (gain !== undefined) parts.push("gain", gain);
+			const seed = readOptionalFlag(rest, "--seed");
+			if (typeof seed !== "string" && seed !== undefined) return seed;
+			if (seed !== undefined) parts.push("seed", seed);
+			const before = readOptionalFlag(rest, "--inject-before");
+			if (typeof before !== "string" && before !== undefined) return before;
+			if (before !== undefined) parts.push("before", quoteDslString(before));
+			clauses.push(parts.join(" "));
+		} else if (hasFlag(rest, "--gain") || hasFlag(rest, "--seed") || hasFlag(rest, "--inject-before")) {
+			return directUsage("dsp trace --gain, --seed, and --inject-before require --inject");
+		}
+		for (const pair of readRepeatedFlag(rest, "--inject-param")) {
+			const eq = pair.indexOf("=");
+			if (eq <= 0) return directUsage("dsp trace --inject-param requires node.Param=value");
+			const path = pair.slice(0, eq);
+			const value = pair.slice(eq + 1);
+			if (value.length === 0) return directUsage("dsp trace --inject-param requires node.Param=value");
+			clauses.push(`inject param ${path} ${formatDslValue(value)}`);
+		}
+		const probeParams = readRepeatedFlag(rest, "--probe-param");
+		if (hasFlag(rest, "--probe-changed-parameters") && probeParams.length > 0) {
+			return directUsage("dsp trace accepts --probe-changed-parameters or --probe-param, not both");
+		}
+		if (hasFlag(rest, "--probe-recursive")) clauses.push("probe recursive");
+		if (hasFlag(rest, "--probe-changed-parameters")) clauses.push("probe changed_parameters");
+		for (const path of probeParams) clauses.push(`probe param ${path}`);
+		const after = readOptionalFlag(rest, "--probe-after");
+		if (typeof after !== "string" && after !== undefined) return after;
+		if (after !== undefined) clauses.push(`probe after ${quoteDslString(after)}`);
+		const delayMs = readOptionalFlag(rest, "--delay-ms");
+		if (typeof delayMs !== "string" && delayMs !== undefined) return delayMs;
+		if (delayMs !== undefined) clauses.push(`delay ${delayMs}`);
+		if (hasFlag(rest, "--trace-compact")) clauses.push("compact");
+		if (hasFlag(rest, "--no-specs")) clauses.push("no_specs");
+		if (hasFlag(rest, "--no-signal")) clauses.push("no_signal");
+		return `${prefix}trace${container ? ` ${formatDslSegment(container)}` : ""}${clauses.length > 0 ? ` ${clauses.join(" ")}` : ""}`;
+	}
 	if (command === "add") {
 		const type = readRequiredFlag(rest, "--type");
 		if (typeof type !== "string") return type;
@@ -574,10 +624,11 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		if (sourceParam && sourceOutput) return directUsage("dsp connect accepts --source-param or --source-output, not both");
 		const target = readRequiredFlag(rest, "--target");
 		if (typeof target !== "string") return target;
-		const param = readRequiredFlag(rest, "--param");
-		if (typeof param !== "string") return param;
+		const param = readOptionalFlag(rest, "--param");
+		if (typeof param !== "string" && param !== undefined) return param;
 		const sourcePath = sourceParam ? joinTargetParam(source, sourceParam) : sourceOutput ? joinTargetParam(source, sourceOutput) : formatDslSegment(source);
-		return `${prefix}connect ${sourcePath} to ${joinTargetParam(target, param)}${rest.includes("--matched") ? " matched" : ""}`;
+		const targetPath = param ? joinTargetParam(target, param) : formatDslSegment(target);
+		return `${prefix}connect ${sourcePath} to ${targetPath}${rest.includes("--matched") ? " matched" : ""}`;
 	}
 	if (command === "disconnect") {
 		const targets = readRepeatedFlag(rest, "--target");
@@ -1139,6 +1190,9 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 		const useMock = rest.includes("--mock");
 		const dryRun = rest.includes("--dry-run");
 		const watch = rest.includes("--watch");
+		const toCli = rest.includes("--to-cli");
+		if (toCli && watch) return { kind: "error", message: "--to-cli cannot be used with --watch" };
+		if (toCli && dryRun) return { kind: "error", message: "--to-cli cannot be used with --dry-run" };
 
 		const verbosityResult = parseVerbosityFlags(rest);
 		if ("error" in verbosityResult) {
@@ -1156,10 +1210,10 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 			if (watch) {
 				return { kind: "error", message: "--watch cannot be used with --inline" };
 			}
-			return { kind: "run", source: { type: "inline", content: demangleMsys(content) }, dryRun, useMock, watch: false, verbosity, output };
+			return { kind: "run", source: { type: "inline", content: demangleMsys(content) }, dryRun, useMock, watch: false, toCli, verbosity, output };
 		}
 
-		const positional = stripVerbosityFlags(rest).find((a) => !a.startsWith("--"));
+		const positional = stripVerbosityFlags(rest).find((a) => a !== "--to-cli" && !a.startsWith("--"));
 		if (!positional) {
 			return { kind: "error", message: "--run requires a file path, -, or --inline <script>" };
 		}
@@ -1167,9 +1221,9 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 			if (watch) {
 				return { kind: "error", message: "--watch cannot be used with stdin" };
 			}
-			return { kind: "run", source: { type: "stdin" }, dryRun, useMock, watch: false, verbosity, output };
+			return { kind: "run", source: { type: "stdin" }, dryRun, useMock, watch: false, toCli, verbosity, output };
 		}
-		return { kind: "run", source: { type: "file", path: positional }, dryRun, useMock, watch, verbosity, output };
+		return { kind: "run", source: { type: "file", path: positional }, dryRun, useMock, watch, toCli, verbosity, output };
 	}
 
 	if (first === "repl") {
