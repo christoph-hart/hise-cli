@@ -1,4 +1,4 @@
-# @hise/cli
+# hise-cli
 
 [![Latest release](https://img.shields.io/github/v/release/christophhart/hise-cli?label=latest&sort=semver)](https://github.com/christophhart/hise-cli/releases/latest)
 [![Release build](https://img.shields.io/github/actions/workflow/status/christophhart/hise-cli/release.yml?branch=master&label=build)](https://github.com/christophhart/hise-cli/actions/workflows/release.yml)
@@ -39,7 +39,7 @@ irm https://github.com/christophhart/hise-cli/releases/latest/download/hise-cli-
 Per-user install (no UAC). Adds `hise-cli` to your `PATH`. Open a new shell
 after install so the updated `PATH` is picked up.
 
-### Via npm
+### Linux (via npm)
 
 ```bash
 npm i -g @hise/cli
@@ -65,6 +65,7 @@ What the wizard takes care of for you:
 
 - Platform compiler toolchain (Xcode CLT on macOS, Visual Studio Build
   Tools on Windows, gcc/clang + dev headers on Linux)
+- Optional tools: IPP (Windows), Faust
 - Projucer (downloaded and built automatically)
 - HISE source clone with the right submodules and branch
 - First full build + smoke test that the resulting binary launches
