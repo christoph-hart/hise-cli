@@ -473,7 +473,7 @@ export class DspMode implements Mode {
 
 	private async handleShow(cmd: ShowCommand, session: SessionContext): Promise<CommandResult> {
 		if (cmd.kind !== "target") {
-			return this.handleShowNoun(cmd.kind, cmd.filter, session);
+			return this.handleShowNoun(cmd.kind, "filter" in cmd ? cmd.filter : undefined, session, "autofix" in cmd ? cmd.autofix : undefined);
 		}
 		if (!this.moduleId) {
 			return errorResult("show: no module context.");
@@ -539,6 +539,7 @@ export class DspMode implements Mode {
 		kind: "tree" | "networks" | "modules" | "connections" | "status",
 		filter: string | undefined,
 		session: SessionContext,
+		autofix?: boolean,
 	): Promise<CommandResult> {
 		const filterLower = filter ? filter.toLowerCase() : null;
 		const filterFn = (s: string): boolean => !filterLower || s.toLowerCase().includes(filterLower);
@@ -554,7 +555,7 @@ export class DspMode implements Mode {
 		}
 
 		if (kind === "status") {
-			return this.handleRuntimeStatus(session);
+			return this.handleRuntimeStatus(session, autofix === true);
 		}
 
 		if (kind === "networks") {
@@ -593,16 +594,20 @@ export class DspMode implements Mode {
 		return tableResult(["Source", "Output", "Target", "Parameter"], filtered);
 	}
 
-	private async handleRuntimeStatus(session: SessionContext): Promise<CommandResult> {
+	private async handleRuntimeStatus(session: SessionContext, autofix: boolean): Promise<CommandResult> {
 		if (!this.moduleId) return errorResult("show status: no module context.");
 		if (!session.connection) return errorResult("show status requires a HISE connection");
+		const params = new URLSearchParams();
+		params.set("moduleId", this.moduleId);
+		if (autofix) params.set("autofix", "true");
 		const response = await session.connection.get(
-			`/api/dsp/runtime_status?moduleId=${encodeURIComponent(this.moduleId)}`,
+			`/api/dsp/runtime_status?${params.toString()}`,
 		);
 		if (isErrorResponse(response)) return errorResult(response.message);
 		if (!isEnvelopeResponse(response)) return errorResult("Unexpected response from HISE");
 
 		const status = normalizeRuntimeStatusResponse(response, this.moduleId);
+		if (status.autofixApplied) session.markProjectTreeDirty?.();
 		if (session.forLlm) return jsonResult(status, renderRuntimeStatus(status));
 		return status.ok
 			? textResult(renderRuntimeStatus(status))
@@ -854,6 +859,11 @@ interface DspRuntimeStatus {
 	apiVersion?: string;
 	moduleId: string;
 	ok: boolean;
+	autofixRequested?: boolean;
+	autofixApplied?: boolean;
+	fixedNodeId?: string;
+	beforeError?: string;
+	afterError?: string;
 	logs: string[];
 	errors: Array<{ errorMessage: string; callstack: string[] }>;
 }
@@ -873,6 +883,11 @@ function normalizeRuntimeStatusResponse(
 		...(typeof data.apiVersion === "string" ? { apiVersion: data.apiVersion } : {}),
 		moduleId,
 		ok: data.ok === true,
+		...(typeof data.autofixRequested === "boolean" ? { autofixRequested: data.autofixRequested } : {}),
+		...(typeof data.autofixApplied === "boolean" ? { autofixApplied: data.autofixApplied } : {}),
+		...(typeof data.fixedNodeId === "string" ? { fixedNodeId: data.fixedNodeId } : {}),
+		...(typeof data.beforeError === "string" ? { beforeError: data.beforeError } : {}),
+		...(typeof data.afterError === "string" ? { afterError: data.afterError } : {}),
 		logs,
 		errors,
 	};
@@ -889,13 +904,23 @@ function normalizeRuntimeStatusError(value: unknown): { errorMessage: string; ca
 }
 
 function renderRuntimeStatus(status: DspRuntimeStatus): string {
-	if (status.ok) return `Runtime status OK: ${status.moduleId}`;
-	if (status.errors.length === 0) return `Runtime status failed: ${status.moduleId}`;
-	return status.errors
+	const lines: string[] = [];
+	if (status.ok) lines.push(`Runtime status OK: ${status.moduleId}`);
+	if (status.autofixApplied) {
+		lines.push(`Autofix applied${status.fixedNodeId ? ` to ${status.fixedNodeId}` : ""}`);
+		if (status.beforeError) lines.push(`Before: ${status.beforeError}`);
+		if (status.afterError) lines.push(`After: ${status.afterError}`);
+	} else if (status.autofixRequested) {
+		lines.push("No autofix applied");
+	}
+	if (status.ok) return lines.join("\n");
+	const errors = status.errors
 		.map((error) => error.callstack.length > 0
 			? `${error.errorMessage}\n${error.callstack.join("\n")}`
 			: error.errorMessage)
 		.join("\n");
+	lines.push(errors || `Runtime status failed: ${status.moduleId}`);
+	return lines.join("\n");
 }
 
 function normalizeScreenshotPath(raw: string): string {

@@ -133,6 +133,8 @@ export function installDspMock(
 			apiVersion: "0.9.0",
 			moduleId: DEFAULT_MOCK_DSP_MODULE,
 			ok: true,
+			autofixRequested: false,
+			autofixApplied: false,
 			logs: [],
 			errors: [],
 		};

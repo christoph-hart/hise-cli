@@ -1607,6 +1607,19 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--agent"
 					],
 					"display": "hise-cli dsp status --module \"Script FX1\" --agent"
+				},
+				{
+					"title": "Autofix runtime status",
+					"argv": [
+						"hise-cli",
+						"dsp",
+						"status",
+						"--module",
+						"Script FX1",
+						"--autofix",
+						"--agent"
+					],
+					"display": "hise-cli dsp status --module \"Script FX1\" --autofix --agent"
 				}
 			],
 			"concepts": [
@@ -1680,6 +1693,8 @@ export const GENERATED_AGENT_CONTEXT = {
 						"dsp status is a cheap graph-level runtime validity check for the active network after loading, editing, recompiling, or changing network properties.",
 						"It can catch wrong MIDI or processing context, compilation flag incompatibilities, mono/polyphony mismatch, processing spec mismatches, invalid parent or container setup, clone container mismatch, dynamic routing errors, missing assets or third-party node resources, SNEX/expression compile failures, and deprecated scriptnode nodes.",
 						"Runtime scriptnode errors are returned as endpoint status with ok=false; request validation, missing modules, and missing networks remain normal HISE API errors.",
+						"dsp status --autofix mutates the graph by attempting HISE's built-in autofix for the first autofixable error before returning status.",
+						"Current autofixes set or unset the network AllowCompilation flag when required, and move a node that requires MIDI processing into a container.midichain.",
 						"After fixing a reported exception, call /api/script/recompile for the DSP module ID when a forced reinitialisation is needed."
 					]
 				}
@@ -2012,6 +2027,72 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
+					"id": "dsp.runtime.autofix",
+					"title": "Autofix DSP runtime status",
+					"purpose": "Attempt HISE's built-in scriptnode autofix for the first autofixable runtime error, then return graph status.",
+					"syntax": "dsp status --module <module> --autofix",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"status",
+							"--module",
+							"Script FX1",
+							"--autofix",
+							"--agent"
+						],
+						"display": "hise-cli dsp status --module \"Script FX1\" --autofix --agent"
+					},
+					"tags": [
+						"dsp",
+						"status",
+						"autofix",
+						"runtime",
+						"validation",
+						"health",
+						"scriptnode",
+						"mutation"
+					],
+					"aliases": [
+						"autofix dsp status",
+						"fix scriptnode runtime error",
+						"auto fix dsp graph",
+						"fix midi context",
+						"fix allow compilation"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": true,
+					"help": {
+						"visibility": "common",
+						"order": 28
+					},
+					"examples": [
+						{
+							"title": "Attempt built-in autofix",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"status",
+								"--module",
+								"Script FX1",
+								"--autofix",
+								"--agent"
+							],
+							"display": "hise-cli dsp status --module \"Script FX1\" --autofix --agent"
+						}
+					],
+					"notes": [
+						"Mutates the graph; use plain dsp status for a read-only health check.",
+						"Attempts only the first autofixable runtime error before returning status.",
+						"Current autofixes set or unset the network AllowCompilation flag when required, and move a node that requires MIDI processing into a container.midichain.",
+						"Response fields include autofixRequested, autofixApplied, fixedNodeId, beforeError, and afterError when HISE reports them.",
+						"After fixing the reported issue, recompile the DSP module to force reinitialisation when needed."
+					]
+				},
+				{
 					"id": "dsp.trace",
 					"title": "Trace DSP runtime behavior",
 					"purpose": "Inject a temporary signal or parameter value and capture signal or parameter effects at runtime.",
@@ -2203,7 +2284,7 @@ export const GENERATED_AGENT_CONTEXT = {
 					"danger": false,
 					"help": {
 						"visibility": "common",
-						"order": 30
+						"order": 31
 					},
 					"examples": [
 						{

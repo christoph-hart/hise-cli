@@ -306,6 +306,48 @@ describe("DspMode — integration", () => {
 		expect(out).toEqual({ type: "error", message: "MidiNote - Can't find suitable parent node", detail: undefined });
 	});
 
+	it("show status autofix requests autofix and marks project dirty when applied", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: { nodeId: "FixDSP", factoryPath: "container.chain", bypassed: false, parameters: [], properties: [], children: [] },
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true", () => ({
+			success: true,
+			apiVersion: "0.9.1",
+			moduleId: "ScriptFX1",
+			ok: true,
+			autofixRequested: true,
+			autofixApplied: true,
+			fixedNodeId: "MidiNote",
+			beforeError: "MidiNote - Can't find suitable parent node",
+			logs: [],
+			errors: [],
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		let dirty = false;
+		const ctx: SessionContext = {
+			connection: conn,
+			popMode: () => ({ type: "empty" }),
+			markProjectTreeDirty: () => { dirty = true; },
+		};
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse("show status autofix", ctx);
+
+		expect(out.type).toBe("text");
+		if (out.type === "text") {
+			expect(out.content).toContain("Runtime status OK: ScriptFX1");
+			expect(out.content).toContain("Autofix applied to MidiNote");
+			expect(out.content).toContain("Before: MidiNote - Can't find suitable parent node");
+		}
+		expect(dirty).toBe(true);
+		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint === "/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true")).toBe(true);
+	});
+
 	it("cd/ls navigate the graph", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");

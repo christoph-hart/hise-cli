@@ -153,7 +153,8 @@ export interface TraceCommand {
 }
 
 export type ShowCommand =
-	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree" | "status"; filter?: string }
+	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree"; filter?: string }
+	| { type: "show"; kind: "status"; autofix?: boolean }
 	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface CdCommand { type: "cd"; target: PathRef }
@@ -991,6 +992,8 @@ export function parseSingleDspCommand(input: string): { command: DspCommand } | 
  * commands so the dispatcher can execute and report each one.
  */
 export function parseDspInput(input: string): { commands: DspCommand[] } | { error: string } {
+	const status = input.trim().match(/^show\s+status(?:\s+(autofix))?$/i);
+	if (status) return { commands: [{ type: "show", kind: "status", autofix: Boolean(status[1]) }] };
 	const result = parseSingleDspCommand(input);
 	if ("error" in result) return result;
 	const cmd = result.command;

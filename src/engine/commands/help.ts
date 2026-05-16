@@ -363,8 +363,13 @@ mono/polyphony mismatch, processing spec mismatches, invalid parent containers,
 clone container mismatches, dynamic routing errors, missing assets or third-party
 node resources, SNEX/expression compile failures, and deprecated scriptnode
 nodes. Runtime scriptnode errors are endpoint status (\`ok=false\`), not transport
-failure. After fixing the reported issue, recompile the DSP module to force
-reinitialisation when needed.
+failure.
+
+\`show status autofix\` mutates the graph by running HISE's built-in autofix for
+the first autofixable error. Current autofixes set or unset the network
+\`AllowCompilation\` flag when required, and move a node that requires MIDI
+processing into a \`container.midichain\`. After fixing the reported issue,
+recompile the DSP module to force reinitialisation when needed.
 
 ## Local queries
 

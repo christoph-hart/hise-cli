@@ -509,12 +509,14 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		}
 		if (rest[0] && !rest[0].startsWith("--")) return directUsage("`dsp show` inspects live DSP nodes and requires --module plus --node. Use `hise-cli dsp show --module <scriptnode-host> --node <node>` for live inspection, or `hise-cli dsp docs <factory.node>` for static documentation.");
 	}
+	if (hasFlag(rest, "--autofix") && command !== "status") return directUsage("dsp --autofix is only supported by `dsp status`");
 	const module = readRequiredFlag(rest, "--module");
 	if (typeof module !== "string" && command === "show") return directUsage("`dsp show` requires --module and --node for live inspection. Use `hise-cli dsp docs <factory.node>` for static scriptnode documentation.");
 	if (typeof module !== "string") return module;
 	const prefix = `${formatTargetSuffix(module)} `;
 	if (command === "tree") return `${prefix}show tree`;
-	if (command === "networks" || command === "modules" || command === "connections" || command === "status") return `${prefix}show ${command}`;
+	if (command === "networks" || command === "modules" || command === "connections") return `${prefix}show ${command}`;
+	if (command === "status") return `${prefix}show status${hasFlag(rest, "--autofix") ? " autofix" : ""}`;
 	if (command === "show") {
 		const node = readRequiredFlag(rest, "--node");
 		if (typeof node !== "string") return node;

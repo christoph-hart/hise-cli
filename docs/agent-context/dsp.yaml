@@ -29,6 +29,8 @@ quickStart:
     argv: [hise-cli, dsp, trace, --module, "Script FX1", --container, root, --inject, dirac, --probe-recursive, --agent]
   - title: Check runtime status
     argv: [hise-cli, dsp, status, --module, "Script FX1", --agent]
+  - title: Autofix runtime status
+    argv: [hise-cli, dsp, status, --module, "Script FX1", --autofix, --agent]
 
 concepts:
   - id: direct-cli
@@ -82,6 +84,8 @@ concepts:
       - dsp status is a cheap graph-level runtime validity check for the active network after loading, editing, recompiling, or changing network properties.
       - It can catch wrong MIDI or processing context, compilation flag incompatibilities, mono/polyphony mismatch, processing spec mismatches, invalid parent or container setup, clone container mismatch, dynamic routing errors, missing assets or third-party node resources, SNEX/expression compile failures, and deprecated scriptnode nodes.
       - Runtime scriptnode errors are returned as endpoint status with ok=false; request validation, missing modules, and missing networks remain normal HISE API errors.
+      - dsp status --autofix mutates the graph by attempting HISE's built-in autofix for the first autofixable error before returning status.
+      - Current autofixes set or unset the network AllowCompilation flag when required, and move a node that requires MIDI processing into a container.midichain.
       - After fixing a reported exception, call /api/script/recompile for the DSP module ID when a forced reinitialisation is needed.
 
 commands:
@@ -186,6 +190,29 @@ commands:
     examples:
       - title: Check graph health
         argv: [hise-cli, dsp, status, --module, "Script FX1", --agent]
+  - id: dsp.runtime.autofix
+    syntax: dsp status --module <module> --autofix
+    title: Autofix DSP runtime status
+    purpose: Attempt HISE's built-in scriptnode autofix for the first autofixable runtime error, then return graph status.
+    command:
+      argv: [hise-cli, dsp, status, --module, "Script FX1", --autofix, --agent]
+    aliases: [autofix dsp status, fix scriptnode runtime error, auto fix dsp graph, fix midi context, fix allow compilation]
+    tags: [dsp, status, autofix, runtime, validation, health, scriptnode, mutation]
+    contexts: [cli]
+    agentRelevance: high
+    danger: true
+    notes:
+      - Mutates the graph; use plain dsp status for a read-only health check.
+      - Attempts only the first autofixable runtime error before returning status.
+      - Current autofixes set or unset the network AllowCompilation flag when required, and move a node that requires MIDI processing into a container.midichain.
+      - Response fields include autofixRequested, autofixApplied, fixedNodeId, beforeError, and afterError when HISE reports them.
+      - After fixing the reported issue, recompile the DSP module to force reinitialisation when needed.
+    help:
+      visibility: common
+      order: 28
+    examples:
+      - title: Attempt built-in autofix
+        argv: [hise-cli, dsp, status, --module, "Script FX1", --autofix, --agent]
   - id: dsp.trace
     syntax: dsp trace --module <module> [--container <container>] [--inject <silence|dirac|noise|dc>] [--gain <n>] [--seed <n>] [--inject-before <node>] [--inject-param <node.param=value>...] [--probe-recursive] [--probe-changed-parameters] [--probe-param <node.param>...] [--probe-after <node>] [--delay-ms <n>] [--trace-compact] [--no-specs] [--no-signal]
     title: Trace DSP runtime behavior
@@ -232,7 +259,7 @@ commands:
     agentRelevance: high
     help:
       visibility: common
-      order: 30
+      order: 31
     examples:
       - title: Show all node types
         argv: [hise-cli, dsp, docs, --agent]

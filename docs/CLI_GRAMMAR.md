@@ -367,7 +367,7 @@ Inversion: scaled DSP connections use the target parameter range as the output m
 | `reset` | `reset` (clears network to empty `root`) |
 | `screenshot` | `screenshot scale <N> file "<path>"` |
 | `trace` | `trace [<container>] <trace-clause>...` |
-| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show status` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
+| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show status [autofix]` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
 | `docs` | `docs` \| `docs <factory>` \| `docs <factory.node>` \| `docs <factory.node>.<param>` (static MCP documentation) |
 | `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m>] [skewFactor <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
 | `cd` / `ls` / `pwd` | navigation |
@@ -429,8 +429,16 @@ channel/block/samplerate spec mismatches, invalid parent/container setup, clone
 container mismatches, dynamic routing errors, missing assets or third-party node
 resources, SNEX/expression compile failures, and deprecated scriptnode nodes.
 Runtime scriptnode errors are returned as endpoint status (`ok=false`) rather
-than transport failure; after fixing the reported issue, callers may need to run
-`/api/script/recompile` for the DSP module ID to force reinitialisation.
+than transport failure.
+
+`show status autofix` and direct CLI `hise-cli dsp status --module <module>
+--autofix` call the same endpoint with `autofix=true`. This mutates the graph by
+running HISE's built-in ScriptnodeExceptionHandler autofix for the first
+autofixable error before returning status. Current autofixes set or unset the
+network `AllowCompilation` flag when required, and move a node that requires MIDI
+processing into a `container.midichain`. After fixing the reported issue, callers
+may need to run `/api/script/recompile` for the DSP module ID to force
+reinitialisation.
 
 Examples:
 
@@ -461,6 +469,7 @@ docs filters
 docs filters.svf.Frequency
 show connections
 show status
+show status autofix
 show g1                                           # node summary
 show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"

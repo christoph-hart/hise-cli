@@ -70,6 +70,11 @@ describe("parseCliArgs", () => {
 		if (result.kind === "execute") {
 			expect(result.canonicalCommand).toBe('/dsp."Script FX1" show status');
 		}
+		const autofix = parseCliArgs(["node", "hise-cli", "dsp", "status", "--module", "Script FX1", "--autofix"], getCliCommands());
+		expect(autofix.kind).toBe("execute");
+		if (autofix.kind === "execute") {
+			expect(autofix.canonicalCommand).toBe('/dsp."Script FX1" show status autofix');
+		}
 	});
 
 	it("parses direct DSP add commands with keyword node types", () => {
@@ -577,6 +582,11 @@ describe("parseCliArgs", () => {
 		const status = parseCliArgs(["node", "hise-cli", "dsp", "status", "--module", "Script FX1"], getCliCommands());
 		expect(status.kind).toBe("execute");
 		if (status.kind === "execute") expect(status.canonicalCommand).toBe('/dsp."Script FX1" show status');
+	});
+
+	it("rejects DSP autofix on non-status commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "tree", "--module", "Script FX1", "--autofix"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "dsp --autofix is only supported by `dsp status`" });
 	});
 
 	it("rejects missing direct builder flags", () => {
