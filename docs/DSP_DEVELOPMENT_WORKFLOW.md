@@ -83,7 +83,8 @@ Useful interpretation patterns:
 
 - Missing expected edge: connection missing, inactive, or not reached.
 - `connectionMode: "scaled"`: source range maps through `0..1` into target
-  range.
+  range. If the target range is reversed, the scaled connection is intentionally
+  inverted, e.g. source `0.1` into target range `1..0` becomes `0.9`.
 - `connectionMode: "matched"`: source and target ranges match or preserve raw
   value intentionally.
 - `connectionMode: "unscaled"`: raw source value is forwarded; inspect units and

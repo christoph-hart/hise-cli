@@ -64,6 +64,15 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP add commands with keyword node types", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "add", "--module", "GateModMathTest", "--type", "math.add", "--id", "InputLevel", "--agent"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp.GateModMathTest add math.add as "InputLevel"');
+			expect(result.output).toEqual({ json: true, agent: true, compact: true });
+		}
+	});
+
 	it("parses direct DSP docs commands", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "docs", "filters.svf.Frequency"], getCliCommands());
 		expect(result.kind).toBe("execute");

@@ -205,6 +205,7 @@ class DspParser extends CstParser {
 	public pathSegment = this.RULE("pathSegment", () => {
 		this.OR([
 			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(Add) },
 			{ ALT: () => this.CONSUME(Type) },
 			{ ALT: () => this.CONSUME(NumberLiteral) },
 			{ ALT: () => this.CONSUME(QuotedString) },
@@ -460,6 +461,7 @@ const parser = new DspParser();
 function extractPathSegmentImage(node: CstNode): string {
 	const c = node.children;
 	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.Add) return (c.Add[0] as IToken).image;
 	if (c.Type) return (c.Type[0] as IToken).image;
 	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
 	if (c.NumberLiteral) return (c.NumberLiteral[0] as IToken).image;

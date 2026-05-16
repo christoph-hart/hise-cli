@@ -41,6 +41,13 @@ describe("dsp parser — add", () => {
 		expect(cmd.alias).toBe("g1");
 	});
 
+	it("parses factory nodes that share command keyword names", () => {
+		const cmd = parseOk<AddCommand>('add math.add as "InputLevel"');
+		expect(cmd.factory).toBe("math");
+		expect(cmd.node).toBe("add");
+		expect(cmd.alias).toBe("InputLevel");
+	});
+
 	it("parses add with `to` parent", () => {
 		const cmd = parseOk<AddCommand>('add core.gain as "g1" to Container');
 		expect(cmd.parent!.kind).toBe("bare");

@@ -1635,6 +1635,9 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--target is the destination DSP node.",
 						"--param is the destination parameter.",
 						"--matched copies compatible range or metadata where HISE exposes enough information.",
+						"Scaled DSP connections map the source range through the target parameter range.",
+						"To invert a scaled connection, reverse the target parameter range, for example set --range \"1,0\" on a 0..1 target; this maps source 0.1 to target 0.9.",
+						"Target-range inversion works whether the range is changed before or after connecting.",
 						"--source-param and --source-output are mutually exclusive."
 					]
 				},
@@ -2424,10 +2427,29 @@ export const GENERATED_AGENT_CONTEXT = {
 								"--agent"
 							],
 							"display": "hise-cli dsp set --module \"Script FX1\" --node F1 --param Frequency --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+						},
+						{
+							"title": "Invert a scaled connection target",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set",
+								"--module",
+								"Script FX1",
+								"--node",
+								"AddNode",
+								"--param",
+								"Value",
+								"--range",
+								"1,0",
+								"--agent"
+							],
+							"display": "hise-cli dsp set --module \"Script FX1\" --node AddNode --param Value --range \"1,0\" --agent"
 						}
 					],
 					"notes": [
 						"--range accepts x,y style shorthand like UI --bounds; use \"20,20000\" or \"[20,20000]\".",
+						"Reversed ranges are valid for DSP parameters and intentionally invert scaled connections targeting that parameter, for example --range \"1,0\" maps source 0.1 to target 0.9.",
 						"Metadata flags require --param because they target a node parameter, not the node itself.",
 						"middlePosition and skewFactor are alternatives; do not use both."
 					]
@@ -2754,7 +2776,8 @@ export const GENERATED_AGENT_CONTEXT = {
 					"notes": [
 						"--source-param and --source-output are optional source qualifiers and are mutually exclusive.",
 						"Use --source-param when the source is a parameter on another node.",
-						"Use --source-output when the source is an output channel index."
+						"Use --source-output when the source is an output channel index.",
+						"Default scaled connections follow the target parameter range; reverse the target range with dsp set --range \"1,0\" to invert the mapping."
 					]
 				},
 				{

@@ -180,6 +180,8 @@ Heuristic when choosing connection mode or node variant:
 Non-obvious point:
 
 - modulation depth is often best controlled by editing the target range, not the source
+- swapping the target range endpoints intentionally inverts scaled connections; a `0..1` source into target range `1..0` maps `0.1` to `0.9`
+- this target-range inversion is valid before or after creating the connection
 
 Visual-verification defaults for educational or diagnostic graphs:
 

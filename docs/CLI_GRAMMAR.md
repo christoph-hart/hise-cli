@@ -350,6 +350,8 @@ Operates on a scriptnode network. Enter DSP mode with `/dsp`, then select the ho
 
 `matched` (on `connect`) — without `matched`, source values map from the source's range to the target's range. With `matched`, the source range copies the target range so values pass through unmodified.
 
+Inversion: scaled DSP connections use the target parameter range as the output mapping. A reversed target range is valid and intentionally inverts the connection, e.g. source `0..1` to target range `[1, 0]` maps `0.1` to `0.9`. This matches HISE's inverted connection behaviour and is independent of whether the range is set before or after connecting.
+
 `disconnect <nodeId>.<paramName>` — removes the single connection on that parameter. The path always ends in the actual parameter name (`Gain`, `Frequency`, `Cutoff`, …). Each target has at most one source, so source is never specified. Node-level `disconnect <nodeId>` (no param) is invalid.
 
 | Verb | Syntax |

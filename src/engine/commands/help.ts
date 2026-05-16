@@ -325,6 +325,8 @@ Long-form HISE property IDs are canonical:
 
 - **stepSize** (range step), **middlePosition** (skew anchor), **skewFactor**
 - **default** (default value), **matched** (post-connect range copy on \`connect\`)
+- Connection inversion: for scaled DSP connections, swap the target range min/max
+  (eg. \`set AddNode.Value.range [1, 0]\`) to map source \`0.1\` to target \`0.9\`.
 - Network-root: \`AllowCompilation\`, \`AllowPolyphonic\`, \`HasTail\`,
   \`SuspendOnSilence\`, \`CompileChannelAmount\`, \`ModulationBlockSize\`
 
