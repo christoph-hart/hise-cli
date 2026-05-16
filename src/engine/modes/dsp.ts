@@ -536,7 +536,7 @@ export class DspMode implements Mode {
 	}
 
 	private async handleShowNoun(
-		kind: "tree" | "networks" | "modules" | "connections",
+		kind: "tree" | "networks" | "modules" | "connections" | "status",
 		filter: string | undefined,
 		session: SessionContext,
 	): Promise<CommandResult> {
@@ -551,6 +551,10 @@ export class DspMode implements Mode {
 			}
 			if (!this.treeRoot) return textResult("(no tree)");
 			return preformattedResult(renderTreeBox(this.getTree()!), undefined, true);
+		}
+
+		if (kind === "status") {
+			return this.handleRuntimeStatus(session);
 		}
 
 		if (kind === "networks") {
@@ -587,6 +591,22 @@ export class DspMode implements Mode {
 		const filtered = filterLower ? rows.filter((r) => r.some(filterFn)) : rows;
 		if (filtered.length === 0) return textResult("(no modulation connections)");
 		return tableResult(["Source", "Output", "Target", "Parameter"], filtered);
+	}
+
+	private async handleRuntimeStatus(session: SessionContext): Promise<CommandResult> {
+		if (!this.moduleId) return errorResult("show status: no module context.");
+		if (!session.connection) return errorResult("show status requires a HISE connection");
+		const response = await session.connection.get(
+			`/api/dsp/runtime_status?moduleId=${encodeURIComponent(this.moduleId)}`,
+		);
+		if (isErrorResponse(response)) return errorResult(response.message);
+		if (!isEnvelopeResponse(response)) return errorResult("Unexpected response from HISE");
+
+		const status = normalizeRuntimeStatusResponse(response, this.moduleId);
+		if (session.forLlm) return jsonResult(status, renderRuntimeStatus(status));
+		return status.ok
+			? textResult(renderRuntimeStatus(status))
+			: errorResult(renderRuntimeStatus(status));
 	}
 
 	// ── Get ─────────────────────────────────────────────────────
@@ -827,6 +847,55 @@ function envelopeError(response: import("../hise.js").HiseResponse, fallback: st
 		return response.errors.map((e) => e.errorMessage).join("\n");
 	}
 	return fallback;
+}
+
+interface DspRuntimeStatus {
+	success: boolean;
+	apiVersion?: string;
+	moduleId: string;
+	ok: boolean;
+	logs: string[];
+	errors: Array<{ errorMessage: string; callstack: string[] }>;
+}
+
+function normalizeRuntimeStatusResponse(
+	response: import("../hise.js").HiseResponse,
+	fallbackModuleId: string,
+): DspRuntimeStatus {
+	const data = response as unknown as Record<string, unknown>;
+	const moduleId = typeof data.moduleId === "string" ? data.moduleId : fallbackModuleId;
+	const logs = Array.isArray(data.logs) ? data.logs.filter((v): v is string => typeof v === "string") : [];
+	const errors = Array.isArray(data.errors)
+		? data.errors.map(normalizeRuntimeStatusError).filter((v): v is { errorMessage: string; callstack: string[] } => v !== null)
+		: [];
+	return {
+		success: data.success === true,
+		...(typeof data.apiVersion === "string" ? { apiVersion: data.apiVersion } : {}),
+		moduleId,
+		ok: data.ok === true,
+		logs,
+		errors,
+	};
+}
+
+function normalizeRuntimeStatusError(value: unknown): { errorMessage: string; callstack: string[] } | null {
+	if (!value || typeof value !== "object") return null;
+	const data = value as Record<string, unknown>;
+	if (typeof data.errorMessage !== "string") return null;
+	return {
+		errorMessage: data.errorMessage,
+		callstack: Array.isArray(data.callstack) ? data.callstack.filter((v): v is string => typeof v === "string") : [],
+	};
+}
+
+function renderRuntimeStatus(status: DspRuntimeStatus): string {
+	if (status.ok) return `Runtime status OK: ${status.moduleId}`;
+	if (status.errors.length === 0) return `Runtime status failed: ${status.moduleId}`;
+	return status.errors
+		.map((error) => error.callstack.length > 0
+			? `${error.errorMessage}\n${error.callstack.join("\n")}`
+			: error.errorMessage)
+		.join("\n");
 }
 
 function normalizeScreenshotPath(raw: string): string {
@@ -1071,7 +1140,7 @@ function renderDspNodeShow(
 // ── Completion keyword tables ───────────────────────────────────
 
 const DSP_KEYWORDS = [
-	{ label: "show", detail: "show tree | networks | modules | connections | <nodeId> | <nodeId>.<param>" },
+	{ label: "show", detail: "show tree | networks | modules | connections | status | <nodeId> | <nodeId>.<param>" },
 	{ label: "save", detail: "Save the network to its .xml file" },
 	{ label: "reset", detail: "Empty the loaded network" },
 	{ label: "add", detail: "add <factory>.<node> as \"<id>\" [to <parent>]" },
@@ -1094,6 +1163,7 @@ const DSP_SHOW_NOUNS = [
 	{ label: "networks", detail: "Available DspNetwork xml files" },
 	{ label: "modules", detail: "Script processors hosting networks" },
 	{ label: "connections", detail: "Modulation edges in the network" },
+	{ label: "status", detail: "Runtime graph validity health check" },
 ];
 
 // Stand-in to silence unused-import warnings when the dispatcher path

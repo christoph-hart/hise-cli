@@ -269,6 +269,43 @@ describe("DspMode — integration", () => {
 		});
 	});
 
+	it("show status queries DSP runtime status", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "StatusDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse("show status", ctx);
+
+		expect(out).toEqual({ type: "text", content: "Runtime status OK: ScriptFX1" });
+	});
+
+	it("show status surfaces runtime errors without treating the request as unavailable", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: { nodeId: "ErrDSP", factoryPath: "container.chain", bypassed: false, parameters: [], properties: [], children: [] },
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status", () => ({
+			success: false,
+			apiVersion: "0.9.0",
+			moduleId: "ScriptFX1",
+			ok: false,
+			logs: [],
+			errors: [{ errorMessage: "MidiNote - Can't find suitable parent node", callstack: [] }],
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse("show status", ctx);
+
+		expect(out).toEqual({ type: "error", message: "MidiNote - Can't find suitable parent node", detail: undefined });
+	});
+
 	it("cd/ls navigate the graph", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");

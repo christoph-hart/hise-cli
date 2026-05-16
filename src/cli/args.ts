@@ -514,7 +514,7 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 	if (typeof module !== "string") return module;
 	const prefix = `${formatTargetSuffix(module)} `;
 	if (command === "tree") return `${prefix}show tree`;
-	if (command === "networks" || command === "modules" || command === "connections") return `${prefix}show ${command}`;
+	if (command === "networks" || command === "modules" || command === "connections" || command === "status") return `${prefix}show ${command}`;
 	if (command === "show") {
 		const node = readRequiredFlag(rest, "--node");
 		if (typeof node !== "string") return node;

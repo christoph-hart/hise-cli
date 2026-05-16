@@ -64,6 +64,14 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP runtime status commands", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "status", "--module", "Script FX1"], getCliCommands());
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" show status');
+		}
+	});
+
 	it("parses direct DSP add commands with keyword node types", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "add", "--module", "GateModMathTest", "--type", "math.add", "--id", "InputLevel", "--agent"], getCliCommands());
 		expect(result.kind).toBe("execute");
@@ -566,6 +574,9 @@ describe("parseCliArgs", () => {
 		const save = parseCliArgs(["node", "hise-cli", "dsp", "save", "--module", "Script FX1"], getCliCommands());
 		expect(save.kind).toBe("execute");
 		if (save.kind === "execute") expect(save.canonicalCommand).toBe('/dsp."Script FX1" save');
+		const status = parseCliArgs(["node", "hise-cli", "dsp", "status", "--module", "Script FX1"], getCliCommands());
+		expect(status.kind).toBe("execute");
+		if (status.kind === "execute") expect(status.canonicalCommand).toBe('/dsp."Script FX1" show status');
 	});
 
 	it("rejects missing direct builder flags", () => {

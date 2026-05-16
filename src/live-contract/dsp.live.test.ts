@@ -153,6 +153,19 @@ describe("live contract parity — DSP endpoints", () => {
 		expect(tree.label).toBe(raw.nodeId);
 	});
 
+	it("GET /api/dsp/runtime_status returns graph runtime validity", async () => {
+		const resp = await connection.get(
+			`/api/dsp/runtime_status?moduleId=${encodeURIComponent(HOST_MODULE_ID)}`,
+		);
+		if (isErrorResponse(resp)) throw new Error(resp.message);
+		expect(isEnvelopeResponse(resp)).toBe(true);
+		if (!isEnvelopeResponse(resp)) throw new Error("unreachable");
+		expect(typeof (resp as unknown as { moduleId?: unknown }).moduleId).toBe("string");
+		expect(typeof (resp as unknown as { ok?: unknown }).ok).toBe("boolean");
+		expect(Array.isArray(resp.logs)).toBe(true);
+		expect(Array.isArray(resp.errors)).toBe(true);
+	});
+
 	it("POST /api/dsp/apply round-trips add → set → connect → get-tree", async () => {
 		const ops = [
 			{ op: "add", factoryPath: "core.oscillator", parent: currentNetworkName, nodeId: "OscCli" },

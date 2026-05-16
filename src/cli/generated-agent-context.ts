@@ -1595,6 +1595,18 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--agent"
 					],
 					"display": "hise-cli dsp trace --module \"Script FX1\" --container root --inject dirac --probe-recursive --agent"
+				},
+				{
+					"title": "Check runtime status",
+					"argv": [
+						"hise-cli",
+						"dsp",
+						"status",
+						"--module",
+						"Script FX1",
+						"--agent"
+					],
+					"display": "hise-cli dsp status --module \"Script FX1\" --agent"
 				}
 			],
 			"concepts": [
@@ -1659,6 +1671,16 @@ export const GENERATED_AGENT_CONTEXT = {
 						"Use --probe-changed-parameters to report changed runtime parameters and touched edges.",
 						"Use repeated --probe-param flags when suspected parameter targets are known.",
 						"--trace-compact changes the trace payload shape; global --compact only compacts the CLI output envelope."
+					]
+				},
+				{
+					"id": "runtime-status",
+					"title": "Runtime status",
+					"body": [
+						"dsp status is a cheap graph-level runtime validity check for the active network after loading, editing, recompiling, or changing network properties.",
+						"It can catch wrong MIDI or processing context, compilation flag incompatibilities, mono/polyphony mismatch, processing spec mismatches, invalid parent or container setup, clone container mismatch, dynamic routing errors, missing assets or third-party node resources, SNEX/expression compile failures, and deprecated scriptnode nodes.",
+						"Runtime scriptnode errors are returned as endpoint status with ok=false; request validation, missing modules, and missing networks remain normal HISE API errors.",
+						"After fixing a reported exception, call /api/script/recompile for the DSP module ID when a forced reinitialisation is needed."
 					]
 				}
 			],
@@ -1928,6 +1950,68 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
+					"id": "dsp.runtime.status",
+					"title": "Check DSP runtime status",
+					"purpose": "Check graph-level scriptnode runtime validity for the active DspNetwork.",
+					"syntax": "dsp status --module <module>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"status",
+							"--module",
+							"Script FX1",
+							"--agent"
+						],
+						"display": "hise-cli dsp status --module \"Script FX1\" --agent"
+					},
+					"tags": [
+						"dsp",
+						"status",
+						"runtime",
+						"validation",
+						"health",
+						"scriptnode",
+						"read-only"
+					],
+					"aliases": [
+						"check dsp status",
+						"scriptnode runtime status",
+						"validate dsp graph",
+						"check scriptnode errors",
+						"graph health check"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": false,
+					"help": {
+						"visibility": "common",
+						"order": 27
+					},
+					"examples": [
+						{
+							"title": "Check graph health",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"status",
+								"--module",
+								"Script FX1",
+								"--agent"
+							],
+							"display": "hise-cli dsp status --module \"Script FX1\" --agent"
+						}
+					],
+					"notes": [
+						"Use after loading, editing, recompiling, or changing network properties.",
+						"Catches graph-level runtime validity errors including wrong processing context, compilation flag mismatch, polyphony mismatch, invalid container setup, routing errors, missing assets, SNEX/expression compile failures, and deprecated nodes.",
+						"ok=false means the endpoint successfully found scriptnode runtime errors; it is not the same as HISE being unavailable.",
+						"After fixing the reported issue, recompile the DSP module to force reinitialisation when needed."
+					]
+				},
+				{
 					"id": "dsp.trace",
 					"title": "Trace DSP runtime behavior",
 					"purpose": "Inject a temporary signal or parameter value and capture signal or parameter effects at runtime.",
@@ -1972,7 +2056,7 @@ export const GENERATED_AGENT_CONTEXT = {
 					"danger": false,
 					"help": {
 						"visibility": "common",
-						"order": 28
+						"order": 29
 					},
 					"examples": [
 						{

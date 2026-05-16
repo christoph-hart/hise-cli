@@ -367,7 +367,7 @@ Inversion: scaled DSP connections use the target parameter range as the output m
 | `reset` | `reset` (clears network to empty `root`) |
 | `screenshot` | `screenshot scale <N> file "<path>"` |
 | `trace` | `trace [<container>] <trace-clause>...` |
-| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
+| `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show status` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
 | `docs` | `docs` \| `docs <factory>` \| `docs <factory.node>` \| `docs <factory.node>.<param>` (static MCP documentation) |
 | `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m>] [skewFactor <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
 | `cd` / `ls` / `pwd` | navigation |
@@ -421,6 +421,17 @@ the preserved HISE trace payload under `trace`. Human output is a concise report
 derived from the same payload. The full signal, recursive container, parameter,
 and touched-edge details remain available in JSON output.
 
+`show status` calls `GET /api/dsp/runtime_status` as a cheap graph-level runtime
+validity check after loading, editing, recompiling, or changing network
+properties. It catches issues such as MIDI-dependent nodes in the wrong
+processing context, compilation-flag incompatibilities, mono/polyphony mismatch,
+channel/block/samplerate spec mismatches, invalid parent/container setup, clone
+container mismatches, dynamic routing errors, missing assets or third-party node
+resources, SNEX/expression compile failures, and deprecated scriptnode nodes.
+Runtime scriptnode errors are returned as endpoint status (`ok=false`) rather
+than transport failure; after fixing the reported issue, callers may need to run
+`/api/script/recompile` for the DSP module ID to force reinitialisation.
+
 Examples:
 
 ```
@@ -449,6 +460,7 @@ show networks
 docs filters
 docs filters.svf.Frequency
 show connections
+show status
 show g1                                           # node summary
 show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"
@@ -489,9 +501,9 @@ remove A, B, C
 
 Verbs and role keywords are reserved across all modes. Using any of them as an identifier requires quoting.
 
-Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `create_parameter`.
+Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `trace`, `create_parameter`.
 
-Catalog nouns following `show` (mode-restricted): `tree`, `types`, `networks`, `modules`, `connections`. These are reserved as direct arguments to `show` only — they may still appear inside dotted paths after a quoted segment escape.
+Catalog nouns following `show` (mode-restricted): `tree`, `types`, `networks`, `modules`, `connections`, `status`. These are reserved as direct arguments to `show` only — they may still appear inside dotted paths after a quoted segment escape.
 
 Role keywords: `as`, `to`, `file`, `scale`, `matched`, `default`, `stepSize`, `middlePosition`, `skewFactor`.
 
@@ -552,7 +564,7 @@ CreateParameterStmt  := 'create_parameter' DottedPath Array2
 TypeRef              := Identifier ['.' Identifier]          ; 2-segment for DSP factory.node
 BuilderShowNoun      := 'types' | 'tree'
 UiShowNoun           := 'tree'
-DspShowNoun          := 'networks' | 'modules' | 'connections' | 'tree'
+DspShowNoun          := 'networks' | 'modules' | 'connections' | 'status' | 'tree'
 Filter               := QuotedString | BareWord
 
 PathExpr             := DottedPath | BarePath | '..'

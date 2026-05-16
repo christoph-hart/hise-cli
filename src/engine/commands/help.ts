@@ -295,6 +295,7 @@ Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 | \`show networks\` | List \`.xml\` files in the project's \`DspNetworks/\` |
 | \`show modules\` | List \`DspNetwork\`-capable script processors |
 | \`show connections\` | Modulation edges in the network |
+| \`show status\` | Runtime graph validity health check |
 | \`docs [<factory>[.<node>[.<param>]]]\` | Static scriptnode catalog, factory list, node docs, or parameter docs from MCP |
 | \`trace [<container>] <clauses...>\` | Runtime signal / parameter probe |
 | \`show <nodeId>\` | Header, properties, parameters, modulation edges |
@@ -352,6 +353,18 @@ Boundary node IDs after \`before\` / \`after\` are quoted to avoid keyword
 ambiguity. Parameter paths use normal dotted syntax. \`probe recursive\` includes
 the recursive topology tree automatically. \`compact\` changes the trace payload;
 global CLI \`--compact\` only changes output envelope formatting.
+
+## Runtime Status
+
+\`show status\` checks the active network for graph-level runtime validity after
+loading, editing, recompiling, or changing network properties. It reports issues
+such as wrong MIDI / processing context, compilation flag incompatibilities,
+mono/polyphony mismatch, processing spec mismatches, invalid parent containers,
+clone container mismatches, dynamic routing errors, missing assets or third-party
+node resources, SNEX/expression compile failures, and deprecated scriptnode
+nodes. Runtime scriptnode errors are endpoint status (\`ok=false\`), not transport
+failure. After fixing the reported issue, recompile the DSP module to force
+reinitialisation when needed.
 
 ## Local queries
 

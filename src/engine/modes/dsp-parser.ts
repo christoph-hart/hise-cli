@@ -153,7 +153,7 @@ export interface TraceCommand {
 }
 
 export type ShowCommand =
-	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree"; filter?: string }
+	| { type: "show"; kind: "networks" | "modules" | "connections" | "tree" | "status"; filter?: string }
 	| { type: "show"; kind: "target"; target: PathRef };
 
 export interface CdCommand { type: "cd"; target: PathRef }
@@ -938,6 +938,9 @@ function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: 
 	}
 	const target = extractPathExpr(c.target![0] as CstNode);
 	if ("error" in target) return { error: target.error };
+	if (target.ref.kind === "bare" && !target.ref.segment.quoted && target.ref.segment.id.toLowerCase() === "status") {
+		return { command: { type: "show", kind: "status" } };
+	}
 	return { command: { type: "show", kind: "target", target: target.ref } };
 }
 

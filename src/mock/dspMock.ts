@@ -122,6 +122,22 @@ export function installDspMock(
 		};
 	});
 
+	// ── GET /api/dsp/runtime_status ─────────────────────────────
+	connection.onGet("/api/dsp/runtime_status", () => {
+		const state = firstNetwork(networks);
+		if (!state) {
+			return errorEnvelope("runtime_status: no active DspNetwork on any module (call init first)");
+		}
+		return {
+			success: true,
+			apiVersion: "0.9.0",
+			moduleId: DEFAULT_MOCK_DSP_MODULE,
+			ok: true,
+			logs: [],
+			errors: [],
+		};
+	});
+
 	// ── POST /api/dsp/apply ────────────────────────────────────
 	connection.onPost("/api/dsp/apply", (body) => {
 		const data = (body ?? {}) as Record<string, unknown>;
