@@ -86,6 +86,9 @@ concepts:
       - Runtime scriptnode errors are returned as endpoint status with ok=false; request validation, missing modules, and missing networks remain normal HISE API errors.
       - dsp status --autofix mutates the graph by attempting HISE's built-in autofix for the first autofixable error before returning status.
       - Current autofixes set or unset the network AllowCompilation flag when required, and move a node that requires MIDI processing into a container.midichain.
+      - Every successful DSP graph mutation automatically runs runtime status afterwards as an early compile and graph error checker.
+      - Normal mutations use autofix=false, so they report errors without silently mutating the graph.
+      - Exact set node.Code writes are the only implicit exception; they run the same check with autofix=true after the code update succeeds.
       - After fixing a reported exception, call /api/script/recompile for the DSP module ID when a forced reinitialisation is needed.
 
 commands:
@@ -315,6 +318,8 @@ commands:
     notes:
       - Inspect with dsp show --module <module> --node <node> first when range/default is unknown.
       - Dynamic flags may be used for simple parameter writes.
+      - Every successful DSP graph mutation runs runtime status after applying. Normal mutations use autofix=false and only report errors.
+      - Exact Code writes trigger runtime-status autofix=true after the set succeeds. If the graph is still invalid, the command returns the runtime status error.
     help:
       visibility: common
       order: 50

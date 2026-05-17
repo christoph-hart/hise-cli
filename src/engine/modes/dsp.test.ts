@@ -348,6 +348,207 @@ describe("DspMode — integration", () => {
 		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint === "/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true")).toBe(true);
 	});
 
+	it("set Code runs runtime autofix after a successful mutation", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: {
+				nodeId: "CodeDSP",
+				factoryPath: "container.chain",
+				bypassed: false,
+				parameters: [],
+				properties: [],
+				children: [{ nodeId: "Expr", factoryPath: "core.expr", bypassed: false, parameters: [], properties: [], children: [] }],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/dsp/apply", () => ({
+			success: true,
+			scope: "root",
+			groupName: "",
+			diff: [{ domain: "dsp", action: "*", target: "Expr" }],
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true", () => ({
+			success: true,
+			apiVersion: "0.9.1",
+			moduleId: "ScriptFX1",
+			ok: true,
+			autofixRequested: true,
+			autofixApplied: true,
+			fixedNodeId: "Expr",
+			beforeError: "Expr - AllowCompilation mismatch",
+			logs: [],
+			errors: [],
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		let dirtyCount = 0;
+		const ctx: SessionContext = {
+			connection: conn,
+			popMode: () => ({ type: "empty" }),
+			markProjectTreeDirty: () => { dirtyCount++; },
+		};
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse('set Expr.Code "return input;"', ctx);
+
+		expect(out.type).toBe("text");
+		if (out.type === "text") expect(out.content).toContain("Autofix applied to Expr");
+		expect(dirtyCount).toBe(2);
+		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint === "/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true")).toBe(true);
+	});
+
+	it("set non-Code checks runtime status without autofix", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: {
+				nodeId: "CodeDSP",
+				factoryPath: "container.chain",
+				bypassed: false,
+				parameters: [],
+				properties: [],
+				children: [{ nodeId: "Expr", factoryPath: "core.expr", bypassed: false, parameters: [], properties: [], children: [] }],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/dsp/apply", () => ({
+			success: true,
+			scope: "root",
+			groupName: "",
+			diff: [{ domain: "dsp", action: "*", target: "Expr" }],
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=false", () => ({
+			success: true,
+			apiVersion: "0.9.1",
+			moduleId: "ScriptFX1",
+			ok: true,
+			autofixRequested: false,
+			autofixApplied: false,
+			logs: [],
+			errors: [],
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse("set Expr.Value 1", ctx);
+
+		expect(out.type).toBe("text");
+		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint === "/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=false")).toBe(true);
+	});
+
+	it("add checks runtime status without autofix and surfaces graph errors", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: { nodeId: "GraphDSP", factoryPath: "container.chain", bypassed: false, parameters: [], properties: [], children: [] },
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/dsp/apply", () => ({
+			success: true,
+			scope: "root",
+			groupName: "",
+			diff: [{ domain: "dsp", action: "+", target: "MidiNote" }],
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=false", () => ({
+			success: false,
+			apiVersion: "0.9.1",
+			moduleId: "ScriptFX1",
+			ok: false,
+			autofixRequested: false,
+			autofixApplied: false,
+			logs: [],
+			errors: [{ errorMessage: "MidiNote - Can't find suitable parent node", callstack: [] }],
+		}));
+		const mode = new DspMode(undefined, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse('add control.pma as "MidiNote"', ctx);
+
+		expect(out).toEqual({ type: "error", message: "MidiNote - Can't find suitable parent node", detail: undefined });
+		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint === "/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=false")).toBe(true);
+	});
+
+	it("failed mutation does not check runtime status", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: { nodeId: "GraphDSP", factoryPath: "container.chain", bypassed: false, parameters: [], properties: [], children: [] },
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/dsp/apply", () => ({
+			success: false,
+			logs: [],
+			errors: [{ errorMessage: "apply failed", callstack: [] }],
+		}));
+		const mode = new DspMode(undefined, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse('add core.gain as "Gain1"', ctx);
+
+		expect(out.type).toBe("error");
+		expect(conn.calls.some((c) => c.method === "GET" && c.endpoint.startsWith("/api/dsp/runtime_status"))).toBe(false);
+	});
+
+	it("set Code surfaces runtime errors left after autofix", async () => {
+		const conn = new MockHiseConnection();
+		conn.onGet("/api/undo/diff", () => ({ success: true, logs: [], errors: [], groupName: "root" }));
+		conn.onGet("/api/dsp/tree", () => ({
+			success: true,
+			result: {
+				nodeId: "CodeDSP",
+				factoryPath: "container.chain",
+				bypassed: false,
+				parameters: [],
+				properties: [],
+				children: [{ nodeId: "Expr", factoryPath: "core.expr", bypassed: false, parameters: [], properties: [], children: [] }],
+			},
+			logs: [],
+			errors: [],
+		}));
+		conn.onPost("/api/dsp/apply", () => ({
+			success: true,
+			scope: "root",
+			groupName: "",
+			diff: [{ domain: "dsp", action: "*", target: "Expr" }],
+			logs: [],
+			errors: [],
+		}));
+		conn.onGet("/api/dsp/runtime_status?moduleId=ScriptFX1&autofix=true", () => ({
+			success: false,
+			apiVersion: "0.9.1",
+			moduleId: "ScriptFX1",
+			ok: false,
+			autofixRequested: true,
+			autofixApplied: false,
+			logs: [],
+			errors: [{ errorMessage: "Expr - SNEX compile failed", callstack: [] }],
+		}));
+		const mode = new DspMode(scriptnodeFixture, undefined, "ScriptFX1");
+		const ctx: SessionContext = { connection: conn, popMode: () => ({ type: "empty" }) };
+		await mode.onEnter(ctx);
+
+		const out = await mode.parse('set Expr.Code "broken"', ctx);
+
+		expect(out).toEqual({ type: "error", message: "No autofix applied\nExpr - SNEX compile failed", detail: undefined });
+	});
+
 	it("cd/ls navigate the graph", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");

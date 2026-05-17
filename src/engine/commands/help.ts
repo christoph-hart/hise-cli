@@ -371,6 +371,13 @@ the first autofixable error. Current autofixes set or unset the network
 processing into a \`container.midichain\`. After fixing the reported issue,
 recompile the DSP module to force reinitialisation when needed.
 
+Every successful DSP graph mutation automatically runs runtime status as an
+early compile / graph error checker. Normal mutations use \`autofix=false\`, so
+they only report errors and never silently mutate the graph. Exact
+\`set <node>.Code "..."\` writes are the only implicit exception: they run the
+same check with \`autofix=true\` after the code update succeeds. If runtime
+status still reports \`ok=false\`, the command returns that runtime error.
+
 ## Local queries
 
 | Command | Returns |

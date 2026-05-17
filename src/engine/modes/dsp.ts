@@ -597,21 +597,28 @@ export class DspMode implements Mode {
 	private async handleRuntimeStatus(session: SessionContext, autofix: boolean): Promise<CommandResult> {
 		if (!this.moduleId) return errorResult("show status: no module context.");
 		if (!session.connection) return errorResult("show status requires a HISE connection");
-		const params = new URLSearchParams();
-		params.set("moduleId", this.moduleId);
-		if (autofix) params.set("autofix", "true");
-		const response = await session.connection.get(
-			`/api/dsp/runtime_status?${params.toString()}`,
-		);
-		if (isErrorResponse(response)) return errorResult(response.message);
-		if (!isEnvelopeResponse(response)) return errorResult("Unexpected response from HISE");
-
-		const status = normalizeRuntimeStatusResponse(response, this.moduleId);
+		const statusResult = await this.fetchRuntimeStatus(session.connection, autofix);
+		if ("error" in statusResult) return errorResult(statusResult.error);
+		const status = statusResult.status;
 		if (status.autofixApplied) session.markProjectTreeDirty?.();
 		if (session.forLlm) return jsonResult(status, renderRuntimeStatus(status));
 		return status.ok
 			? textResult(renderRuntimeStatus(status))
 			: errorResult(renderRuntimeStatus(status));
+	}
+
+	private async fetchRuntimeStatus(
+		connection: HiseConnection,
+		autofix: boolean,
+	): Promise<{ status: DspRuntimeStatus } | { error: string }> {
+		if (!this.moduleId) return { error: "show status: no module context." };
+		const params = new URLSearchParams();
+		params.set("moduleId", this.moduleId);
+		params.set("autofix", autofix ? "true" : "false");
+		const response = await connection.get(`/api/dsp/runtime_status?${params.toString()}`);
+		if (isErrorResponse(response)) return { error: response.message };
+		if (!isEnvelopeResponse(response)) return { error: "Unexpected response from HISE" };
+		return { status: normalizeRuntimeStatusResponse(response, this.moduleId) };
 	}
 
 	// ── Get ─────────────────────────────────────────────────────
@@ -677,13 +684,38 @@ export class DspMode implements Mode {
 		const opsResult = commandToDspOps(cmd, this.rawTree, this.treeRoot, this.currentPath);
 		if ("error" in opsResult) return errorResult(opsResult.error);
 		if (opsResult.ops.length === 0) return textResult("(no operations)");
+		const shouldAutofixRuntimeStatus = isCodeSetCommand(cmd);
 
 		if (!session.connection) {
 			return textResult(`(offline) would apply: ${JSON.stringify(opsResult.ops)}`);
 		}
 		const result = await this.executeOps(opsResult.ops, session.connection);
 		if (result.type !== "error") session.markProjectTreeDirty?.();
+		if (result.type !== "error") {
+			return this.handlePostMutationRuntimeStatus(result, session, shouldAutofixRuntimeStatus);
+		}
 		return result;
+	}
+
+	private async handlePostMutationRuntimeStatus(
+		mutationResult: CommandResult,
+		session: SessionContext,
+		autofix: boolean,
+	): Promise<CommandResult> {
+		if (!session.connection) return mutationResult;
+		const statusResult = await this.fetchRuntimeStatus(session.connection, autofix);
+		if ("error" in statusResult) {
+			return errorResult(autofix
+				? `Code set succeeded, but runtime autofix check failed: ${statusResult.error}`
+				: `Mutation succeeded, but runtime status check failed: ${statusResult.error}`);
+		}
+		const status = statusResult.status;
+		if (status.autofixApplied) session.markProjectTreeDirty?.();
+		if (!status.ok) return errorResult(renderRuntimeStatus(status));
+		if (!status.autofixApplied) return mutationResult;
+		const note = renderRuntimeStatus(status);
+		if (mutationResult.type === "text") return textResult(`${mutationResult.content}\n${note}`);
+		return textResult(note);
 	}
 
 	private findDuplicateAddId(cmd: DspCommand): { id: string; candidates: string[] } | null {
@@ -852,6 +884,14 @@ function envelopeError(response: import("../hise.js").HiseResponse, fallback: st
 		return response.errors.map((e) => e.errorMessage).join("\n");
 	}
 	return fallback;
+}
+
+function isCodeSetCommand(cmd: DspCommand): boolean {
+	if (cmd.type !== "set") return false;
+	return cmd.clauses.some((clause) => {
+		const segs = pathRefSegments(clause.path);
+		return segs.length === 2 && segs[1]?.id.toLowerCase() === "code";
+	});
 }
 
 interface DspRuntimeStatus {

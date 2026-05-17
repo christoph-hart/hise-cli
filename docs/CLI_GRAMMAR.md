@@ -440,6 +440,16 @@ processing into a `container.midichain`. After fixing the reported issue, caller
 may need to run `/api/script/recompile` for the DSP module ID to force
 reinitialisation.
 
+Every successful DSP graph mutation automatically runs runtime status as an
+early compile / graph error checker. Normal mutations use `autofix=false`, so
+they only report errors and never silently mutate the graph. This catches errors
+introduced by operations such as adding too many children for a processing
+context or connecting send/receive nodes with incompatible processing specs.
+Exact `set <node>.Code "..."` writes are the only implicit exception: they run
+the same check with `autofix=true` after the code update succeeds. If the
+follow-up status reports `ok=false`, hise-cli returns that runtime error so
+agents do not continue after leaving the graph invalid.
+
 Examples:
 
 ```
@@ -457,6 +467,7 @@ set g1.Gain.range [0, 2], g1.Gain.skewFactor 0.3, g1.Gain.stepSize 0.01
 set MicPairSelector.NodeColour 0xFF2F80ED
 set MicPairSelector.Comment "**Mic pair selector** - Routes one stereo pair into the FX chain."
 set CabGlueComp.Folded true
+set Expr.Code "return input;"                         # runs status autofix afterwards
 set g1.parent root2
 set g1.index 0
 set g1.bypassed 1
