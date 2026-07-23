@@ -10,6 +10,7 @@ import {
 	createSetupCloneRepoHandler,
 	createSetupBuildDepsHandler,
 	createSetupFaustInstallHandler,
+	createSetupFftwInstallHandler,
 	createSetupExtractSdksHandler,
 	createSetupCompilerInstallHandler,
 	createSetupIppInstallHandler,
@@ -64,6 +65,7 @@ export function registerSetupHandlers(
 	registry.registerTask("setupCloneRepo", createSetupCloneRepoHandler(executor));
 	registry.registerTask("setupBuildDeps", createSetupBuildDepsHandler(executor));
 	registry.registerTask("setupFaustInstall", createSetupFaustInstallHandler(executor));
+	registry.registerTask("setupFftwInstall", createSetupFftwInstallHandler(executor));
 	registry.registerTask("setupExtractSdks", createSetupExtractSdksHandler(executor));
 	registry.registerTask("setupCompilerInstall", createSetupCompilerInstallHandler(executor));
 	registry.registerTask("setupIppInstall", createSetupIppInstallHandler(executor));

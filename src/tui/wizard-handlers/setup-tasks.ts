@@ -8,6 +8,7 @@ import type { PhaseExecutor } from "../../engine/wizard/phase-executor.js";
 import type { WizardExecResult } from "../../engine/wizard/types.js";
 import { isOn } from "../../engine/wizard/types.js";
 import { runJuceCompile } from "./project-compile.js";
+import { detectFaust, detectFftw, installAptPackages, runApt } from "./setup-linux.js";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -61,35 +62,6 @@ async function hasDevDir(executor: PhaseExecutor): Promise<boolean> {
 	return sel.exitCode === 0 && sel.stdout.trim().length > 0;
 }
 
-/** Runtime faust probe — mirrors detectFaust in setup-detect.ts. Kept
- *  inline rather than imported to avoid the handler depending on the
- *  init handler's module. */
-async function reprobeFaust(
-	executor: PhaseExecutor,
-	platform: string,
-	installPath: string,
-): Promise<boolean> {
-	if (platform === "Windows") {
-		const global = await executor.spawn(
-			"cmd",
-			["/c", "if exist \"C:\\Program Files\\Faust\\lib\\faust.dll\" echo found"],
-			{},
-		);
-		if (global.stdout.includes("found")) return true;
-		if (!installPath) return false;
-		const local = `${installPath}\\tools\\faust\\lib\\libfaust.dll`;
-		const localCheck = await executor.spawn("cmd", ["/c", `if exist "${local}" echo found`], {});
-		return localCheck.stdout.includes("found");
-	}
-	const onPath = await executor.spawn("faust", ["--version"], {});
-	if (onPath.exitCode === 0) return true;
-	if (!installPath) return false;
-	const ext = platform === "macOS" ? "dylib" : "so";
-	const local = `${installPath}/tools/faust/lib/libfaust.${ext}`;
-	const localCheck = await executor.spawn("test", ["-f", local], {});
-	return localCheck.exitCode === 0;
-}
-
 /** Detect noise lines from curl / winget that would otherwise flood the log
  *  4x/sec during multi-minute downloads. Keeps anything with real text,
  *  drops progress bars, spinner chars, and pure size/percentage tickers. */
@@ -137,9 +109,8 @@ export function createSetupGitInstallHandler(_executor: PhaseExecutor): Internal
 		}
 
 		if (platform === "Linux") {
-			const result = await executor.spawn("sudo", ["apt-get", "install", "-y", "git"], {
-				onLog: (line, transient) => onProgress({ phase: "git-install", message: line, transient }),
-			});
+			const result = await installAptPackages(executor, ["git"], (line, transient) =>
+				onProgress({ phase: "git-install", message: line, transient }));
 			if (result.exitCode !== 0) return fail(`Git installation failed: ${result.stderr}`);
 			return ok("✓ Git installed.");
 		}
@@ -227,18 +198,25 @@ export function createSetupBuildDepsHandler(_executor: PhaseExecutor): InternalT
 
 		onProgress({ phase: "build-deps", percent: 0, message: "Installing build dependencies..." });
 
+		const onLog = (line: string, transient?: boolean) =>
+			onProgress({ phase: "build-deps", message: line, transient });
+		const update = await runApt(executor, ["update"], onLog);
+		if (update.exitCode !== 0) return fail(`Dependency index update failed: ${update.stderr || update.stdout}`);
+
+		const webkit40 = await executor.spawn("apt-cache", ["show", "libwebkit2gtk-4.0-dev"], {});
+		const webkitPackage = webkit40.exitCode === 0
+			? "libwebkit2gtk-4.0-dev"
+			: "libwebkit2gtk-4.1-dev";
 		const packages = [
 			"build-essential", "make", "llvm", "clang",
 			"libfreetype6-dev", "libx11-dev", "libxinerama-dev",
 			"libxrandr-dev", "libxcursor-dev", "mesa-common-dev",
 			"libasound2-dev", "freeglut3-dev", "libxcomposite-dev",
 			"libcurl4-gnutls-dev", "libgtk-3-dev", "libjack-jackd2-dev",
-			"libwebkit2gtk-4.0-dev", "libpthread-stubs0-dev", "ladspa-sdk",
+			webkitPackage, "libpthread-stubs0-dev", "ladspa-sdk", "unzip",
 		];
 
-		const result = await executor.spawn("sudo", ["apt-get", "install", "-y", ...packages], {
-			onLog: (line, transient) => onProgress({ phase: "build-deps", message: line, transient }),
-		});
+		const result = await runApt(executor, ["install", "-y", ...packages], onLog);
 
 		if (result.exitCode !== 0) return fail(`Dependency installation failed: ${result.stderr}`);
 		return ok("✓ Build dependencies installed.");
@@ -263,7 +241,7 @@ export function createSetupFaustInstallHandler(_executor: PhaseExecutor): Intern
 
 		// Re-probe faust so a stale hasFaust=0 (from init) doesn't trigger
 		// a redundant install when the user manually installed between runs.
-		if (await reprobeFaust(executor, platform, installPath)) {
+		if (await detectFaust(executor, platform, installPath)) {
 			onProgress({ phase: "faust-install", percent: 100, message: "Faust detected, skipping install." });
 			return ok("✓ Faust detected.");
 		}
@@ -271,11 +249,16 @@ export function createSetupFaustInstallHandler(_executor: PhaseExecutor): Intern
 		onProgress({ phase: "faust-install", percent: 0, message: "Installing Faust..." });
 
 		if (platform === "Linux") {
-			const result = await executor.spawn("sudo", ["apt-get", "install", "-y", "faust", "libfaust-dev"], {
-				onLog: (line, transient) => onProgress({ phase: "faust-install", message: line, transient }),
-			});
+			const result = await installAptPackages(executor, ["faust"], (line, transient) =>
+				onProgress({ phase: "faust-install", message: line, transient }));
 			if (result.exitCode !== 0) {
-				return fail("Faust installation failed. Install manually from https://faust.grame.fr");
+				return fail(`Faust installation failed: ${result.stderr || result.stdout}`);
+			}
+			if (!(await detectFaust(executor, platform, installPath))) {
+				return fail(
+					"Faust was installed but is not usable by HISE. Version 2.54+ with headers, " +
+					"architecture files, and libfaust.so is required.",
+				);
 			}
 			return ok("✓ Faust installed.");
 		}
@@ -384,6 +367,35 @@ export function createSetupFaustInstallHandler(_executor: PhaseExecutor): Intern
 			`If the build complains about unsigned Faust libs on first run, allow them via ` +
 			`System Settings → Privacy & Security.`,
 		);
+	};
+}
+
+export function createSetupFftwInstallHandler(_executor: PhaseExecutor): InternalTaskHandler {
+	return async (answers, onProgress, signal) => {
+		const executor = withSignal(_executor, signal);
+		const platform = answers.platform ?? "Linux";
+		if (platform !== "Linux" || !isOn(answers.includeFftw)) {
+			onProgress({ phase: "fftw-install", percent: 100, message: "FFTW not requested, skipping." });
+			return ok("✓ FFTW installation skipped.");
+		}
+
+		if (await detectFftw(executor, platform)) {
+			onProgress({ phase: "fftw-install", percent: 100, message: "FFTW detected, skipping install." });
+			return ok("✓ FFTW detected.");
+		}
+
+		onProgress({ phase: "fftw-install", percent: 0, message: "Installing FFTW..." });
+		const result = await installAptPackages(executor, ["libfftw3-dev"], (line, transient) =>
+			onProgress({ phase: "fftw-install", message: line, transient }));
+		if (result.exitCode !== 0) {
+			return fail(`FFTW installation failed: ${result.stderr || result.stdout}`);
+		}
+		if (!(await detectFftw(executor, platform))) {
+			return fail("FFTW was installed but pkg-config cannot resolve the required fftw3f library.");
+		}
+
+		onProgress({ phase: "fftw-install", percent: 100 });
+		return ok("✓ FFTW installed.");
 	};
 }
 
@@ -507,8 +519,8 @@ export function createSetupExtractSdksHandler(_executor: PhaseExecutor): Interna
 		// Windows: PowerShell Expand-Archive avoids the GNU-tar-shadows-bsdtar
 		// case (Git for Windows / MSYS put a GNU tar earlier on PATH, which
 		// fails with "This does not look like a tar archive" on .zip input).
-		// macOS bsdtar handles zip transparently; Linux uses unzip when
-		// available and falls back to tar.
+		// macOS bsdtar handles zip transparently; Linux gets unzip from the
+		// build-dependencies task.
 		const result = platform === "Windows"
 			? await executor.spawn("powershell", [
 				"-NoProfile",
@@ -518,7 +530,9 @@ export function createSetupExtractSdksHandler(_executor: PhaseExecutor): Interna
 			], {
 				onLog: (line, transient) => onProgress({ phase: "extract-sdks", message: line, transient }),
 			})
-			: await executor.spawn("tar", ["-xf", "sdk.zip"], { cwd: sdkDir });
+			: platform === "Linux"
+				? await executor.spawn("unzip", ["-o", "sdk.zip"], { cwd: sdkDir })
+				: await executor.spawn("tar", ["-xf", "sdk.zip"], { cwd: sdkDir });
 		if (result.exitCode !== 0) return fail(`SDK extraction failed: ${result.stderr || result.stdout}`);
 
 		onProgress({ phase: "extract-sdks", percent: 100 });
@@ -830,7 +844,21 @@ export async function compileHise(
 		projucerPath = `${installPath}/JUCE/Projucer/Projucer.app/Contents/MacOS/Projucer`;
 	} else if (platform === "Linux") {
 		jucerFile = `${installPath}/projects/standalone/HISE Standalone.jucer`;
-		projucerPath = `${installPath}/JUCE/Projucer/Projucer`;
+		const candidates = [
+			`${installPath}/JUCE/Projucer/Projucer`,
+			`${installPath}/JUCE/projucer/Projucer`,
+		];
+		projucerPath = "";
+		for (const candidate of candidates) {
+			const check = await executor.spawn("test", ["-x", candidate], {});
+			if (check.exitCode === 0) {
+				projucerPath = candidate;
+				break;
+			}
+		}
+		if (!projucerPath) {
+			return fail(`Projucer not found. Checked: ${candidates.join(", ")}`);
+		}
 	} else {
 		jucerFile = `${installPath}\\projects\\standalone\\HISE Standalone.jucer`;
 		projucerPath = `${installPath}\\JUCE\\Projucer\\Projucer.exe`;
@@ -1139,13 +1167,11 @@ export function createSetupVerifyHandler(_executor: PhaseExecutor): InternalTask
 	};
 }
 
-/** Resolve the directory where Faust is installed for a given platform.
- *  Mirrors the install locations chosen by `setupFaustInstall`. Returns null
- *  on Linux where Faust comes from apt and lives in standard system dirs
- *  (HISE doesn't need an explicit FaustPath in that case). */
+/** Resolve the directory where Faust is installed for a given platform. */
 function faustInstallPath(platform: string, installPath: string): string | null {
 	if (platform === "Windows") return "C:\\Program Files\\Faust";
 	if (platform === "macOS") return `${installPath}/tools/faust`;
+	if (platform === "Linux") return "/usr";
 	return null;
 }
 

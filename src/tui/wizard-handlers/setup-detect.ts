@@ -6,6 +6,9 @@
 import type { InternalInitHandler } from "../../engine/wizard/handler-registry.js";
 import type { PhaseExecutor } from "../../engine/wizard/phase-executor.js";
 import { detectVsVersion } from "./setup-tasks.js";
+import { detectFaust, detectFftw } from "./setup-linux.js";
+
+export { detectFaust } from "./setup-linux.js";
 
 const DEFAULT_INSTALL_PATHS_MACOS = ["~/HISE", "/Users/Shared/HISE", "~/Documents/HISE", "~/Desktop/HISE"];
 const DEFAULT_INSTALL_PATHS_WINDOWS = ["C:\\HISE", "~/HISE", "D:\\HISE", "~/Documents/HISE", "~/Desktop/HISE"];
@@ -65,6 +68,7 @@ export function createSetupDetectHandler(executor: PhaseExecutor): InternalInitH
 		// Faust detection — check PATH and the HISE-local install at
 		// <installPath>/tools/faust/lib/libfaust.<dylib|so|dll>.
 		defaults.hasFaust = await detectFaust(executor, platform, defaults.installPath) ? "1" : "0";
+		defaults.hasFftw = await detectFftw(executor, platform) ? "1" : "0";
 
 		// Parallel jobs — cores × RAM-aware cap. 2 GB per clang job matches
 		// HISE's peak RSS; prevents OOM thrash on RAM-constrained VMs.
@@ -203,30 +207,4 @@ async function detectIpp(executor: PhaseExecutor, platform: string): Promise<boo
 		{},
 	);
 	return result.stdout.includes("found");
-}
-
-export async function detectFaust(
-	executor: PhaseExecutor,
-	platform: string,
-	installPath: string,
-): Promise<boolean> {
-	if (platform === "Windows") {
-		// Global install
-		const global = await executor.spawn("cmd", ["/c", "if exist \"C:\\Program Files\\Faust\\lib\\faust.dll\" echo found"], {});
-		if (global.stdout.includes("found")) return true;
-		// HISE-local install at <installPath>\tools\faust\lib\libfaust.dll
-		const local = `${installPath}\\tools\\faust\\lib\\libfaust.dll`;
-		const localCheck = await executor.spawn("cmd", ["/c", `if exist "${local}" echo found`], {});
-		return localCheck.stdout.includes("found");
-	}
-
-	// macOS / Linux — check PATH first
-	const onPath = await executor.spawn("faust", ["--version"], {});
-	if (onPath.exitCode === 0) return true;
-
-	// Fall back to HISE-local install at <installPath>/tools/faust/lib/libfaust.<ext>
-	const ext = platform === "macOS" ? "dylib" : "so";
-	const local = `${installPath}/tools/faust/lib/libfaust.${ext}`;
-	const localCheck = await executor.spawn("test", ["-f", local], {});
-	return localCheck.exitCode === 0;
 }

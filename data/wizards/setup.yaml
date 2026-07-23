@@ -10,6 +10,7 @@ body: |
   - **Clone**: Fetches the HISE repository from GitHub
   - **Build Dependencies**: Installs platform-specific build requirements
   - **Faust** (optional): Installs the Faust compiler for DSP development
+  - **FFTW** (Linux): Installs the single-precision FFTW development library
   - **Compile**: Builds HISE from source using your system compiler
   - **Verify**: Confirms the built binary works correctly
 
@@ -54,6 +55,14 @@ tabs:
         label: Include Faust
         help: Install Faust and build HISE with Faust support
         defaultValue: "0"
+      - id: includeFftw
+        type: toggle
+        label: Include FFTW
+        help: Install libfftw3-dev for Linux projects using AUDIOFFT_FFTW3=1. Review FFTW licensing before distribution.
+        defaultValue: "1"
+        visibleIf:
+          fieldId: platform
+          value: Linux
       - id: includeIpp
         type: toggle
         label: Include Intel IPP
@@ -105,6 +114,14 @@ tabs:
         label: Faust Installed
         disabled: true
         help: Detected automatically — skips Faust installation if found
+      - id: hasFftw
+        type: toggle
+        label: FFTW Installed
+        disabled: true
+        help: Detected automatically — checks for the single-precision fftw3f development library
+        visibleIf:
+          fieldId: platform
+          value: Linux
       - id: vsVersion
         type: text
         label: Visual Studio Version
@@ -136,6 +153,10 @@ tasks:
     function: setupFaustInstall
     type: internal
     label: Install Faust
+  - id: fftwInstall
+    function: setupFftwInstall
+    type: internal
+    label: Install FFTW
   - id: extractSdks
     function: setupExtractSdks
     type: internal

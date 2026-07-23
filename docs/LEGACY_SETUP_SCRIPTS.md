@@ -144,7 +144,7 @@ hdiutil detach /tmp/faust-mount 2>/dev/null || true
 Linux:
 
 ```bash
-sudo apt-get install -y faust libfaust-dev || {
+sudo apt-get install -y faust || {
   echo "Install manually from source"; exit 1;
 }
 ```

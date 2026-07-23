@@ -8,8 +8,7 @@
 //   • macOS   → make CONFIG=… -jN in Builds/MacOSXMakefile (CLT-only,
 //               no xcodebuild). Assumes HISE's --prepare emits the
 //               MACOSX_MAKE exporter.
-//   • Linux   → cat the shipped batchCompileLinux script, strip its
-//               xcbeautify pipe, run through bash (unchanged).
+//   • Linux   → run the generated batchCompileLinux.sh through bash.
 //
 // The HISE-generated `batchCompile.bat` on Windows still hardcodes the
 // old VS 2026 Community MSBuild path, so we deliberately do NOT run it.
@@ -66,7 +65,7 @@ export interface MacCompileSpec {
 }
 
 export interface LinuxCompileSpec {
-	/** batchCompileLinux script path, emitted by HISE --prepare. */
+	/** batchCompileLinux.sh script path, emitted by HISE --prepare. */
 	readonly buildScript: string;
 	/** Working directory for the build script. */
 	readonly buildDirectory: string;
@@ -201,7 +200,7 @@ export async function runJuceCompile(
 	}
 
 	return runLinuxJuceCompile(executor, {
-		buildScript: `${spec.binaryFolder}/batchCompileLinux`,
+		buildScript: `${spec.binaryFolder}/batchCompileLinux.sh`,
 		buildDirectory: spec.binaryFolder,
 	}, emit);
 }
@@ -276,23 +275,21 @@ export async function runMacJuceCompile(
 	return { success: result.exitCode === 0, exitCode: result.exitCode, stderr: result.stderr };
 }
 
-/** Compile a JUCE-generated Linux project via its batchCompileLinux script. */
+/** Compile a JUCE-generated Linux project via its batchCompileLinux.sh script. */
 export async function runLinuxJuceCompile(
 	executor: PhaseExecutor,
 	spec: LinuxCompileSpec,
 	emit: CompileEmit,
 ): Promise<CompileOutcome> {
-	const scriptContent = await executor.spawn("cat", [spec.buildScript], {});
-	if (scriptContent.exitCode !== 0) {
+	const scriptCheck = await executor.spawn("test", ["-f", spec.buildScript], {});
+	if (scriptCheck.exitCode !== 0) {
 		return {
 			success: false,
-			exitCode: scriptContent.exitCode,
-			stderr: `Cannot read build script: ${spec.buildScript}`,
+			exitCode: scriptCheck.exitCode,
+			stderr: `Build script not found: ${spec.buildScript}`,
 		};
 	}
-	// Strip the xcbeautify pipe so raw make output reaches the caller.
-	const patchedScript = scriptContent.stdout.replace(/\s*\|\s*"[^"]*xcbeautify"/, "");
-	const result = await executor.spawn("bash", ["-c", patchedScript], {
+	const result = await executor.spawn("bash", [spec.buildScript], {
 		cwd: spec.buildDirectory,
 		onLog: (line, transient) => emit(line, transient),
 	});

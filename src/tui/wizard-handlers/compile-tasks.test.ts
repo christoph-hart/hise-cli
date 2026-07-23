@@ -37,7 +37,6 @@ describe("createCompileProjectHandler", () => {
 			const executor: PhaseExecutor = {
 				spawn: async (cmd, args, _opts) => {
 					spawnCalls.push({ cmd, args });
-					if (cmd === "cat") return { exitCode: 0, stdout: "make CONFIG=Release", stderr: "" };
 					return okResult;
 				},
 			};
@@ -47,9 +46,10 @@ describe("createCompileProjectHandler", () => {
 			const result = await handler({}, (p) => progress.push(p), undefined, fullContext);
 
 			expect(result.success).toBe(true);
-			expect(spawnCalls[0]!.cmd).toBe("cat");
-			expect(spawnCalls[0]!.args).toEqual(["/path/to/Binaries/batchCompileLinux"]);
+			expect(spawnCalls[0]!.cmd).toBe("test");
+			expect(spawnCalls[0]!.args).toEqual(["-f", "/path/to/Binaries/batchCompileLinux.sh"]);
 			expect(spawnCalls[1]!.cmd).toBe("bash");
+			expect(spawnCalls[1]!.args).toEqual(["/path/to/Binaries/batchCompileLinux.sh"]);
 		});
 	});
 
@@ -95,7 +95,7 @@ describe("createCompileProjectHandler", () => {
 		await withPlatform("linux", async () => {
 			const executor: PhaseExecutor = {
 				spawn: async (cmd) => {
-					if (cmd === "cat") return { exitCode: 0, stdout: "make", stderr: "" };
+					if (cmd === "bash") return failResult;
 					return failResult;
 				},
 			};
@@ -116,7 +116,6 @@ describe("createCompileNetworksHandler", () => {
 			const executor: PhaseExecutor = {
 				spawn: async (cmd, args) => {
 					spawnCalls.push({ cmd, args });
-					if (cmd === "cat") return { exitCode: 0, stdout: "make CONFIG=Release", stderr: "" };
 					return okResult;
 				},
 			};
@@ -125,9 +124,10 @@ describe("createCompileNetworksHandler", () => {
 			const result = await handler({}, () => {}, undefined, fullContext);
 
 			expect(result.success).toBe(true);
-			expect(spawnCalls[0]!.cmd).toBe("cat");
-			expect(spawnCalls[0]!.args).toEqual(["/path/to/Binaries/batchCompileLinux"]);
+			expect(spawnCalls[0]!.cmd).toBe("test");
+			expect(spawnCalls[0]!.args).toEqual(["-f", "/path/to/Binaries/batchCompileLinux.sh"]);
 			expect(spawnCalls[1]!.cmd).toBe("bash");
+			expect(spawnCalls[1]!.args).toEqual(["/path/to/Binaries/batchCompileLinux.sh"]);
 		});
 	});
 

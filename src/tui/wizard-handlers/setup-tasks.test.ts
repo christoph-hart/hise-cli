@@ -4,8 +4,11 @@ import {
 	createSetupCloneRepoHandler,
 	createSetupBuildDepsHandler,
 	createSetupFaustInstallHandler,
+	createSetupFftwInstallHandler,
 	createSetupCompilerInstallHandler,
 	createSetupCompileHandler,
+	createSetupExtractSdksHandler,
+	createSetupVerifyHandler,
 	filterMsbuildLine,
 	adaptJucerToVsVersion,
 	normaliseVsVersion,
@@ -102,6 +105,18 @@ describe("setupBuildDeps", () => {
 		const result = await handler({ platform: "Linux" }, noop);
 		expect(result.success).toBe(true);
 	});
+
+	it("uses the WebKit 4.1 development package when 4.0 is unavailable", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawn("apt-cache", { exitCode: 1, stdout: "", stderr: "missing" });
+		executor.onSpawn("sudo", { exitCode: 0, stdout: "", stderr: "" });
+		const handler = createSetupBuildDepsHandler(executor);
+		const result = await handler({ platform: "Linux" }, noop);
+		expect(result.success).toBe(true);
+		const install = executor.calls.find((call) => call.command === "sudo" && call.args.includes("install"));
+		expect(install?.args).toContain("libwebkit2gtk-4.1-dev");
+		expect(install?.args).toContain("unzip");
+	});
 });
 
 describe("setupFaustInstall", () => {
@@ -126,13 +141,23 @@ describe("setupFaustInstall", () => {
 
 	it("installs on Linux via apt-get", async () => {
 		const executor = new MockPhaseExecutor();
-		// Runtime probe: faust --version exits non-zero so install proceeds.
-		executor.onSpawn("faust", { exitCode: 127, stdout: "", stderr: "not found" });
-		executor.onSpawn("test", { exitCode: 1, stdout: "", stderr: "" });
+		executor.onSpawnSequence("faust", [
+			{ exitCode: 127, stdout: "", stderr: "not found" },
+			{ exitCode: 0, stdout: "FAUST Version 2.81.2", stderr: "" },
+		]);
+		executor.onSpawnSequence("test", [
+			{ exitCode: 1, stdout: "", stderr: "" },
+			{ exitCode: 0, stdout: "", stderr: "" },
+			{ exitCode: 0, stdout: "", stderr: "" },
+		]);
+		executor.onSpawn("/sbin/ldconfig", { exitCode: 0, stdout: "libfaust.so (libc6,x86-64)", stderr: "" });
 		executor.onSpawn("sudo", { exitCode: 0, stdout: "", stderr: "" });
 		const handler = createSetupFaustInstallHandler(executor);
 		const result = await handler({ includeFaust: "1", hasFaust: "0", platform: "Linux" }, noop);
 		expect(result.success).toBe(true);
+		const install = executor.calls.find((call) => call.command === "sudo" && call.args.includes("install"));
+		expect(install?.args).toContain("faust");
+		expect(install?.args).not.toContain("libfaust-dev");
 	});
 
 	it("downloads and runs the NSIS installer via Start-Process -Verb RunAs (UAC self-elevation)", async () => {
@@ -227,6 +252,66 @@ describe("setupFaustInstall", () => {
 		// Still detached even on layout failure.
 		const detach = executor.calls.find((c) => c.command === "hdiutil" && c.args.includes("detach"));
 		expect(detach).toBeDefined();
+	});
+});
+
+describe("setupFftwInstall", () => {
+	it("skips outside Linux", async () => {
+		const executor = new MockPhaseExecutor();
+		const handler = createSetupFftwInstallHandler(executor);
+		const result = await handler({ platform: "macOS", includeFftw: "1" }, noop);
+		expect(result.success).toBe(true);
+		expect(executor.calls).toHaveLength(0);
+	});
+
+	it("installs and verifies fftw3f on Linux", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawnSequence("pkg-config", [
+			{ exitCode: 1, stdout: "", stderr: "missing" },
+			{ exitCode: 0, stdout: "", stderr: "" },
+		]);
+		executor.onSpawn("sudo", { exitCode: 0, stdout: "", stderr: "" });
+		const handler = createSetupFftwInstallHandler(executor);
+		const result = await handler({ platform: "Linux", includeFftw: "1" }, noop);
+		expect(result.success).toBe(true);
+		const install = executor.calls.find((call) => call.command === "sudo" && call.args.includes("install"));
+		expect(install?.args).toContain("libfftw3-dev");
+	});
+
+	it("fails when fftw3f is still unavailable after installation", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawn("pkg-config", { exitCode: 1, stdout: "", stderr: "missing" });
+		executor.onSpawn("sudo", { exitCode: 0, stdout: "", stderr: "" });
+		const handler = createSetupFftwInstallHandler(executor);
+		const result = await handler({ platform: "Linux", includeFftw: "1" }, noop);
+		expect(result.success).toBe(false);
+		expect(result.message).toContain("fftw3f");
+	});
+});
+
+describe("Linux setup completion", () => {
+	it("extracts the SDK ZIP with unzip", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawn("test", { exitCode: 1, stdout: "", stderr: "" });
+		executor.onSpawn("unzip", { exitCode: 0, stdout: "", stderr: "" });
+		const handler = createSetupExtractSdksHandler(executor);
+		const result = await handler({ platform: "Linux", installPath: "/HISE" }, noop);
+		expect(result.success).toBe(true);
+		const unzip = executor.calls.find((call) => call.command === "unzip");
+		expect(unzip?.args).toEqual(["-o", "sdk.zip"]);
+	});
+
+	it("persists /usr as the Linux Faust prefix", async () => {
+		const executor = new MockPhaseExecutor();
+		const handler = createSetupVerifyHandler(executor);
+		const result = await handler({
+			platform: "Linux",
+			installPath: "/HISE",
+			includeFaust: "1",
+		}, noop);
+		expect(result.success).toBe(true);
+		const settings = executor.calls.find((call) => call.args[0] === "set_hise_settings");
+		expect(settings?.args).toContain("-faustpath:/usr");
 	});
 });
 
@@ -367,6 +452,33 @@ describe("setupCompilerInstall", () => {
 			const result = await handler({ platform: "Windows", hasVs: "0" }, noop);
 			expect(result.success).toBe(true);
 		});
+	});
+});
+
+describe("setupCompile (Linux)", () => {
+	it("uses the lowercase Projucer path when that is the executable layout", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawnSequence("test", [
+			{ exitCode: 1, stdout: "", stderr: "" },
+			{ exitCode: 0, stdout: "", stderr: "" },
+		]);
+		const handler = createSetupCompileHandler(executor);
+		const result = await handler({
+			platform: "Linux",
+			installPath: "/HISE",
+			parallelJobs: "2",
+		}, noop);
+		expect(result.success).toBe(true);
+		expect(executor.calls.some((call) => call.command === "/HISE/JUCE/projucer/Projucer")).toBe(true);
+	});
+
+	it("fails clearly when Projucer is missing", async () => {
+		const executor = new MockPhaseExecutor();
+		executor.onSpawn("test", { exitCode: 1, stdout: "", stderr: "" });
+		const handler = createSetupCompileHandler(executor);
+		const result = await handler({ platform: "Linux", installPath: "/HISE" }, noop);
+		expect(result.success).toBe(false);
+		expect(result.message).toContain("Projucer not found");
 	});
 });
 

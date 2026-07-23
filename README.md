@@ -48,6 +48,10 @@ hise-cli
 
 Or run without installing: `npx @hise/cli`.
 
+The automated `/setup` flow supports Debian, Ubuntu, and compatible systems
+with `apt-get`. Other distributions can use hise-cli, but their HISE build
+dependencies must currently be installed manually.
+
 ## Get HISE building on your machine — `/setup`
 
 If you've never compiled HISE from source, this is your starting line.
@@ -66,6 +70,8 @@ What the wizard takes care of for you:
 - Platform compiler toolchain (Xcode CLT on macOS, Visual Studio Build
   Tools on Windows, gcc/clang + dev headers on Linux)
 - Optional tools: IPP (Windows), Faust
+- FFTW development libraries on Linux (enabled by default for projects using
+  `AUDIOFFT_FFTW3=1`; review FFTW licensing before distribution)
 - Projucer (downloaded and built automatically)
 - HISE source clone with the right submodules and branch
 - First full build + smoke test that the resulting binary launches
