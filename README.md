@@ -39,14 +39,16 @@ irm https://github.com/christophhart/hise-cli/releases/latest/download/hise-cli-
 Per-user install (no UAC). Adds `hise-cli` to your `PATH`. Open a new shell
 after install so the updated `PATH` is picked up.
 
-### Linux (via npm)
+**Linux** (x64 + ARM64):
 
 ```bash
-npm i -g @hise/cli
+curl -fsSL https://github.com/christophhart/hise-cli/releases/latest/download/install.sh | sh
 hise-cli
 ```
 
-Or run without installing: `npx @hise/cli`.
+Installs to `~/.local/bin/hise-cli` and verifies the release checksum. Override
+the destination with `HISE_CLI_INSTALL_DIR`. Node.js users can alternatively
+run `npm i -g @hise/cli` or use `npx @hise/cli` without installing.
 
 The automated `/setup` flow supports Debian, Ubuntu, and compatible systems
 with `apt-get`. Other distributions can use hise-cli, but their HISE build

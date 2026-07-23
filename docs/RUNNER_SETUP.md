@@ -4,6 +4,10 @@ One-time bootstrap for each macOS / Windows runner that powers the release
 pipeline (`.github/workflows/release.yml`). Without these prerequisites, the
 codesign, notarize, or Inno Setup steps will fail.
 
+The macOS runner also cross-compiles the unsigned Linux x64 baseline and ARM64
+standalone binaries. Bun provides the target runtimes, so no Linux SDK or Apple
+signing step is required for those artifacts.
+
 The runner labels expected by the workflow are the GitHub defaults
 (`self-hosted` + `macOS` / `Windows`).
 

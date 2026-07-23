@@ -43,14 +43,36 @@ jobs:
           xcrun notarytool submit dist/hise-cli.pkg \
             --keychain-profile notarize --wait
           xcrun stapler staple dist/hise-cli.pkg
+      - name: Build Linux binaries
+        run: |
+          node scripts/build-binary.mjs \
+            --target bun-linux-x64-baseline \
+            --outfile dist/hise-cli-linux-x64
+          node scripts/build-binary.mjs \
+            --target bun-linux-arm64 \
+            --outfile dist/hise-cli-linux-arm64
+          chmod +x dist/hise-cli-linux-x64 dist/hise-cli-linux-arm64
+      - name: Generate Linux checksums
+        working-directory: dist
+        run: shasum -a 256 hise-cli-linux-x64 hise-cli-linux-arm64 > SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
-          name: hise-cli-macos
-          path: dist/hise-cli.pkg
+          name: hise-cli-macos-linux
+          path: |
+            dist/hise-cli.pkg
+            dist/hise-cli-linux-x64
+            dist/hise-cli-linux-arm64
+            dist/SHA256SUMS
+            scripts/install.sh
       - if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/hise-cli.pkg
+          files: |
+            dist/hise-cli.pkg
+            dist/hise-cli-linux-x64
+            dist/hise-cli-linux-arm64
+            dist/SHA256SUMS
+            scripts/install.sh
 
   build-windows:
     runs-on: [self-hosted, Windows]

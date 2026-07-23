@@ -74,9 +74,10 @@ submodules) into `hise-source/` for C++ inspection. Gitignored — local referen
 
 Tag-triggered (`v*`) via `.github/workflows/release.yml` — parallel macOS +
 Windows jobs on self-hosted runners produce `hise-cli.pkg` (universal2,
-codesigned + notarized) and `hise-cli-setup.exe` (Inno Setup, see
-`installer/hise-cli.iss`). `workflow_dispatch` runs build-only smoke tests
-without publishing. Runner bootstrap: [docs/RUNNER_SETUP.md](docs/RUNNER_SETUP.md).
+codesigned + notarized), `hise-cli-setup.exe` (Inno Setup, see
+`installer/hise-cli.iss`), and Linux x64 baseline + ARM64 standalone binaries
+cross-compiled on the macOS runner. `workflow_dispatch` runs build-only smoke
+tests without publishing. Runner bootstrap: [docs/RUNNER_SETUP.md](docs/RUNNER_SETUP.md).
 
 `hise-cli update` (`src/cli/update.ts`) resolves the latest tag via
 `/releases/latest` redirect, runs the platform installer (macOS

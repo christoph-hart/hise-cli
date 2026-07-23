@@ -1,6 +1,6 @@
 {
   "name": "@hise/cli",
-  "version": "0.8.2",
+  "version": "0.8.1",
   "description": "Official command-line interface for HISE REPL and automation workflows",
   "license": "MIT",
   "type": "module",
@@ -53,7 +53,7 @@
     "dev:profile": "npm run build && node dist/index.js --profile",
     "build:binary": "npm run build && node scripts/build-binary.mjs",
     "build:binary:mac": "npm run build && node scripts/build-binary.mjs --target bun-darwin-arm64",
-    "build:binary:linux": "npm run build && node scripts/build-binary.mjs --target bun-linux-x64-baseline --outfile dist/hise-cli-linux-x64 && node scripts/build-binary.mjs --target bun-linux-arm64 --outfile dist/hise-cli-linux-arm64",
+    "build:binary:linux": "npm run build && node scripts/build-binary.mjs --target bun-linux-x64",
     "build:binary:windows": "npm run build && node scripts/build-binary.mjs --target bun-windows-x64",
     "build:binary:windows:arm": "npm run build && node scripts/build-binary.mjs --target bun-windows-arm64"
   },
