@@ -13,8 +13,11 @@ case "$(uname -s)" in
 esac
 
 case "$(uname -m)" in
-	x86_64|amd64) asset="hise-cli-linux-x64" ;;
-	aarch64|arm64) asset="hise-cli-linux-arm64" ;;
+	x86_64|amd64) binary_name="hise-cli-linux-x64" ;;
+	aarch64|arm64)
+		printf '%s\n' "hise-cli: Linux ARM64 is not currently supported" >&2
+		exit 1
+		;;
 	*)
 		printf 'hise-cli: unsupported Linux architecture: %s\n' "$(uname -m)" >&2
 		exit 1
@@ -22,9 +25,9 @@ case "$(uname -m)" in
 esac
 
 if command -v curl >/dev/null 2>&1; then
-	download() { curl -fsSL "$1" -o "$2"; }
+	download() { curl -fL --progress-bar "$1" -o "$2"; }
 elif command -v wget >/dev/null 2>&1; then
-	download() { wget -qO "$2" "$1"; }
+	download() { wget -O "$2" "$1"; }
 else
 	printf '%s\n' "hise-cli: curl or wget is required" >&2
 	exit 1
@@ -34,11 +37,13 @@ tmp_dir=$(mktemp -d)
 trap 'rm -rf "$tmp_dir"' EXIT HUP INT TERM
 
 release_url="$repository/releases/latest/download"
-binary="$tmp_dir/$asset"
+asset="$binary_name.tar.gz"
+archive="$tmp_dir/$asset"
+binary="$tmp_dir/$binary_name"
 checksums="$tmp_dir/SHA256SUMS"
 
 printf 'Downloading %s...\n' "$asset"
-download "$release_url/$asset" "$binary"
+download "$release_url/$asset" "$archive"
 download "$release_url/SHA256SUMS" "$checksums"
 
 expected=$(awk -v asset="$asset" '$2 == asset || $2 == "*" asset { print $1; exit }' "$checksums")
@@ -48,9 +53,9 @@ if [ -z "$expected" ]; then
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-	actual=$(sha256sum "$binary" | awk '{ print $1 }')
+	actual=$(sha256sum "$archive" | awk '{ print $1 }')
 elif command -v shasum >/dev/null 2>&1; then
-	actual=$(shasum -a 256 "$binary" | awk '{ print $1 }')
+	actual=$(shasum -a 256 "$archive" | awk '{ print $1 }')
 else
 	printf '%s\n' "hise-cli: sha256sum or shasum is required" >&2
 	exit 1
@@ -60,6 +65,12 @@ if [ "$actual" != "$expected" ]; then
 	printf '%s\n' "hise-cli: checksum verification failed" >&2
 	exit 1
 fi
+
+if ! command -v tar >/dev/null 2>&1; then
+	printf '%s\n' "hise-cli: tar is required" >&2
+	exit 1
+fi
+tar -xzf "$archive" -C "$tmp_dir"
 
 mkdir -p "$install_dir"
 install -m 0755 "$binary" "$install_dir/hise-cli"

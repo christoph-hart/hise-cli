@@ -14,7 +14,9 @@ import { cliError, exitCodeForPayload } from "./cli/errors.js";
 
 // ── Runtime singleton ───────────────────────────────────────────────
 
-const runtime: NodeRuntime = bootstrapNodeRuntime();
+const runtime: NodeRuntime = bootstrapNodeRuntime({
+	allowInteractive: !process.argv.includes("--web"),
+});
 
 // ── Windows: clean up post-update sidecar ──────────────────────────
 //

@@ -75,25 +75,64 @@ export function makeLineSplitter() {
 	};
 }
 
-export function createNodePhaseExecutor(): PhaseExecutor {
+export interface NodePhaseExecutorOptions {
+	readonly allowInteractive?: boolean;
+}
+
+export function createNodePhaseExecutor(options: NodePhaseExecutorOptions = {}): PhaseExecutor {
+	const supportsInteractive = options.allowInteractive === true && process.stdin.isTTY === true;
 	return {
+		supportsInteractive,
 		async spawn(command: string, args: string[], options: SpawnOptions): Promise<SpawnResult> {
 			return new Promise((resolve) => {
+				if (options.interactive && !supportsInteractive) {
+					resolve({
+						exitCode: 1,
+						stdout: "",
+						stderr: "Interactive terminal input is unavailable.",
+					});
+					return;
+				}
+
 				// On Windows, only route through cmd.exe for bare command names
 				// (so git / winget / .cmd resolution works). When the command
 				// has a path separator it's a direct executable — invoking it
 				// without a shell avoids cmd.exe mis-quoting args with spaces.
 				const useShell = process.platform === "win32" && !/[\/\\]/.test(command);
-				const proc = cpSpawn(command, args, {
-					cwd: options.cwd,
-					env: options.env ? { ...process.env, ...options.env } : undefined,
-					signal: options.signal,
-					stdio: ["ignore", "pipe", "pipe"],
-					shell: useShell,
-				});
+				const stdin = process.stdin;
+				const wasRaw = options.interactive && stdin.isRaw === true;
+				const wasPaused = options.interactive && stdin.isPaused();
+				if (options.interactive) {
+					stdin.pause();
+					if (wasRaw && typeof stdin.setRawMode === "function") stdin.setRawMode(false);
+				}
 
 				const stdoutChunks: string[] = [];
 				const stderrChunks: string[] = [];
+				let settled = false;
+				const finish = (result: SpawnResult) => {
+					if (settled) return;
+					settled = true;
+					if (options.interactive) {
+						if (wasRaw && typeof stdin.setRawMode === "function") stdin.setRawMode(true);
+						if (!wasPaused) stdin.resume();
+					}
+					resolve(result);
+				};
+
+				let proc;
+				try {
+					proc = cpSpawn(command, args, {
+						cwd: options.cwd,
+						env: options.env ? { ...process.env, ...options.env } : undefined,
+						signal: options.signal,
+						stdio: options.interactive ? ["inherit", "inherit", "inherit"] : ["ignore", "pipe", "pipe"],
+						shell: useShell,
+					});
+				} catch (err) {
+					finish({ exitCode: 1, stdout: "", stderr: err instanceof Error ? err.message : String(err) });
+					return;
+				}
 
 				const splitOut = makeLineSplitter();
 				const splitErr = makeLineSplitter();
@@ -115,7 +154,7 @@ export function createNodePhaseExecutor(): PhaseExecutor {
 				});
 
 				proc.on("close", (code) => {
-					resolve({
+					finish({
 						exitCode: code ?? 1,
 						stdout: stdoutChunks.join(""),
 						stderr: stderrChunks.join(""),
@@ -123,7 +162,7 @@ export function createNodePhaseExecutor(): PhaseExecutor {
 				});
 
 				proc.on("error", (err) => {
-					resolve({
+					finish({
 						exitCode: 1,
 						stdout: stdoutChunks.join(""),
 						stderr: err.message,

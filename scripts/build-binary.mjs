@@ -6,7 +6,7 @@
 // Usage:
 //   node scripts/build-binary.mjs                     # all targets
 //   node scripts/build-binary.mjs --target bun-darwin-arm64  # single target
-//   node scripts/build-binary.mjs --target bun-linux-arm64 --outfile dist/hise-cli-linux-arm64
+//   node scripts/build-binary.mjs --target bun-linux-x64-baseline --outfile dist/hise-cli-linux-x64
 
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -18,7 +18,6 @@ const targets = [
 	"bun-darwin-arm64",
 	"bun-darwin-x64",
 	"bun-linux-x64-baseline",
-	"bun-linux-arm64",
 	"bun-windows-x64",
 	"bun-windows-arm64",
 ];

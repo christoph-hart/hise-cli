@@ -19,7 +19,22 @@ function withSignal(
 ): PhaseExecutor {
 	if (!signal) return executor;
 	return {
+		supportsInteractive: executor.supportsInteractive,
 		spawn: (cmd, args, opts) => executor.spawn(cmd, args, { ...opts, signal }),
+	};
+}
+
+const LINUX_ARM_UNSUPPORTED =
+	"Linux /setup currently supports x64 only. Linux ARM64 is not supported because " +
+	"HISE ships an x86-64 Projucer and the full ARM64 toolchain is not validated.";
+
+export function createSetupPlatformCheckHandler(): InternalTaskHandler {
+	return async (answers, onProgress) => {
+		if (answers.platform === "Linux" && answers.architecture !== "x64") {
+			return fail(LINUX_ARM_UNSUPPORTED);
+		}
+		onProgress({ phase: "platform-check", percent: 100, message: "Platform supported." });
+		return ok("✓ Platform supported.");
 	};
 }
 
@@ -825,6 +840,7 @@ export async function compileHise(
 	onProgress: (p: import("../../engine/wizard/types.js").WizardProgress) => void,
 ): Promise<WizardExecResult> {
 	const { installPath, platform, architecture, includeFaust, parallelJobs } = spec;
+	if (platform === "Linux" && architecture === "arm64") return fail(LINUX_ARM_UNSUPPORTED);
 	const phase = spec.phase ?? "compile";
 
 	// Build config: explicit spec value if supplied, otherwise the legacy

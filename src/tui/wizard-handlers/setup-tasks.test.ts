@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	createSetupGitInstallHandler,
+	createSetupPlatformCheckHandler,
 	createSetupCloneRepoHandler,
 	createSetupBuildDepsHandler,
 	createSetupFaustInstallHandler,
@@ -17,6 +18,22 @@ import { MockPhaseExecutor } from "../../engine/wizard/mock-phase-executor.js";
 import type { WizardProgress } from "../../engine/wizard/types.js";
 
 function noop(_p: WizardProgress): void {}
+
+describe("setupPlatformCheck", () => {
+	it("accepts Linux x64", async () => {
+		const handler = createSetupPlatformCheckHandler();
+		const result = await handler({ platform: "Linux", architecture: "x64" }, noop);
+		expect(result.success).toBe(true);
+	});
+
+	it("rejects Linux ARM64 before setup mutates the system", async () => {
+		const handler = createSetupPlatformCheckHandler();
+		const result = await handler({ platform: "Linux", architecture: "arm64" }, noop);
+		expect(result.success).toBe(false);
+		expect(result.message).toContain("x64 only");
+		expect(result.message).toContain("ARM64");
+	});
+});
 
 describe("setupGitInstall", () => {
 	// macOS probes `git` only after xcode-select -p confirms a dev dir
@@ -456,6 +473,19 @@ describe("setupCompilerInstall", () => {
 });
 
 describe("setupCompile (Linux)", () => {
+	it("rejects ARM64 before invoking the x86-64 Projucer", async () => {
+		const executor = new MockPhaseExecutor();
+		const handler = createSetupCompileHandler(executor);
+		const result = await handler({
+			platform: "Linux",
+			architecture: "arm64",
+			installPath: "/HISE",
+		}, noop);
+		expect(result.success).toBe(false);
+		expect(result.message).toContain("ARM64");
+		expect(executor.calls).toHaveLength(0);
+	});
+
 	it("uses the lowercase Projucer path when that is the executable layout", async () => {
 		const executor = new MockPhaseExecutor();
 		executor.onSpawnSequence("test", [

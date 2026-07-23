@@ -20,9 +20,13 @@ export interface SpawnOptions {
 	// lines as a single self-updating slot instead of appending.
 	readonly onLog?: (line: string, transient?: boolean) => void;
 	readonly signal?: AbortSignal;
+	/** Temporarily yield terminal stdin to the child process. Node adapters may
+	 *  reject this when running without a TTY or behind the web frontend. */
+	readonly interactive?: boolean;
 }
 
 /** Platform-specific shell command executor. */
 export interface PhaseExecutor {
+	readonly supportsInteractive?: boolean;
 	spawn(command: string, args: string[], options: SpawnOptions): Promise<SpawnResult>;
 }

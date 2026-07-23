@@ -7,6 +7,7 @@ import type { PhaseExecutor } from "../../engine/wizard/phase-executor.js";
 import { createSetupDetectHandler } from "./setup-detect.js";
 import {
 	createSetupGitInstallHandler,
+	createSetupPlatformCheckHandler,
 	createSetupCloneRepoHandler,
 	createSetupBuildDepsHandler,
 	createSetupFaustInstallHandler,
@@ -61,6 +62,7 @@ export function registerSetupHandlers(
 	registry.registerInit("setupDetectEnvironment", createSetupDetectHandler(executor));
 
 	// Task handlers
+	registry.registerTask("setupPlatformCheck", createSetupPlatformCheckHandler());
 	registry.registerTask("setupGitInstall", createSetupGitInstallHandler(executor));
 	registry.registerTask("setupCloneRepo", createSetupCloneRepoHandler(executor));
 	registry.registerTask("setupBuildDeps", createSetupBuildDepsHandler(executor));

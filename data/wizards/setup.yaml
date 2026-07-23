@@ -15,6 +15,8 @@ body: |
   - **Verify**: Confirms the built binary works correctly
 
   > The full build can take 30+ minutes depending on your machine.
+  > Linux setup currently supports x64 Debian/Ubuntu systems only and may ask
+  > for administrator authorization when apt packages are missing.
 
 init:
   type: internal
@@ -133,6 +135,10 @@ tabs:
 
 submitLabel: Starts the HISE build pipeline (may take 30+ minutes)
 tasks:
+  - id: platformCheck
+    function: setupPlatformCheck
+    type: internal
+    label: Check platform support
   - id: compilerInstall
     function: setupCompilerInstall
     type: internal

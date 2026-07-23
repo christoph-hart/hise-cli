@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { makeLineSplitter } from "./nodePhaseExecutor.js";
+import { createNodePhaseExecutor, makeLineSplitter } from "./nodePhaseExecutor.js";
 
 describe("makeLineSplitter", () => {
 	it("emits plain NL-terminated lines as non-transient", () => {
@@ -64,5 +64,14 @@ describe("makeLineSplitter", () => {
 		expect(b).toEqual([
 			{ line: "abc\x1b[31mred", transient: false },
 		]);
+	});
+});
+
+describe("createNodePhaseExecutor", () => {
+	it("rejects interactive commands when terminal input is disabled", async () => {
+		const executor = createNodePhaseExecutor({ allowInteractive: false });
+		const result = await executor.spawn("unused", [], { interactive: true });
+		expect(result.exitCode).toBe(1);
+		expect(result.stderr).toContain("unavailable");
 	});
 });

@@ -22,9 +22,29 @@ export async function runApt(
 
 	const uid = await executor.spawn("id", ["-u"], {});
 	const asRoot = uid.exitCode === 0 && uid.stdout.trim() === "0";
-	return asRoot
-		? executor.spawn("apt-get", args, { onLog })
-		: executor.spawn("sudo", ["apt-get", ...args], { onLog });
+	if (asRoot) return executor.spawn("apt-get", args, { onLog });
+
+	let authorized = await executor.spawn("sudo", ["-n", "true"], {});
+	if (authorized.exitCode !== 0) {
+		if (!executor.supportsInteractive) {
+			return {
+				exitCode: 1,
+				stdout: "",
+				stderr: "Administrator access is required. Run `sudo -v` in the server terminal, then `/resume`.",
+			};
+		}
+		onLog?.("Administrator access is required. Enter your sudo password in the terminal.");
+		authorized = await executor.spawn("sudo", ["-v"], { interactive: true });
+		if (authorized.exitCode !== 0) {
+			return {
+				exitCode: authorized.exitCode,
+				stdout: authorized.stdout,
+				stderr: "Administrator authorization failed. Run `sudo -v`, then `/resume`.",
+			};
+		}
+	}
+
+	return executor.spawn("sudo", ["-n", "apt-get", ...args], { onLog });
 }
 
 export async function installAptPackages(

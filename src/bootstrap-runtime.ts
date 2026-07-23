@@ -31,8 +31,12 @@ export interface NodeRuntime {
 	dataLoader: DataLoader;
 }
 
-export function bootstrapNodeRuntime(): NodeRuntime {
-	const phaseExecutor = createNodePhaseExecutor();
+export interface BootstrapNodeRuntimeOptions {
+	readonly allowInteractive?: boolean;
+}
+
+export function bootstrapNodeRuntime(options: BootstrapNodeRuntimeOptions = {}): NodeRuntime {
+	const phaseExecutor = createNodePhaseExecutor({ allowInteractive: options.allowInteractive });
 	const handlerRegistry = new WizardHandlerRegistry();
 	registerSetupHandlers(handlerRegistry, phaseExecutor);
 	registerCompileHandlers(handlerRegistry, phaseExecutor);
