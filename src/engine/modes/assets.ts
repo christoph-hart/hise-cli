@@ -337,6 +337,13 @@ function formatInstall(r: InstallResult): CommandResult {
 			if (files.length > FILE_CAP) {
 				lines.push(`- _… ${files.length - FILE_CAP} more_`);
 			}
+			if (r.sharedFilesReused.length > 0) {
+				lines.push("", `### Shared Files Reused (${r.sharedFilesReused.length})`);
+				lines.push(...r.sharedFilesReused.slice(0, FILE_CAP).map((f) => `- \`${f}\``));
+				if (r.sharedFilesReused.length > FILE_CAP) {
+					lines.push(`- _… ${r.sharedFilesReused.length - FILE_CAP} more_`);
+				}
+			}
 			if (r.warnings.length > 0) {
 				lines.push("", "_Warnings:_", ...r.warnings.map((w) => `- ${w}`));
 			}
@@ -349,7 +356,12 @@ function formatInstall(r: InstallResult): CommandResult {
 		case "fileConflict":
 			return errorResult(
 				"Cannot install: some files in your project would be overwritten by this package.",
-				`Move or rename these files first, then retry:\n${r.collisions.map((p) => `- ${p}`).join("\n")}`,
+				`${r.collisions.map((p) => `- ${p}`).join("\n")}\n\nShared files can only be installed when every package marks them as shared and the file contents are identical.`,
+			);
+		case "updateConflict":
+			return errorResult(
+				"Cannot update this package because it changes shared files that are also used by another package.",
+				`${r.collisions.map((p) => `- ${p}`).join("\n")}\n\nShared files must stay identical across all installed assets. Uninstall all affected packs first, then install compatible versions.`,
 			);
 		case "invalidPackage":
 			return errorResult(`Invalid package: ${r.message}`);
@@ -399,11 +411,16 @@ function formatInstall(r: InstallResult): CommandResult {
 function formatUninstall(r: Awaited<ReturnType<typeof uninstall>>): CommandResult {
 	switch (r.kind) {
 		case "ok": {
-			const lines = [`Uninstalled — removed ${r.deleted.length} file(s)${r.skipped.length > 0 ? `, kept ${r.skipped.length} that you've modified` : ""}.`];
+			const lines = [`Uninstalled — removed ${r.deleted.length} file(s)${r.skipped.length > 0 ? `, kept ${r.skipped.length} that you've modified` : ""}${r.keptOwned.length > 0 ? `, kept ${r.keptOwned.length} owned by another package` : ""}.`];
 			if (r.needsCleanup) {
 				lines.push("", "Some files were skipped because you've modified them. Run `cleanup <name>` when you're ready to delete them too.");
 				lines.push(...r.skipped.slice(0, 10).map((p) => `- ${p}`));
 				if (r.skipped.length > 10) lines.push(`- ... ${r.skipped.length - 10} more`);
+			}
+			if (r.keptOwned.length > 0) {
+				lines.push("", "### Kept Because Another Package Owns Them");
+				lines.push(...r.keptOwned.slice(0, 10).map((p) => `- ${p}`));
+				if (r.keptOwned.length > 10) lines.push(`- ... ${r.keptOwned.length - 10} more`);
 			}
 			return markdownResult(lines.join("\n"));
 		}

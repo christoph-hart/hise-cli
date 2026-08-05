@@ -8,6 +8,7 @@ function fileStep(over: Partial<FileStep> = {}): FileStep {
 		target: "Scripts/a.js",
 		hash: 12345n,
 		hasHashField: true,
+		shared: false,
 		modified: "2026-01-01T00:00:00",
 		...over,
 	};

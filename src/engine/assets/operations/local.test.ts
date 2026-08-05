@@ -47,6 +47,15 @@ describe("readLocalFolders", () => {
 		expect(await readLocalFolders(env)).toEqual(["/a", "/b"]);
 	});
 
+	it("normalizes and deduplicates slash variants on read", async () => {
+		const { env, fs } = makeEnv();
+		fs.seedText(localFoldersPath(env), JSON.stringify([
+			"D:\\Development\\Projekte\\MyLib",
+			"D:/Development/Projekte/MyLib/",
+		]));
+		expect(await readLocalFolders(env)).toEqual(["D:/Development/Projekte/MyLib"]);
+	});
+
 	it("rejects non-array", async () => {
 		const { env, fs } = makeEnv();
 		fs.seedText(localFoldersPath(env), '"not an array"');
@@ -99,6 +108,15 @@ describe("addLocalFolder", () => {
 		const r = await addLocalFolder(env, "/proj/MyLib");
 		expect(r).toEqual({ kind: "duplicate", folder: "/proj/MyLib" });
 	});
+
+	it("returns duplicate for Windows slash variants", async () => {
+		const { env, fs } = makeEnv();
+		fs.seedText("D:/Development/Projekte/MyLib/project_info.xml", PROJECT_XML);
+		await addLocalFolder(env, "D:\\Development\\Projekte\\MyLib");
+		const r = await addLocalFolder(env, "D:/Development/Projekte/MyLib/");
+		expect(r).toEqual({ kind: "duplicate", folder: "D:/Development/Projekte/MyLib" });
+		expect(await readLocalFolders(env)).toEqual(["D:/Development/Projekte/MyLib"]);
+	});
 });
 
 describe("removeLocalFolder", () => {
@@ -107,6 +125,14 @@ describe("removeLocalFolder", () => {
 		await writeLocalFolders(env, ["/proj/MyLib", "/proj/Other"]);
 		const r = await removeLocalFolder(env, "/proj/MyLib");
 		expect(r).toEqual({ kind: "ok", folder: "/proj/MyLib" });
+		expect(await readLocalFolders(env)).toEqual(["/proj/Other"]);
+	});
+
+	it("removes by normalized path variant", async () => {
+		const { env } = makeEnv();
+		await writeLocalFolders(env, ["D:/Development/Projekte/MyLib", "/proj/Other"]);
+		const r = await removeLocalFolder(env, "D:\\Development\\Projekte\\MyLib\\");
+		expect(r).toEqual({ kind: "ok", folder: "D:/Development/Projekte/MyLib" });
 		expect(await readLocalFolders(env)).toEqual(["/proj/Other"]);
 	});
 

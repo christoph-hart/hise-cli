@@ -38,13 +38,14 @@ describe("normalizeInstallLog", () => {
 			type: "Preprocessor",
 			data: { HISE_NUM_CHANNELS: [null, "4"] },
 		});
-		expect(entry.steps[2]).toEqual({
-			type: "File",
-			target: "Scripts/sbb/main.js",
-			hash: -8123456789012345678n,
-			hasHashField: true,
-			modified: "2026-04-09T14:29:58",
-		});
+			expect(entry.steps[2]).toEqual({
+				type: "File",
+				target: "Scripts/sbb/main.js",
+				hash: -8123456789012345678n,
+				hasHashField: true,
+				shared: false,
+				modified: "2026-04-09T14:29:58",
+			});
 		expect(entry.steps[3]).toEqual({ type: "Info" });
 		expect(entry.steps[4]).toEqual({ type: "Clipboard" });
 	});
@@ -61,6 +62,20 @@ describe("normalizeInstallLog", () => {
 		const file = (got[0] as ActiveInstallLogEntry).steps[0] as FileStep;
 		expect(file.hash).toBe(1234n);
 		expect(file.hasHashField).toBe(true);
+		expect(file.shared).toBe(false);
+	});
+
+	it("parses Shared true on file steps", () => {
+		const got = normalizeInstallLog([
+			{
+				...sampleActive,
+				Steps: [
+					{ Type: "File", Target: "Scripts/a.h", Hash: "1234", Shared: true, Modified: "2026-01-01T00:00:00" },
+				],
+			},
+		]);
+		const file = (got[0] as ActiveInstallLogEntry).steps[0] as FileStep;
+		expect(file.shared).toBe(true);
 	});
 
 	it("treats missing Hash field as legacy missing", () => {
@@ -159,6 +174,21 @@ describe("serializeInstallLog", () => {
 		const fileStep = (serialized[0] as { Steps: Array<{ Type: string; Hash?: unknown }> }).Steps[2];
 		expect(fileStep.Type).toBe("File");
 		expect(fileStep.Hash).toBe("-8123456789012345678");
+		expect(fileStep).not.toHaveProperty("Shared");
+	});
+
+	it("serializes Shared only when true", () => {
+		const parsed = normalizeInstallLog([
+			{
+				...sampleActive,
+				Steps: [
+					{ Type: "File", Target: "Scripts/a.js", Hash: "42", Shared: true, Modified: "2026-01-01T00:00:00" },
+				],
+			},
+		]);
+		const out = serializeInstallLog(parsed);
+		const fileStep = (out[0] as { Steps: Array<Record<string, unknown>> }).Steps[0];
+		expect(fileStep.Shared).toBe(true);
 	});
 
 	it("legacy number Hash is migrated to string on write", () => {

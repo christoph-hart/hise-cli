@@ -25,9 +25,13 @@ describe("normalizeRelPath", () => {
 });
 
 describe("matchesWildcard", () => {
-	it("glob matches against filename only", () => {
+	it("glob matches against filename only when there is no path segment", () => {
 		expect(matchesWildcard("*.js", file("Scripts/main.js"))).toBe(true);
 		expect(matchesWildcard("*.js", file("Scripts/main.css"))).toBe(false);
+	});
+	it("glob with a path segment matches against relPath", () => {
+		expect(matchesWildcard("Scripts/Common/*", file("Scripts/Common/main.js"))).toBe(true);
+		expect(matchesWildcard("Scripts/Common/*", file("Scripts/Other/main.js"))).toBe(false);
 	});
 	it("? matches single char", () => {
 		expect(matchesWildcard("a?.js", file("Scripts/ab.js"))).toBe(true);

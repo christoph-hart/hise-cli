@@ -83,6 +83,34 @@ describe("uninstall", () => {
 		expect(await readInstallLog(env, PROJECT)).toEqual([]);
 	});
 
+	it("keeps files still owned by another active package", async () => {
+		const { env, fs } = makeEnv();
+		const content = "shared";
+		fs.seedText(`${PROJECT}/Scripts/common.js`, content);
+		fs.seedText(installLogPath(PROJECT), JSON.stringify([
+			{
+				...baseMeta,
+				Steps: [{ ...makeFileEntry("Scripts/common.js", content), Shared: true }],
+			},
+			{
+				Name: "other", Company: "v", Version: "1.0.0",
+				Date: "2026-04-09T14:30:00", Mode: "StoreDownload",
+				Steps: [{ ...makeFileEntry("Scripts/common.js", content), Shared: true }],
+			},
+		]));
+
+		const r = await uninstall(env, "pkg");
+		expect(r.kind).toBe("ok");
+		if (r.kind !== "ok") return;
+		expect(r.deleted).toEqual([]);
+		expect(r.skipped).toEqual([]);
+		expect(r.keptOwned).toEqual([`${PROJECT}/Scripts/common.js`]);
+		expect(r.needsCleanup).toBe(false);
+		expect(await fs.exists(`${PROJECT}/Scripts/common.js`)).toBe(true);
+		const log = await readInstallLog(env, PROJECT);
+		expect(log.map((e) => e.name)).toEqual(["other"]);
+	});
+
 	it("skips modified text files and rewrites entry as NeedsCleanup", async () => {
 		const { env, fs } = makeEnv();
 		const original = "original contents";

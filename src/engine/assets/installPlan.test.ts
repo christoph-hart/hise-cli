@@ -13,6 +13,7 @@ function defaultManifest(over: Partial<PackageInstallManifest> = {}): PackageIns
 		fileTypes: [],
 		positiveWildcard: ["*"],
 		negativeWildcard: [],
+		sharedWildcard: [],
 		preprocessors: [],
 		infoText: "",
 		clipboardContent: "",
@@ -45,7 +46,7 @@ function defaultInput(over: Partial<InstallPlanInput> = {}): InstallPlanInput {
 		targetPreprocessors: {},
 		targetSettings: {},
 		targetExistingPaths: new Set(),
-		claimedPaths: new Set(),
+		ownership: new Map(),
 		existingPackageVersion: null,
 		...over,
 	};
@@ -90,8 +91,8 @@ describe("computeInstallPlan", () => {
 		if (r.kind !== "ok") return;
 		expect(r.plan.filesToCopy).toEqual(["Scripts/a.js", "Images/logo.png"]);
 		expect(r.plan.entry.steps).toEqual([
-			{ type: "File", target: "Scripts/a.js", hash: 11n, hasHashField: true, modified: "2026-04-09T14:29:58" },
-			{ type: "File", target: "Images/logo.png", hash: null, hasHashField: false, modified: "2026-04-09T14:29:58" },
+			{ type: "File", target: "Scripts/a.js", hash: 11n, hasHashField: true, shared: false, modified: "2026-04-09T14:29:58" },
+			{ type: "File", target: "Images/logo.png", hash: null, hasHashField: false, shared: false, modified: "2026-04-09T14:29:58" },
 		]);
 	});
 
@@ -230,18 +231,32 @@ describe("computeInstallPlan", () => {
 		const r = computeInstallPlan(defaultInput({
 			sourceFiles: [txt("Scripts/a.js", 1n), txt("Scripts/b.js", 2n)],
 			targetExistingPaths: new Set(["Scripts/b.js"]),
-			claimedPaths: new Set(), // not claimed by any existing pkg
+			ownership: new Map(), // not claimed by any existing pkg
 		}));
-		expect(r).toEqual({ kind: "fileConflict", collisions: ["Scripts/b.js"] });
+		expect(r).toEqual({ kind: "fileConflict", collisions: [{ target: "Scripts/b.js", reason: "Scripts/b.js: trying to overwrite a user file" }] });
 	});
 
-	it("does not flag conflict for path claimed by existing log", () => {
+	it("reuses identical shared file claimed by existing log", () => {
 		const r = computeInstallPlan(defaultInput({
+			manifest: defaultManifest({ sharedWildcard: ["Scripts/*"] }),
 			sourceFiles: [txt("Scripts/a.js", 1n)],
 			targetExistingPaths: new Set(["Scripts/a.js"]),
-			claimedPaths: new Set(["Scripts/a.js"]),
+			ownership: new Map([["Scripts/a.js", [{
+				packageId: "other::other",
+				name: "other",
+				company: "other",
+				version: "1.0.0",
+				target: "Scripts/a.js",
+				shared: true,
+				hash: 1n,
+				hasHashField: true,
+			}]]]),
 		}));
 		expect(r.kind).toBe("ok");
+		if (r.kind !== "ok") return;
+	expect(r.plan.filesToCopy).toEqual([]);
+	expect(r.plan.sharedFilesToReuse).toEqual(["Scripts/a.js"]);
+	expect(r.plan.entry.steps[0]).toMatchObject({ type: "File", target: "Scripts/a.js", shared: true });
 	});
 
 	it("logs entry metadata", () => {

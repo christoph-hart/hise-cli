@@ -13,12 +13,13 @@ import type {
 	FileStep,
 } from "../../mock/contracts/assets/installLog.js";
 import type { PackageInstallManifest } from "../../mock/contracts/assets/packageInstall.js";
+import type { OwnershipMap } from "./ownership.js";
 import {
 	lookupSourcePreprocessor,
 	type ProjectInfo,
 } from "../../mock/contracts/assets/projectInfoXml.js";
 import { compareVersions } from "./semver.js";
-import { shouldIncludeFile, type CandidateFile } from "./wildcard.js";
+import { matchesWildcard, shouldIncludeFile, type CandidateFile } from "./wildcard.js";
 
 // Settings copied verbatim from source -> target. Spec §8 step 6.2.
 const PORTABLE_SETTINGS = ["OSXStaticLibs", "WindowsStaticLibFolder"] as const;
@@ -46,8 +47,7 @@ export interface InstallPlanInput {
 	targetSettings: Record<string, string>;
 	// Project-relative paths that currently exist on disk in the target project.
 	targetExistingPaths: Set<string>;
-	// Project-relative paths claimed by the existing install log (already-installed package files).
-	claimedPaths: Set<string>;
+	ownership: OwnershipMap;
 	// Existing install log — used to detect the "already installed" / "different version" cases.
 	existingPackageVersion: string | null;
 }
@@ -56,14 +56,20 @@ export interface InstallPlan {
 	entry: ActiveInstallLogEntry;
 	// File targets in install order (relative paths). Convenience for the runtime.
 	filesToCopy: string[];
+	sharedFilesToReuse: string[];
 	warnings: string[];
+}
+
+export interface InstallConflict {
+	target: string;
+	reason: string;
 }
 
 export type InstallPlanResult =
 	| { kind: "ok"; plan: InstallPlan }
 	| { kind: "alreadyInstalled"; existingVersion: string }
 	| { kind: "needsUpgrade"; existingVersion: string }
-	| { kind: "fileConflict"; collisions: string[] };
+	| { kind: "fileConflict"; collisions: InstallConflict[] };
 
 export function computeInstallPlan(input: InstallPlanInput): InstallPlanResult {
 	if (input.existingPackageVersion !== null) {
@@ -100,7 +106,8 @@ export function computeInstallPlan(input: InstallPlanInput): InstallPlanResult {
 
 	// 3. File steps
 	const filesToCopy: string[] = [];
-	const collisions: string[] = [];
+	const sharedFilesToReuse: string[] = [];
+	const collisions: InstallConflict[] = [];
 	for (const f of input.sourceFiles) {
 		const candidate: CandidateFile = { relPath: f.relPath, name: f.name };
 		if (!shouldIncludeFile(candidate, {
@@ -110,17 +117,30 @@ export function computeInstallPlan(input: InstallPlanInput): InstallPlanResult {
 		})) continue;
 
 		const targetRel = f.relPath;
-		if (input.targetExistingPaths.has(targetRel) && !input.claimedPaths.has(targetRel)) {
-			collisions.push(targetRel);
-			continue;
+		const shared = isSharedFile(f, candidate, input.manifest);
+		const owners = input.ownership.get(targetRel) ?? [];
+		if (input.targetExistingPaths.has(targetRel)) {
+			if (owners.length === 0) {
+				collisions.push({ target: targetRel, reason: `${targetRel}: trying to overwrite a user file` });
+				continue;
+			}
+			const accepted = classifyOwnedExisting(targetRel, shared, f.hash, owners);
+			if (accepted !== null) {
+				if (accepted === "reuse") sharedFilesToReuse.push(targetRel);
+				else collisions.push({ target: targetRel, reason: accepted });
+				if (accepted !== "reuse") continue;
+			} else {
+				filesToCopy.push(targetRel);
+			}
+		} else {
+			filesToCopy.push(targetRel);
 		}
-
-		filesToCopy.push(targetRel);
 		steps.push({
 			type: "File",
 			target: targetRel,
 			hash: f.isText ? f.hash : null,
 			hasHashField: f.isText,
+			shared,
 			modified: f.modified,
 		} satisfies FileStep);
 	}
@@ -143,7 +163,28 @@ export function computeInstallPlan(input: InstallPlanInput): InstallPlanResult {
 		mode: input.mode,
 		steps,
 	};
-	return { kind: "ok", plan: { entry, filesToCopy, warnings } };
+	return { kind: "ok", plan: { entry, filesToCopy, sharedFilesToReuse, warnings } };
+}
+
+function isSharedFile(file: SourceFileEntry, candidate: CandidateFile, manifest: PackageInstallManifest): boolean {
+	if (!file.isText || file.hash === null) return false;
+	return manifest.sharedWildcard.some((pattern) => matchesWildcard(pattern, candidate));
+}
+
+function classifyOwnedExisting(
+	target: string,
+	incomingShared: boolean,
+	incomingHash: bigint | null,
+	owners: readonly { name: string; version: string; shared: boolean; hash: bigint | null; hasHashField: boolean }[],
+): "reuse" | string | null {
+	if (owners.length === 0) return null;
+	if (!incomingShared) return `${target}: trying to overwrite a file from another package`;
+	for (const owner of owners) {
+		if (!owner.shared) return `${target}: file conflict with existing package`;
+		if (!owner.hasHashField || owner.hash === null || incomingHash === null) return `${target}: file conflict with existing package`;
+		if (owner.hash !== incomingHash) return `${target}: shared file content differs from existing package ${owner.name} ${owner.version}`;
+	}
+	return "reuse";
 }
 
 function computeProjectSettingStep(input: InstallPlanInput): ProjectSettingStep | null {

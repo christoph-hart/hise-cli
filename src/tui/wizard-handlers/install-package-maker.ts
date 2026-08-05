@@ -72,6 +72,7 @@ export function createInstallPackageMakerInitHandler(
 			FileTypes: ASSET_DIRECTORY_IDS.join(", "),
 			PositiveWildcard: "*",
 			NegativeWildcard: "",
+			SharedWildcard: "",
 			Preprocessors: "",
 			InfoText: "",
 			ClipboardContent: "",
@@ -99,6 +100,7 @@ export function createInstallPackageMakerInitHandler(
 				}
 				defaults.PositiveWildcard = parsed.positiveWildcard.join(", ");
 				defaults.NegativeWildcard = parsed.negativeWildcard.join(", ");
+				defaults.SharedWildcard = parsed.sharedWildcard.join(", ");
 				defaults.Preprocessors = parsed.preprocessors.join(", ");
 				defaults.InfoText = parsed.infoText;
 				defaults.ClipboardContent = parsed.clipboardContent;
@@ -212,6 +214,7 @@ function buildManifest(answers: Record<string, string>): Record<string, unknown>
 	const fileTypes = parseList(answers.FileTypes ?? "");
 	const positiveWildcard = parseList(answers.PositiveWildcard ?? "*");
 	const negativeWildcard = parseList(answers.NegativeWildcard ?? "");
+	const sharedWildcard = parseList(answers.SharedWildcard ?? "");
 	const preprocessors = parseList(answers.Preprocessors ?? "");
 	const infoText = answers.InfoText ?? "";
 	const clipboardContent = answers.ClipboardContent ?? "";
@@ -224,6 +227,7 @@ function buildManifest(answers: Record<string, string>): Record<string, unknown>
 		manifest.PositiveWildcard = positiveWildcard;
 	}
 	if (negativeWildcard.length > 0) manifest.NegativeWildcard = negativeWildcard;
+	if (sharedWildcard.length > 0) manifest.SharedWildcard = sharedWildcard;
 	if (preprocessors.length > 0) manifest.Preprocessors = preprocessors;
 	if (infoText.length > 0) manifest.InfoText = infoText;
 	if (clipboardContent.length > 0) manifest.ClipboardContent = clipboardContent;

@@ -26,11 +26,11 @@ export async function readLocalFolders(env: AssetEnvironment): Promise<string[]>
 	if (!Array.isArray(parsed) || parsed.some((p) => typeof p !== "string")) {
 		throw new Error(`${LOCAL_FOLDERS_BASENAME} must be a JSON array of strings`);
 	}
-	return parsed as string[];
+	return dedupeFolders((parsed as string[]).map(normalizeLocalFolderPath));
 }
 
 export async function writeLocalFolders(env: AssetEnvironment, folders: string[]): Promise<void> {
-	await env.fs.writeText(localFoldersPath(env), JSON.stringify(folders, null, 2));
+	await env.fs.writeText(localFoldersPath(env), JSON.stringify(dedupeFolders(folders.map(normalizeLocalFolderPath)), null, 2));
 }
 
 export interface LocalFolderInfo {
@@ -41,6 +41,7 @@ export interface LocalFolderInfo {
 }
 
 export async function describeLocalFolder(env: AssetEnvironment, folder: string): Promise<LocalFolderInfo> {
+	folder = normalizeLocalFolderPath(folder);
 	const xmlPath = joinPath(folder, "project_info.xml");
 	const userPath = joinPath(folder, "user_info.xml");
 	let name: string | null = null;
@@ -63,14 +64,12 @@ export type AddLocalResult =
 	| { kind: "missingProjectInfo"; folder: string };
 
 export async function addLocalFolder(env: AssetEnvironment, input: string): Promise<AddLocalResult> {
-	let folder = input.trim();
-	// User may have passed the package_install.json file directly.
-	if (folder.endsWith("/package_install.json")) folder = dirname(folder);
+	const folder = normalizeLocalFolderPath(input);
 	if (!await env.fs.exists(joinPath(folder, "project_info.xml"))) {
 		return { kind: "missingProjectInfo", folder };
 	}
 	const list = await readLocalFolders(env);
-	if (list.includes(folder)) {
+	if (list.some((existing) => sameFolder(existing, folder))) {
 		return { kind: "duplicate", folder };
 	}
 	list.push(folder);
@@ -84,7 +83,8 @@ export type RemoveLocalResult =
 
 export async function removeLocalFolder(env: AssetEnvironment, query: string): Promise<RemoveLocalResult> {
 	const list = await readLocalFolders(env);
-	let idx = list.indexOf(query);
+	const normalizedQuery = normalizeLocalFolderPath(query);
+	let idx = list.findIndex((folder) => sameFolder(folder, normalizedQuery));
 	if (idx < 0) {
 		for (let i = 0; i < list.length; i++) {
 			const xmlPath = joinPath(list[i], "project_info.xml");
@@ -98,4 +98,31 @@ export async function removeLocalFolder(env: AssetEnvironment, query: string): P
 	list.splice(idx, 1);
 	await writeLocalFolders(env, list);
 	return { kind: "ok", folder: removed };
+}
+
+function normalizeLocalFolderPath(input: string): string {
+	let folder = input.trim().replaceAll("\\", "/").replace(/\/+$/, "");
+	// User may have passed the package_install.json file directly.
+	if (folder.endsWith("/package_install.json")) folder = dirname(folder);
+	return folder;
+}
+
+function sameFolder(a: string, b: string): boolean {
+	return folderKey(a) === folderKey(b);
+}
+
+function folderKey(folder: string): string {
+	return normalizeLocalFolderPath(folder).toLowerCase();
+}
+
+function dedupeFolders(folders: string[]): string[] {
+	const seen = new Set<string>();
+	const out: string[] = [];
+	for (const folder of folders) {
+		const key = folderKey(folder);
+		if (seen.has(key)) continue;
+		seen.add(key);
+		out.push(folder);
+	}
+	return out;
 }

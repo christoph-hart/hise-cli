@@ -19,12 +19,13 @@ import {
 	writeTargetSetting,
 } from "../hiseAdapter.js";
 import { joinPath } from "../io.js";
+import { buildOwnershipMap, otherOwners } from "../ownership.js";
 import { classifyFileForUninstall, reverseSteps } from "../uninstallPlan.js";
 import { isTextExtension } from "../textExtensions.js";
 import { readInstallLog, writeInstallLog } from "./log.js";
 
 export type UninstallResult =
-	| { kind: "ok"; deleted: string[]; skipped: string[]; needsCleanup: boolean }
+	| { kind: "ok"; deleted: string[]; skipped: string[]; keptOwned: string[]; needsCleanup: boolean }
 	| { kind: "notFound"; package: string }
 	| { kind: "alreadyNeedsCleanup"; package: string }
 	| { kind: "transportError"; message: string };
@@ -49,12 +50,19 @@ export async function uninstall(
 	}
 
 	const reversed = reverseSteps(entry.steps);
+	const ownership = buildOwnershipMap(entries);
 	const deleted: string[] = [];
 	const skipped: string[] = [];
+	const keptOwned: string[] = [];
 
 	for (const step of reversed) {
 		if (step.type === "File") {
 			const abs = joinPath(projectFolder, step.target);
+			const owners = otherOwners(ownership.get(step.target), { name: entry.name, company: entry.company });
+			if (owners.length > 0) {
+				keptOwned.push(abs);
+				continue;
+			}
 			let currentHash: bigint | null = null;
 			if (step.hasHashField && isTextExtension(step.target) && await env.fs.exists(abs)) {
 				try {
@@ -130,5 +138,5 @@ export async function uninstall(
 	}
 	await writeInstallLog(env, projectFolder, next);
 
-	return { kind: "ok", deleted, skipped, needsCleanup: skipped.length > 0 };
+	return { kind: "ok", deleted, skipped, keptOwned, needsCleanup: skipped.length > 0 };
 }

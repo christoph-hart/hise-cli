@@ -72,6 +72,7 @@ describe("createInstallPackageMakerInitHandler", () => {
 			FileTypes: ["Scripts"],
 			PositiveWildcard: ["*.js"],
 			NegativeWildcard: ["*.tmp"],
+			SharedWildcard: ["Scripts/Common/*"],
 			Preprocessors: ["FOO"],
 			InfoText: "## Setup",
 			ClipboardContent: "include();",
@@ -83,6 +84,7 @@ describe("createInstallPackageMakerInitHandler", () => {
 		expect(struct.defaults.FileTypes).toBe("Scripts");
 		expect(struct.defaults.PositiveWildcard).toBe("*.js");
 		expect(struct.defaults.NegativeWildcard).toBe("*.tmp");
+		expect(struct.defaults.SharedWildcard).toBe("Scripts/Common/*");
 		expect(struct.defaults.Preprocessors).toBe("FOO");
 		expect(struct.defaults.InfoText).toBe("## Setup");
 		expect(struct.defaults.ClipboardContent).toBe("include();");
@@ -111,6 +113,7 @@ describe("createInstallPackageMakerWriteHandler", () => {
 			FileTypes: "Scripts, AdditionalSourceCode, Samples, Images, AudioFiles, SampleMaps, MidiFiles, DspNetworks, Presets",
 			PositiveWildcard: "*",
 			NegativeWildcard: "",
+			SharedWildcard: "",
 			Preprocessors: "",
 			InfoText: "## Hello",
 			ClipboardContent: "",
@@ -129,6 +132,7 @@ describe("createInstallPackageMakerWriteHandler", () => {
 			FileTypes: "Scripts, Images",
 			PositiveWildcard: "*",
 			NegativeWildcard: "",
+			SharedWildcard: "Scripts/Common/*, AdditionalSourceCode/Vendor/Common/*",
 			Preprocessors: "FOO, BAR",
 			InfoText: "",
 			ClipboardContent: "",
@@ -136,6 +140,7 @@ describe("createInstallPackageMakerWriteHandler", () => {
 		}, () => {}, undefined, undefined);
 		const written = JSON.parse(await fs.readText(`${PROJECT}/package_install.json`));
 		expect(written.FileTypes).toEqual(["Scripts", "Images"]);
+		expect(written.SharedWildcard).toEqual(["Scripts/Common/*", "AdditionalSourceCode/Vendor/Common/*"]);
 		expect(written.Preprocessors).toEqual(["FOO", "BAR"]);
 	});
 
@@ -148,6 +153,7 @@ describe("createInstallPackageMakerWriteHandler", () => {
 			FileTypes: "Scripts, AdditionalSourceCode, Samples, Images, AudioFiles, SampleMaps, MidiFiles, DspNetworks, Presets",
 			PositiveWildcard: "*",
 			NegativeWildcard: "",
+			SharedWildcard: "",
 			Preprocessors: "",
 			InfoText: "",
 			ClipboardContent: "",

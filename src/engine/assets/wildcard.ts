@@ -67,7 +67,7 @@ function escapeRegex(s: string): string {
 
 export function matchesWildcard(pattern: string, file: CandidateFile): boolean {
 	if (pattern.includes("*") || pattern.includes("?")) {
-		return globToRegex(pattern).test(file.name);
+		return globToRegex(pattern).test(pattern.includes("/") ? file.relPath : file.name);
 	}
 	// Substring match against full relative path (forward-slash normalized).
 	return file.relPath.includes(pattern);

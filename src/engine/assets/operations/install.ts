@@ -22,13 +22,15 @@ import {
 	type SourceFileEntry,
 } from "../installPlan.js";
 import { joinPath } from "../io.js";
+import { buildOwnershipMap, otherOwners } from "../ownership.js";
 import { compareVersions } from "../semver.js";
 import {
 	isTextExtension,
 	TEXT_FILE_SIZE_CAP,
 } from "../textExtensions.js";
+import { matchesWildcard, shouldIncludeFile } from "../wildcard.js";
 import { readStoredToken } from "./auth.js";
-import { claimedPaths, readInstallLog, writeInstallLog } from "./log.js";
+import { readInstallLog, writeInstallLog } from "./log.js";
 import { acquireLocal, acquireStore, type AcquiredSource } from "./source.js";
 import { uninstall } from "./uninstall.js";
 
@@ -59,9 +61,11 @@ export type InstallResult =
 		warnings: string[];
 		infoText: string;
 		clipboardWritten: boolean;
+		sharedFilesReused: string[];
 	}
 	| { kind: "alreadyInstalled"; existingVersion: string }
 	| { kind: "fileConflict"; collisions: string[] }
+	| { kind: "updateConflict"; collisions: string[] }
 	| { kind: "invalidPackage"; message: string }
 	| { kind: "corruptedLog"; message: string }
 	| { kind: "transportError"; message: string }
@@ -97,31 +101,6 @@ export async function install(
 		return { kind: "invalidPackage", message: (err as Error).message };
 	}
 
-	// Same-version short-circuit.
-	const existing = log.find((e) => e.name === source.packageName);
-	if (existing) {
-		if (existing.kind === "needsCleanup") {
-			return { kind: "needsCleanupFirst", package: source.packageName };
-		}
-		if (compareVersions(existing.version, source.packageVersion) === 0) {
-			return { kind: "alreadyInstalled", existingVersion: existing.version };
-		}
-		if (!opts.dryRun) {
-			const ur = await uninstall(env, source.packageName);
-			if (ur.kind !== "ok") {
-				return { kind: "transportError", message: `Auto-uninstall failed (${ur.kind})` };
-			}
-			if (ur.needsCleanup) {
-				return { kind: "needsCleanupFirst", package: source.packageName };
-			}
-			try {
-				log = await readInstallLog(env, projectFolder);
-			} catch (err) {
-				return { kind: "corruptedLog", message: (err as Error).message };
-			}
-		}
-	}
-
 	// First pass: walk source files to compute hashes / metadata. Bytes are
 	// not retained — applyPlan walks again to write keepers.
 	const sourceFiles: SourceFileEntry[] = [];
@@ -140,6 +119,35 @@ export async function install(
 		});
 	}
 
+	// Same-version short-circuit.
+	const existing = log.find((e) => e.name === source.packageName);
+	if (existing) {
+		if (existing.kind === "needsCleanup") {
+			return { kind: "needsCleanupFirst", package: source.packageName };
+		}
+		if (compareVersions(existing.version, source.packageVersion) === 0) {
+			return { kind: "alreadyInstalled", existingVersion: existing.version };
+		}
+		if (!opts.dryRun) {
+			const updateConflicts = preflightSharedUpdate(log, source, sourceFiles);
+			if (updateConflicts.length > 0) {
+				return { kind: "updateConflict", collisions: updateConflicts };
+			}
+			const ur = await uninstall(env, source.packageName);
+			if (ur.kind !== "ok") {
+				return { kind: "transportError", message: `Auto-uninstall failed (${ur.kind})` };
+			}
+			if (ur.needsCleanup) {
+				return { kind: "needsCleanupFirst", package: source.packageName };
+			}
+			try {
+				log = await readInstallLog(env, projectFolder);
+			} catch (err) {
+				return { kind: "corruptedLog", message: (err as Error).message };
+			}
+		}
+	}
+
 	let targetPreprocessors: Record<string, string | null> = {};
 	let targetSettings: Record<string, string> = {};
 	try {
@@ -152,7 +160,7 @@ export async function install(
 	}
 
 	const targetExistingPaths = await collectProjectFiles(env, projectFolder);
-	const claimedSet = claimedPaths(log);
+	const ownership = buildOwnershipMap(log);
 
 	const planResult = computeInstallPlan({
 		packageName: source.packageName,
@@ -166,11 +174,13 @@ export async function install(
 		targetPreprocessors,
 		targetSettings,
 		targetExistingPaths,
-		claimedPaths: claimedSet,
+		ownership,
 		existingPackageVersion: null,
 	});
 
-	if (planResult.kind === "fileConflict") return planResult;
+	if (planResult.kind === "fileConflict") {
+		return { kind: "fileConflict", collisions: planResult.collisions.map((c) => c.reason) };
+	}
 	if (planResult.kind !== "ok") {
 		return { kind: "transportError", message: `internal: unexpected plan variant ${planResult.kind}` };
 	}
@@ -205,7 +215,45 @@ export async function install(
 		warnings: plan.warnings,
 		infoText: source.manifest.infoText,
 		clipboardWritten,
+		sharedFilesReused: plan.sharedFilesToReuse,
 	};
+}
+
+function preflightSharedUpdate(
+	log: InstallLogEntry[],
+	source: AcquiredSource,
+	sourceFiles: SourceFileEntry[],
+): string[] {
+	const ownership = buildOwnershipMap(log);
+	const collisions: string[] = [];
+	for (const f of sourceFiles) {
+		const candidate = { relPath: f.relPath, name: f.name };
+		if (!shouldIncludeFile(candidate, {
+			fileTypes: source.manifest.fileTypes,
+			positivePatterns: source.manifest.positiveWildcard,
+			negativePatterns: source.manifest.negativeWildcard,
+		})) continue;
+		const owners = otherOwners(ownership.get(f.relPath), { name: source.packageName, company: source.packageCompany });
+		if (owners.length === 0) continue;
+		const incomingShared = f.isText
+			&& f.hash !== null
+			&& source.manifest.sharedWildcard.some((pattern) => matchesWildcard(pattern, candidate));
+		if (!incomingShared) {
+			collisions.push(`${f.relPath}: update would stop sharing a file still used by another package`);
+			continue;
+		}
+		for (const owner of owners) {
+			if (!owner.shared || !owner.hasHashField || owner.hash === null) {
+				collisions.push(`${f.relPath}: installed package has inconsistent shared file ownership`);
+				break;
+			}
+			if (owner.hash !== f.hash) {
+				collisions.push(`${f.relPath}: shared file content differs from existing package ${owner.name} ${owner.version}`);
+				break;
+			}
+		}
+	}
+	return collisions;
 }
 
 class MissingTokenError extends Error {}

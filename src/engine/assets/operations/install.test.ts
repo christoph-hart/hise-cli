@@ -145,6 +145,18 @@ describe("install (local)", () => {
 		expect(await fs.exists(`${PROJECT}/Images/skipped.png`)).toBe(false);
 	});
 
+	it("installs from a Windows-style local source path", async () => {
+		const { env, fs } = makeEnv();
+		seedLocalSource(fs, "D:/Development/Projekte/source", { UseFileTypeFilter: true, FileTypeFilter: ["Scripts"] });
+		fs.seedText("D:/Development/Projekte/source/Scripts/a.js", "x");
+		fs.seedText("D:/Development/Projekte/source/Images/skipped.png", "y");
+
+		const r = await install(env, { source: { kind: "local", folder: "D:\\Development\\Projekte\\source" } });
+		expect(r.kind).toBe("ok");
+		expect(await fs.exists(`${PROJECT}/Scripts/a.js`)).toBe(true);
+		expect(await fs.exists(`${PROJECT}/Images/skipped.png`)).toBe(false);
+	});
+
 	it("applies preprocessor step", async () => {
 		const { env, fs, hise } = makeEnv();
 		const writes: unknown[] = [];
@@ -221,6 +233,36 @@ describe("install (local)", () => {
 		expect(r).toEqual({ kind: "needsCleanupFirst", package: "synth_blocks" });
 	});
 
+	it("blocks upgrade before uninstall when shared file content would change", async () => {
+		const { env, fs } = makeEnv();
+		const src = seedLocalSource(fs, "/source", { SharedWildcard: ["Scripts/Common/*"] });
+		fs.seedText(`${src}/Scripts/Common/util.js`, "new shared");
+		fs.seedText(`${PROJECT}/Scripts/Common/util.js`, "old shared");
+		fs.seedText(installLogPath(PROJECT), JSON.stringify([
+			{
+				Name: "synth_blocks", Company: "vendor_username", Version: "0.9.0",
+				Date: "2026-01-01T00:00:00", Mode: "LocalFolder",
+				Steps: [
+					{ Type: "File", Target: "Scripts/Common/util.js", Hash: hashCode64("old shared").toString(), Shared: true, Modified: "2026-01-01T00:00:00" },
+				],
+			},
+			{
+				Name: "other_pack", Company: "vendor_username", Version: "1.0.0",
+				Date: "2026-01-01T00:00:00", Mode: "LocalFolder",
+				Steps: [
+					{ Type: "File", Target: "Scripts/Common/util.js", Hash: hashCode64("old shared").toString(), Shared: true, Modified: "2026-01-01T00:00:00" },
+				],
+			},
+		]));
+
+		const r = await install(env, { source: { kind: "local", folder: src } });
+		expect(r.kind).toBe("updateConflict");
+		if (r.kind !== "updateConflict") return;
+		expect(r.collisions[0]).toMatch(/shared file content differs/);
+		const log = await readInstallLog(env, PROJECT);
+		expect(log.map((e) => e.name)).toEqual(["synth_blocks", "other_pack"]);
+	});
+
 	it("returns fileConflict for unclaimed pre-existing file", async () => {
 		const { env, fs } = makeEnv();
 		const src = seedLocalSource(fs, "/source", {});
@@ -230,9 +272,57 @@ describe("install (local)", () => {
 		const r = await install(env, { source: { kind: "local", folder: src } });
 		expect(r.kind).toBe("fileConflict");
 		if (r.kind !== "fileConflict") return;
-		expect(r.collisions).toEqual(["Scripts/x.js"]);
+		expect(r.collisions).toEqual(["Scripts/x.js: trying to overwrite a user file"]);
 		// Target file untouched.
 		expect(await fs.readText(`${PROJECT}/Scripts/x.js`)).toBe("user-owned");
+	});
+
+	it("reuses identical shared files owned by another package", async () => {
+		const { env, fs } = makeEnv();
+		const content = "const shared = 1;";
+		const hash = hashCode64(content).toString();
+		const src = seedLocalSource(fs, "/source", { SharedWildcard: ["Scripts/Common/*"] });
+		fs.seedText(`${src}/Scripts/Common/util.js`, content);
+		fs.seedText(`${PROJECT}/Scripts/Common/util.js`, content);
+		fs.seedText(installLogPath(PROJECT), JSON.stringify([{
+			Name: "other_pack", Company: "vendor_username", Version: "1.0.0",
+			Date: "2026-01-01T00:00:00", Mode: "LocalFolder",
+			Steps: [
+				{ Type: "File", Target: "Scripts/Common/util.js", Hash: hash, Shared: true, Modified: "2026-01-01T00:00:00" },
+			],
+		}]));
+
+		const r = await install(env, { source: { kind: "local", folder: src } });
+		expect(r.kind).toBe("ok");
+		if (r.kind !== "ok") return;
+		expect(r.sharedFilesReused).toEqual(["Scripts/Common/util.js"]);
+		expect(await fs.readText(`${PROJECT}/Scripts/Common/util.js`)).toBe(content);
+		const log = await readInstallLog(env, PROJECT);
+		expect(log).toHaveLength(2);
+		const installed = log[1];
+		expect(installed.kind).toBe("active");
+		if (installed.kind !== "active") return;
+		const step = installed.steps.find((s) => s.type === "File" && s.target === "Scripts/Common/util.js");
+		expect(step).toMatchObject({ shared: true, hash: hashCode64(content) });
+	});
+
+	it("blocks shared files with differing existing content hash", async () => {
+		const { env, fs } = makeEnv();
+		const src = seedLocalSource(fs, "/source", { SharedWildcard: ["Scripts/Common/*"] });
+		fs.seedText(`${src}/Scripts/Common/util.js`, "new shared");
+		fs.seedText(`${PROJECT}/Scripts/Common/util.js`, "old shared");
+		fs.seedText(installLogPath(PROJECT), JSON.stringify([{
+			Name: "other_pack", Company: "vendor_username", Version: "1.0.0",
+			Date: "2026-01-01T00:00:00", Mode: "LocalFolder",
+			Steps: [
+				{ Type: "File", Target: "Scripts/Common/util.js", Hash: hashCode64("old shared").toString(), Shared: true, Modified: "2026-01-01T00:00:00" },
+			],
+		}]));
+
+		const r = await install(env, { source: { kind: "local", folder: src } });
+		expect(r.kind).toBe("fileConflict");
+		if (r.kind !== "fileConflict") return;
+		expect(r.collisions[0]).toMatch(/shared file content differs/);
 	});
 
 	it("returns invalidPackage when source is missing package_install.json", async () => {

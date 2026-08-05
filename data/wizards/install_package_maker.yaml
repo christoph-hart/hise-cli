@@ -57,6 +57,11 @@ tabs:
         label: Exclude Wildcards
         help: Comma-separated patterns to exclude (e.g. `*.tmp, scratch/`).
         emptyText: leave empty for none
+      - id: SharedWildcard
+        type: text
+        label: Shared Wildcards
+        help: Comma-separated included text-file patterns that compatible packages may co-own.
+        emptyText: leave empty for none
       - id: RegisterAsLocalSource
         type: toggle
         label: Add to my asset library
@@ -96,6 +101,7 @@ globalDefaults:
   FileTypes: "Scripts, AdditionalSourceCode, Samples, Images, AudioFiles, SampleMaps, MidiFiles, DspNetworks, Presets"
   PositiveWildcard: "*"
   NegativeWildcard: ""
+  SharedWildcard: ""
   Preprocessors: ""
   InfoText: ""
   ClipboardContent: ""

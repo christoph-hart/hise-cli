@@ -34,6 +34,7 @@ export interface FileStep {
 	target: string;     // forward-slash, project-root-relative
 	hash: bigint | null; // null = binary semantics OR legacy missing hash
 	hasHashField: boolean; // distinguishes legacy-missing-hash from null/binary
+	shared: boolean;
 	modified: string;   // ISO-8601 without ms (YYYY-MM-DDTHH:MM:SS)
 }
 
@@ -197,7 +198,7 @@ function normalizeFileStep(data: Record<string, unknown>): FileStep {
 	const modified = requireString(data.Modified, "Modified");
 	const hasHashField = data.Hash !== undefined;
 	const hash = hasHashField ? parseHashField(data.Hash) : null;
-	return { type: "File", target, hash, hasHashField, modified };
+	return { type: "File", target, hash, hasHashField, shared: data.Shared === true, modified };
 }
 
 function requireString(value: unknown, label: string): string {
@@ -265,6 +266,7 @@ function serializeStep(step: InstallStep): Record<string, unknown> {
 				Modified: step.modified,
 			};
 			if (step.hash !== null) out.Hash = step.hash.toString();
+			if (step.shared) out.Shared = true;
 			return out;
 		}
 		case "Info": return { Type: "Info" };

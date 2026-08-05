@@ -49,7 +49,7 @@ export interface AcquiredSource {
 const DECODER = new TextDecoder();
 
 export async function acquireLocal(env: AssetEnvironment, folder: string): Promise<AcquiredSource> {
-	const f = folder.replace(/\/+$/, "");
+	const f = folder.replaceAll("\\", "/").replace(/\/+$/, "");
 	const projectXmlPath = joinPath(f, "project_info.xml");
 	if (!await env.fs.exists(projectXmlPath)) {
 		throw new Error(`Local source missing project_info.xml: ${f}`);
@@ -236,9 +236,10 @@ function requireSetting(info: ProjectInfo, key: string): string {
 }
 
 function relativize(root: string, abs: string): string | null {
-	const r = root.replace(/\/+$/, "") + "/";
-	if (!abs.startsWith(r)) return null;
-	return abs.slice(r.length);
+	const r = root.replaceAll("\\", "/").replace(/\/+$/, "") + "/";
+	const normalizedAbs = abs.replaceAll("\\", "/");
+	if (!normalizedAbs.startsWith(r)) return null;
+	return normalizedAbs.slice(r.length);
 }
 
 function basename(p: string): string {

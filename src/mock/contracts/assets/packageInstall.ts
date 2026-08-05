@@ -8,6 +8,7 @@ export interface PackageInstallManifest {
 	fileTypes: string[];
 	positiveWildcard: string[];
 	negativeWildcard: string[];
+	sharedWildcard: string[];
 	preprocessors: string[];
 	infoText: string;
 	clipboardContent: string;
@@ -19,7 +20,12 @@ export function normalizePackageInstall(value: unknown): PackageInstallManifest 
 	}
 	const data = value as Record<string, unknown>;
 
-	const fileTypes = optionalStringArray(data.FileTypes, "FileTypes");
+	const useFileTypeFilter = data.UseFileTypeFilter === true;
+	const fileTypes = data.FileTypes !== undefined
+		? optionalStringArray(data.FileTypes, "FileTypes")
+		: useFileTypeFilter
+			? optionalStringArray(data.FileTypeFilter, "FileTypeFilter")
+			: [];
 	for (const ft of fileTypes) {
 		if (!(ASSET_DIRECTORY_IDS as readonly string[]).includes(ft)) {
 			throw new Error(`FileTypes contains unknown directory id: "${ft}"`);
@@ -28,12 +34,14 @@ export function normalizePackageInstall(value: unknown): PackageInstallManifest 
 
 	const positive = optionalStringArray(data.PositiveWildcard, "PositiveWildcard");
 	const negative = optionalStringArray(data.NegativeWildcard, "NegativeWildcard");
+	const shared = optionalStringArray(data.SharedWildcard, "SharedWildcard");
 	const preprocessors = optionalStringArray(data.Preprocessors, "Preprocessors");
 
 	return {
 		fileTypes,
 		positiveWildcard: positive.length === 0 ? ["*"] : positive,
 		negativeWildcard: negative,
+		sharedWildcard: shared,
 		preprocessors,
 		infoText: optionalString(data.InfoText, "InfoText") ?? "",
 		clipboardContent: optionalString(data.ClipboardContent, "ClipboardContent") ?? "",

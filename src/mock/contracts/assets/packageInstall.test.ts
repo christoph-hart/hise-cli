@@ -8,10 +8,16 @@ describe("normalizePackageInstall", () => {
 			fileTypes: [],
 			positiveWildcard: ["*"],
 			negativeWildcard: [],
+			sharedWildcard: [],
 			preprocessors: [],
 			infoText: "",
 			clipboardContent: "",
 		});
+	});
+
+	it("preserves shared wildcard list", () => {
+		const got = normalizePackageInstall({ SharedWildcard: ["Scripts/Common/*", "AdditionalSourceCode/Vendor/Common/*"] });
+		expect(got.sharedWildcard).toEqual(["Scripts/Common/*", "AdditionalSourceCode/Vendor/Common/*"]);
 	});
 
 	it("preserves explicit positive wildcard list", () => {
@@ -29,6 +35,22 @@ describe("normalizePackageInstall", () => {
 			FileTypes: ["Scripts", "Images", "Samples"],
 		});
 		expect(got.fileTypes).toEqual(["Scripts", "Images", "Samples"]);
+	});
+
+	it("accepts C++ FileTypeFilter when enabled", () => {
+		const got = normalizePackageInstall({
+			UseFileTypeFilter: true,
+			FileTypeFilter: ["Scripts"],
+		});
+		expect(got.fileTypes).toEqual(["Scripts"]);
+	});
+
+	it("ignores C++ FileTypeFilter when disabled", () => {
+		const got = normalizePackageInstall({
+			UseFileTypeFilter: false,
+			FileTypeFilter: ["Scripts"],
+		});
+		expect(got.fileTypes).toEqual([]);
 	});
 
 	it("rejects unknown FileTypes id", () => {
