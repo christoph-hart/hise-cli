@@ -10,6 +10,7 @@ import type {
 	RemoveCommand,
 	RenameCommand,
 	SetClause,
+	SetComplexDataCommand,
 } from "./dsp-parser.js";
 import type { RawDspNode } from "../../mock/contracts/dsp.js";
 import { findDspNode, findDspParent } from "../../mock/contracts/dsp.js";
@@ -36,6 +37,13 @@ export interface DspOp {
 
 const READONLY_PARAM_SUBFIELDS = new Set(["source"]);
 const RANGE_FIELDS = new Set(["min", "max", "stepsize", "middleposition", "skewfactor"]);
+const COMPLEX_DATA_TYPES = new Map([
+	["table", "Table"],
+	["sliderpack", "SliderPack"],
+	["audiofile", "AudioFile"],
+	["filtercoefficients", "FilterCoefficients"],
+	["displaybuffer", "DisplayBuffer"],
+]);
 
 // ── Public translator entrypoint ──────────────────────────────────
 
@@ -60,6 +68,7 @@ export function commandToDspOps(
 		case "remove": return translateRemove(cmd, treeRoot, currentPath);
 		case "rename": return translateRename(cmd, treeRoot, currentPath);
 		case "set": return translateSet(cmd.clauses, rawTree, treeRoot, currentPath);
+		case "setComplexData": return translateSetComplexData(cmd, treeRoot, currentPath);
 		case "connect": return translateConnect(cmd);
 		case "disconnect": return translateDisconnect(cmd);
 		case "createParameter": return translateCreateParameter(cmd);
@@ -74,6 +83,40 @@ export function commandToDspOps(
 		case "trace":
 			return { ops: [] };
 	}
+}
+
+function translateSetComplexData(
+	cmd: SetComplexDataCommand,
+	treeRoot: TreeNode | null,
+	currentPath: string[],
+): { ops: DspOp[] } | { error: string } {
+	const ops: DspOp[] = [];
+	for (const clause of cmd.clauses) {
+		const segs = pathRefSegments(clause.path);
+		if (segs.length !== 2 && segs.length !== 3) {
+			return { error: "set_complex_data: path must be <node>.<dataType>[.<slot>]" };
+		}
+		const nodeRef = { kind: "bare" as const, segment: segs[0]! };
+		const node = resolveRefToId(treeRoot, currentPath, nodeRef);
+		if ("error" in node) return node;
+		const dataType = COMPLEX_DATA_TYPES.get(segs[1]!.id.toLowerCase());
+		if (!dataType) return { error: `set_complex_data: unsupported data type "${segs[1]!.id}"` };
+		const slotIndex = segs.length === 3 ? Number(segs[2]!.id) : 0;
+		if (!Number.isInteger(slotIndex) || slotIndex < 0) {
+			return { error: "set_complex_data: slot must be a non-negative integer" };
+		}
+		if (clause.dataIndex < -1) {
+			return { error: "set_complex_data: index must be -1 or greater" };
+		}
+		ops.push({
+			op: "set_complex_data",
+			nodeId: node.id,
+			dataType,
+			slotIndex,
+			dataIndex: clause.dataIndex,
+		});
+	}
+	return { ops };
 }
 
 // ── Path resolution helpers ──────────────────────────────────────

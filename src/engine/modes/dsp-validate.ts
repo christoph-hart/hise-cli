@@ -9,6 +9,7 @@ import type {
 	CreateParameterCommand,
 	SetCommand,
 	SetClause,
+	SetComplexDataCommand,
 } from "./dsp-parser.js";
 import {
 	nodePropertyNames,
@@ -76,6 +77,37 @@ export function validateSetCommand(
 
 const UNIVERSAL_FIELDS = new Set(["bypassed", "parent", "index", "name"]);
 const RANGE_SUBFIELDS_FLOAT = new Set(["min", "max", "stepsize", "middleposition", "skewfactor"]);
+const COMPLEX_DATA_TYPES = new Set(["table", "sliderpack", "audiofile", "filtercoefficients", "displaybuffer"]);
+
+export function validateSetComplexDataCommand(
+	cmd: SetComplexDataCommand,
+	rawTree: RawDspNode | null,
+): ValidationResult {
+	const errors: string[] = [];
+	for (const clause of cmd.clauses) {
+		const segs = pathRefSegments(clause.path);
+		if (segs.length !== 2 && segs.length !== 3) {
+			errors.push("set_complex_data: path must be <node>.<dataType>[.<slot>]");
+			continue;
+		}
+		if (!COMPLEX_DATA_TYPES.has(segs[1]!.id.toLowerCase())) {
+			errors.push(`set_complex_data: unsupported data type "${segs[1]!.id}"`);
+		}
+		if (segs.length === 3) {
+			const slot = Number(segs[2]!.id);
+			if (!Number.isInteger(slot) || slot < 0) {
+				errors.push("set_complex_data: slot must be a non-negative integer");
+			}
+		}
+		if (clause.dataIndex < -1) {
+			errors.push("set_complex_data: index must be -1 or greater");
+		}
+		if (rawTree && !findDspNode(rawTree, segs[0]!.id)) {
+			errors.push(`set_complex_data: node "${segs[0]!.id}" not found`);
+		}
+	}
+	return errors.length === 0 ? { valid: true, errors: [] } : { valid: false, errors };
+}
 
 function validateSetClause(
 	clause: SetClause,

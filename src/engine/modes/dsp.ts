@@ -51,6 +51,7 @@ import {
 import {
 	validateAddCommand,
 	validateCreateParameterCommand,
+	validateSetComplexDataCommand,
 	validateSetCommand,
 } from "./dsp-validate.js";
 import { resolvePath } from "../grammar/path-resolver.js";
@@ -678,6 +679,10 @@ export class DspMode implements Mode {
 			const v = validateCreateParameterCommand(cmd, this.scriptnodeList, this.rawTree);
 			if (!v.valid) return errorResult(v.errors.join("\n"));
 		}
+		if (cmd.type === "setComplexData") {
+			const v = validateSetComplexDataCommand(cmd, this.rawTree);
+			if (!v.valid) return errorResult(v.errors.join("\n"));
+		}
 		const duplicate = this.findDuplicateAddId(cmd);
 		if (duplicate) return duplicateIdErrorResult(duplicate.id, duplicate.candidates);
 
@@ -869,6 +874,15 @@ export class DspMode implements Mode {
 			}
 			const nodeIds = collectDspNodeIds(this.rawTree)
 				.filter((n) => n.nodeId.toLowerCase().startsWith(tail.toLowerCase()))
+				.map((n) => ({ label: n.nodeId, detail: n.factoryPath }));
+			return { items: nodeIds, from: offset + tokens[0]!.length + 1, to: inputLength };
+		}
+
+		if (first === "set_complex_data" && tokens.length === 2) {
+			const tail = tokens[1]!;
+			const nodePrefix = tail.split(".")[0]!.toLowerCase();
+			const nodeIds = collectDspNodeIds(this.rawTree)
+				.filter((n) => n.nodeId.toLowerCase().startsWith(nodePrefix))
 				.map((n) => ({ label: n.nodeId, detail: n.factoryPath }));
 			return { items: nodeIds, from: offset + tokens[0]!.length + 1, to: inputLength };
 		}
@@ -1151,6 +1165,14 @@ function renderDspNodeShow(
 		}
 	}
 
+	if (node.complexData && node.complexData.length > 0) {
+		lines.push("  Complex data");
+		for (const data of node.complexData) {
+			const source = data.dataIndex === -1 ? "embedded" : `external ${data.dataIndex}`;
+			lines.push(`    ${data.dataType}  slot ${data.slotIndex}  ${source}`);
+		}
+	}
+
 	if (node.parameters.length > 0) {
 		lines.push("  Parameters");
 		const idWidth = Math.max(...node.parameters.map((p) => p.parameterId.length));
@@ -1214,6 +1236,7 @@ const DSP_KEYWORDS = [
 	{ label: "connect", detail: "Connect modulation source to target param" },
 	{ label: "disconnect", detail: "Disconnect modulation by target" },
 	{ label: "set", detail: "Set a parameter value or range field" },
+	{ label: "set_complex_data", detail: "Assign external complex data to a node slot" },
 	{ label: "get", detail: "Get a parameter value or universal field" },
 	{ label: "create_parameter", detail: "Create a dynamic parameter on a container" },
 	{ label: "screenshot", detail: "screenshot scale <s> file \"<path>\"" },

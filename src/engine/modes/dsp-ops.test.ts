@@ -110,6 +110,30 @@ describe("dsp-ops — set parameter value", () => {
 	});
 });
 
+describe("dsp-ops — set_complex_data", () => {
+	it("emits an external data assignment with the default slot", () => {
+		const ops = opsOk("set_complex_data Env.Table index 3");
+		expect(ops[0]).toMatchObject({
+			op: "set_complex_data",
+			nodeId: "Env",
+			dataType: "Table",
+			slotIndex: 0,
+			dataIndex: 3,
+		});
+	});
+
+	it("emits an explicit slot and preserves embedded index", () => {
+		const ops = opsOk("set_complex_data Env.SliderPack.2 index -1");
+		expect(ops[0]).toMatchObject({ dataType: "SliderPack", slotIndex: 2, dataIndex: -1 });
+	});
+
+	it("rejects unsupported types and invalid indexes", () => {
+		expect(opsErr("set_complex_data Env.Unknown index 1")).toMatch(/unsupported data type/);
+		expect(opsErr("set_complex_data Env.Table.-1 index 1")).toMatch(/slot/);
+		expect(opsErr("set_complex_data Env.Table index -2")).toMatch(/index/);
+	});
+});
+
 describe("dsp-ops — set bypassed", () => {
 	it("emits bypass op", () => {
 		const ops = opsOk("set g1.bypassed true");

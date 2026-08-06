@@ -561,6 +561,18 @@ describe("DspMode — integration", () => {
 		expect(ls.rows[0]?.[0]).toBe("Osc1");
 	});
 
+	it("sets complex data using the default slot", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "MyDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+
+		const result = await mode.parse("set_complex_data MyDSP.Table index 3", ctx);
+
+		expect(result.type).toBe("text");
+		if (result.type === "text") expect(result.content).toContain("* MyDSP");
+	});
+
 	it("entering DSP with no network loaded errors + auto-pops", async () => {
 		const conn = new (await import("../hise.js")).MockHiseConnection();
 		conn.onGet("/api/dsp/tree", () => ({

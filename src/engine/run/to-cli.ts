@@ -283,6 +283,15 @@ function serializeDspCommand(command: DspCommand, ctx: TranslationContext): stri
 			const split = splitFirstField(clause.path);
 			return ["dsp", "set", ...moduleFlag, "--node", split.target, "--param", split.field, "--value", valueToArg(clause.value)];
 		});
+		case "setComplexData": return command.clauses.map((clause) => {
+			const segments = pathRefSegments(clause.path).map(segmentToArg);
+			return [
+				"dsp", "set-complex-data", ...moduleFlag,
+				"--node", segments[0]!, "--type", segments[1]!,
+				...(segments[2] ? ["--slot", segments[2]] : []),
+				"--index", String(clause.dataIndex),
+			];
+		});
 		case "connect": return command.clauses.map((clause) => {
 			const source = splitOptionalTargetField(clause.source);
 			const target = splitOptionalTargetField(clause.target);

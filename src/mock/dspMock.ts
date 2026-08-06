@@ -37,6 +37,7 @@ export const MOCK_DSP_NETWORK_NAMES: readonly string[] = [
 
 // Default module available as a DspNetwork host.
 export const DEFAULT_MOCK_DSP_MODULE = "ScriptFX1";
+const COMPLEX_DATA_TYPES = new Set(["Table", "SliderPack", "AudioFile", "FilterCoefficients", "DisplayBuffer"]);
 
 function emptyTree(name: string): RawDspNode {
 	return {
@@ -212,11 +213,31 @@ function applyOp(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): string | null 
 		case "connect": return applyConnect(tree, op, diff);
 		case "disconnect": return applyDisconnect(tree, op, diff);
 		case "set": return applySet(tree, op, diff);
+		case "set_complex_data": return applySetComplexData(tree, op, diff);
 		case "bypass": return applyBypass(tree, op, diff);
 		case "create_parameter": return applyCreateParameter(tree, op, diff);
 		case "clear": return applyClear(tree, diff);
 		default: return `unknown op "${String(op.op)}"`;
 	}
+}
+
+function applySetComplexData(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): string | null {
+	const nodeId = typeof op.nodeId === "string" ? op.nodeId : "";
+	const dataType = typeof op.dataType === "string" ? op.dataType : "";
+	const dataIndex = op.dataIndex;
+	const slotIndex = op.slotIndex === undefined ? 0 : op.slotIndex;
+	if (!nodeId) return "set_complex_data: missing nodeId";
+	if (!dataType) return "set_complex_data: missing dataType";
+	if (!COMPLEX_DATA_TYPES.has(dataType)) return `set_complex_data: unsupported dataType "${dataType}"`;
+	if (typeof dataIndex !== "number" || !Number.isInteger(dataIndex) || dataIndex < -1) {
+		return "set_complex_data: dataIndex must be -1 or greater";
+	}
+	if (typeof slotIndex !== "number" || !Number.isInteger(slotIndex) || slotIndex < 0) {
+		return "set_complex_data: slotIndex must be a non-negative integer";
+	}
+	if (!findDspNode(tree, nodeId)) return `set_complex_data: node "${nodeId}" not found`;
+	diff.push({ domain: "dsp", action: "*", target: nodeId });
+	return null;
 }
 
 function applyAdd(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): string | null {

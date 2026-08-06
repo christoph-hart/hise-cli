@@ -14,6 +14,7 @@ import {
 	type RenameCommand,
 	type ScreenshotCommand,
 	type SetCommand,
+	type SetComplexDataCommand,
 	type ShowCommand,
 	type TraceCommand,
 } from "./dsp-parser.js";
@@ -147,6 +148,30 @@ describe("dsp parser — set", () => {
 
 	it("rejects 1-segment path", () => {
 		expect(parseErr("set g1 1")).toMatch(/at least 2 segments/);
+	});
+});
+
+describe("dsp parser — set_complex_data", () => {
+	it("parses an omitted slot as a two-segment path", () => {
+		const cmd = parseOk<SetComplexDataCommand>("set_complex_data Env.Table index 3");
+		expect(cmd.type).toBe("setComplexData");
+		expect(cmd.clauses[0]!.path.kind).toBe("dotted");
+		expect(cmd.clauses[0]!.dataIndex).toBe(3);
+	});
+
+	it("parses an explicit slot and embedded index", () => {
+		const cmd = parseOk<SetComplexDataCommand>('set_complex_data "Envelope Main".SliderPack.1 index -1');
+		expect(cmd.clauses[0]!.dataIndex).toBe(-1);
+		if (cmd.clauses[0]!.path.kind === "dotted") expect(cmd.clauses[0]!.path.segments).toHaveLength(3);
+	});
+
+	it("parses chained assignments", () => {
+		const cmd = parseOk<SetComplexDataCommand>("set_complex_data Env.Table index 3, Lfo.SliderPack.1 index 4");
+		expect(cmd.clauses).toHaveLength(2);
+	});
+
+	it("requires the index clause", () => {
+		expect(parseErr("set_complex_data Env.Table 3")).toMatch(/Parse error/);
 	});
 });
 

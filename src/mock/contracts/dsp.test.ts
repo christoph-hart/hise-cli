@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { cleanDspParameterForLlm, normalizeDspTreeResponse } from "./dsp.js";
 
 describe("normalizeDspTreeResponse", () => {
+	it("preserves complex-data assignments", () => {
+		const { raw } = normalizeDspTreeResponse({
+			nodeId: "network",
+			factoryPath: "container.chain",
+			bypassed: false,
+			parameters: [],
+			complexData: [{ dataType: "Table", slotIndex: "0", dataIndex: "3" }],
+			children: [],
+		});
+		expect(raw.complexData).toEqual([{ dataType: "Table", slotIndex: 0, dataIndex: 3 }]);
+	});
+
 	it("accepts numeric string parameter values from live HISE", () => {
 		const { raw } = normalizeDspTreeResponse({
 			nodeId: "network",

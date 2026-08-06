@@ -361,6 +361,7 @@ Inversion: scaled DSP connections use the target parameter range as the output m
 | `connect` | `connect <src>[.<output>] to <targetNode>[.<paramName>] [matched]` (for modulation/parameter targets, path ends in the parameter name (`gain.Gain`); for routing targets (`routing.send` → `routing.receive`), `.<paramName>` may be omitted. Source `.<output>` may be omitted only when source has a single output) |
 | `disconnect` | `disconnect <nodeId>.<paramName>` (path ends in the parameter name; each param target has at most one source, so source never specified) |
 | `set` | `set <id>.<field> <value>` \| `set <id>.<param> <value>` \| `set <id>.<param>.<field> <value>` (node fields include `parent`, `index`, `bypassed`, `name`, `NodeColour`, `Comment`, `Folded`; param fields ∈ {`range`, `min`, `max`, `stepSize`, `middlePosition`, `skewFactor`}) |
+| `set_complex_data` | `set_complex_data <node>.<dataType>[.<slot>] index <index>` (slot defaults to `0`; `index -1` selects embedded data) |
 | `get` | same path shapes as `set` plus read-only `<id>.<param>.<source>`, `<id>.<param>.<parent>` |
 | `rename` | `rename <nodeId> as "<newId>"` |
 | `save` | `save` (writes current network to disk if file-backed; embeds in project if in-memory) |
@@ -485,6 +486,8 @@ show g1                                           # node summary
 show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"
 create_parameter root.Cutoff [20, 20000] default 1000 stepSize 1 skewFactor 0.3
+set_complex_data Env.Table index 3
+set_complex_data Lfo.SliderPack.1 index -1
 trace root inject dirac gain 0.25 before "gain" probe after "delay"
 trace root inject dirac probe recursive compact
 trace root inject param Root.Value 0.5 probe param add.Value probe param mul.Value
@@ -505,7 +508,7 @@ trace root inject param Root.Value 0.5 probe changed_parameters
 
 Only the verb inherits across commas. Every clause provides full arguments and full identifier paths. Each verb defines what its clause shape is (see BNF).
 
-Verbs that support chaining: `set`, `get`, `add`, `remove`, `connect`, `disconnect`. `trace` is single-statement only; repeat trace clauses instead of using commas inside a trace.
+Verbs that support chaining: `set`, `set_complex_data`, `get`, `add`, `remove`, `connect`, `disconnect`. `trace` is single-statement only; repeat trace clauses instead of using commas inside a trace.
 
 ```
 set Master.Volume -6, Master.Pan 0
@@ -514,6 +517,7 @@ set g1.Gain.range [0, 2], g1.Gain.skewFactor 0.3, g1.Gain.stepSize 0.01
 connect lfo to g1.Gain, lfo to g2.Pan
 add Synth as "A", Synth as "B"
 set A.bypassed 1, B.bypassed 1
+set_complex_data Env.Table index 3, Lfo.SliderPack.1 index -1
 remove A, B, C
 ```
 
@@ -521,7 +525,7 @@ remove A, B, C
 
 Verbs and role keywords are reserved across all modes. Using any of them as an identifier requires quoting.
 
-Verbs: `add`, `remove`, `rename`, `clone`, `set`, `get`, `save`, `show`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `trace`, `create_parameter`.
+Verbs: `add`, `remove`, `rename`, `clone`, `set`, `set_complex_data`, `get`, `save`, `show`, `cd`, `ls`, `pwd`, `reset`, `connect`, `disconnect`, `screenshot`, `trace`, `create_parameter`.
 
 Catalog nouns following `show` (mode-restricted): `tree`, `types`, `networks`, `modules`, `connections`, `status`. These are reserved as direct arguments to `show` only — they may still appear inside dotted paths after a quoted segment escape.
 
@@ -541,7 +545,7 @@ Each verb has its own production with verb-specific comma continuation. Verbs th
 
 ```
 Statement            := AddStmt | RemoveStmt | RenameStmt | CloneStmt
-                     |  SetStmt | GetStmt | ShowStmt
+                     |  SetStmt | SetComplexDataStmt | GetStmt | ShowStmt
                      |  CdStmt | LsStmt | PwdStmt
                      |  ResetStmt | SaveStmt
                      |  ConnectStmt | DisconnectStmt
@@ -558,6 +562,12 @@ CloneStmt            := 'clone' PathExpr Number
 
 SetStmt              := 'set' SetClause (',' SetClause)*
 SetClause            := DottedPath Value                     ; ≥2 segments — bare node assignment is invalid
+
+SetComplexDataStmt   := 'set_complex_data' SetComplexDataClause
+                         (',' SetComplexDataClause)*
+SetComplexDataClause := DottedPath 'index' Integer
+                         ; path is <node>.<dataType>[.<slot>], slot defaults to 0
+                         ; index -1 selects embedded data
 
 GetStmt              := 'get' DottedPath (',' DottedPath)*
 

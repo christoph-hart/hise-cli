@@ -36,6 +36,7 @@ import {
 	Save,
 	Scale,
 	Screenshot,
+	SetComplexData,
 	Set,
 	Show,
 	To,
@@ -94,6 +95,16 @@ export interface SetClause {
 export interface SetCommand {
 	type: "set";
 	clauses: SetClause[];
+}
+
+export interface SetComplexDataClause {
+	path: PathRef;
+	dataIndex: number;
+}
+
+export interface SetComplexDataCommand {
+	type: "setComplexData";
+	clauses: SetComplexDataClause[];
 }
 
 export interface GetCommand {
@@ -169,6 +180,7 @@ export type DspCommand =
 	| RemoveCommand
 	| RenameCommand
 	| SetCommand
+	| SetComplexDataCommand
 	| GetCommand
 	| ConnectCommand
 	| DisconnectCommand
@@ -288,6 +300,20 @@ class DspParser extends CstParser {
 		});
 	});
 
+	public setComplexDataClause = this.RULE("setComplexDataClause", () => {
+		this.SUBRULE(this.pathExpr, { LABEL: "path" });
+		this.CONSUME(Identifier, { LABEL: "indexKeyword" });
+		this.CONSUME(NumberLiteral, { LABEL: "indexValue" });
+	});
+
+	public setComplexDataCommand = this.RULE("setComplexDataCommand", () => {
+		this.CONSUME(SetComplexData);
+		this.AT_LEAST_ONE_SEP({
+			SEP: Comma,
+			DEF: () => this.SUBRULE(this.setComplexDataClause),
+		});
+	});
+
 	public getCommand = this.RULE("getCommand", () => {
 		this.CONSUME(Get);
 		this.AT_LEAST_ONE_SEP({
@@ -367,6 +393,7 @@ class DspParser extends CstParser {
 			{ ALT: () => this.CONSUME(Connect) },
 			{ ALT: () => this.CONSUME(Disconnect) },
 			{ ALT: () => this.CONSUME(CreateParameter) },
+			{ ALT: () => this.CONSUME(SetComplexData) },
 			{ ALT: () => this.CONSUME(Screenshot) },
 			{ ALT: () => this.CONSUME(Trace) },
 			{ ALT: () => this.CONSUME(Cd) },
@@ -436,6 +463,7 @@ class DspParser extends CstParser {
 			{ ALT: () => this.SUBRULE(this.removeCommand) },
 			{ ALT: () => this.SUBRULE(this.renameCommand) },
 			{ ALT: () => this.SUBRULE(this.setCommand) },
+			{ ALT: () => this.SUBRULE(this.setComplexDataCommand) },
 			{ ALT: () => this.SUBRULE(this.getCommand) },
 			{ ALT: () => this.SUBRULE(this.connectCommand) },
 			{ ALT: () => this.SUBRULE(this.disconnectCommand) },
@@ -609,6 +637,29 @@ function extractSetCommand(node: CstNode): { command: SetCommand } | { error: st
 		clauses.push({ path: path.ref, value: value.value });
 	}
 	return { command: { type: "set", clauses } };
+}
+
+function extractSetComplexDataCommand(node: CstNode): { command: SetComplexDataCommand } | { error: string } {
+	const clauses: SetComplexDataClause[] = [];
+	for (const clauseNode of (node.children.setComplexDataClause ?? []) as CstNode[]) {
+		const c = clauseNode.children;
+		const path = extractPathExpr(c.path![0] as CstNode);
+		if ("error" in path) return { error: path.error };
+		const count = pathRefSegmentCount(path.ref);
+		if (count !== 2 && count !== 3) {
+			return { error: "set_complex_data: path must be <node>.<dataType>[.<slot>]" };
+		}
+		const keyword = (c.indexKeyword![0] as IToken).image;
+		if (keyword.toLowerCase() !== "index") {
+			return { error: `set_complex_data: expected index, got "${keyword}"` };
+		}
+		const value = parseNumberLiteral((c.indexValue![0] as IToken).image);
+		if (!value.ok || value.value.kind !== "number" || !Number.isInteger(value.value.n)) {
+			return { error: "set_complex_data: index must be an integer" };
+		}
+		clauses.push({ path: path.ref, dataIndex: value.value.n });
+	}
+	return { command: { type: "setComplexData", clauses } };
 }
 
 function extractGetCommand(node: CstNode): { command: GetCommand } | { error: string } {
@@ -957,6 +1008,7 @@ function extractCommand(cst: CstNode): { command: DspCommand } | { error: string
 	if (c.removeCommand) return extractRemoveCommand(c.removeCommand[0] as CstNode);
 	if (c.renameCommand) return extractRenameCommand(c.renameCommand[0] as CstNode);
 	if (c.setCommand) return extractSetCommand(c.setCommand[0] as CstNode);
+	if (c.setComplexDataCommand) return extractSetComplexDataCommand(c.setComplexDataCommand[0] as CstNode);
 	if (c.getCommand) return extractGetCommand(c.getCommand[0] as CstNode);
 	if (c.connectCommand) return extractConnectCommand(c.connectCommand[0] as CstNode);
 	if (c.disconnectCommand) return extractDisconnectCommand(c.disconnectCommand[0] as CstNode);
@@ -999,6 +1051,9 @@ export function parseDspInput(input: string): { commands: DspCommand[] } | { err
 	const cmd = result.command;
 	if (cmd.type === "set") {
 		return { commands: cmd.clauses.map((cl): DspCommand => ({ type: "set", clauses: [cl] })) };
+	}
+	if (cmd.type === "setComplexData") {
+		return { commands: cmd.clauses.map((cl): DspCommand => ({ type: "setComplexData", clauses: [cl] })) };
 	}
 	if (cmd.type === "get") {
 		return { commands: cmd.paths.map((p): DspCommand => ({ type: "get", paths: [p] })) };

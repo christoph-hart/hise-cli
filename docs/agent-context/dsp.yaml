@@ -216,6 +216,30 @@ commands:
     examples:
       - title: Attempt built-in autofix
         argv: [hise-cli, dsp, status, --module, "Script FX1", --autofix, --agent]
+  - id: dsp.set.complexData
+    syntax: dsp set-complex-data --module <module> --node <node> --type <Table|SliderPack|AudioFile|FilterCoefficients|DisplayBuffer> [--slot <n>] --index <n>
+    title: Assign DSP complex data
+    purpose: Assign an external or embedded complex data object to a node's complex-data slot.
+    command:
+      argv: [hise-cli, dsp, set-complex-data, --module, "Script FX1", --node, Env, --type, Table, --index, "3", --agent]
+    aliases: [set dsp table, assign slider pack, set external complex data]
+    tags: [dsp, complex-data, table, slider-pack, mutation, scriptnode]
+    contexts: [cli]
+    agentRelevance: high
+    danger: true
+    notes:
+      - --slot is optional and defaults to 0.
+      - --index -1 selects embedded data; non-negative values select external data registration indexes.
+      - The DSL form is set_complex_data <node>.<dataType>[.<slot>] index <index>.
+      - Supported data types are Table, SliderPack, AudioFile, FilterCoefficients, and DisplayBuffer.
+    help:
+      visibility: common
+      order: 30
+    examples:
+      - title: Assign an external table
+        argv: [hise-cli, dsp, set-complex-data, --module, "Script FX1", --node, Env, --type, Table, --index, "3", --agent]
+      - title: Select embedded slider-pack data
+        argv: [hise-cli, dsp, set-complex-data, --module, "Script FX1", --node, Lfo, --type, SliderPack, --slot, "1", --index, "-1", --agent]
   - id: dsp.trace
     syntax: dsp trace --module <module> [--container <container>] [--inject <silence|dirac|noise|dc>] [--gain <n>] [--seed <n>] [--inject-before <node>] [--inject-param <node.param=value>...] [--probe-recursive] [--probe-changed-parameters] [--probe-param <node.param>...] [--probe-after <node>] [--delay-ms <n>] [--trace-compact] [--no-specs] [--no-signal]
     title: Trace DSP runtime behavior

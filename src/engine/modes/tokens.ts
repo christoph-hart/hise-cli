@@ -339,6 +339,12 @@ export const CreateParameter = createToken({
 	longer_alt: Identifier,
 });
 
+export const SetComplexData = createToken({
+	name: "SetComplexData",
+	pattern: /set_complex_data/i,
+	longer_alt: Identifier,
+});
+
 export const Networks = createToken({
 	name: "Networks",
 	pattern: /networks/i,
@@ -375,6 +381,7 @@ export const DSP_TOKENS = [
 	PercentLiteral,
 	NumberLiteral,
 	CreateParameter,
+	SetComplexData,
 	Disconnect,
 	Connections,
 	Connect,
@@ -410,7 +417,7 @@ export const DSP_TOKENS = [
 ];
 
 export const DSP_VERB_KEYWORDS: ReadonlySet<string> = new _Set([
-	"set", "get", "add", "remove", "connect", "disconnect", "trace",
+	"set", "set_complex_data", "get", "add", "remove", "connect", "disconnect", "trace",
 ]);
 
 export const dspLexer = new Lexer(DSP_TOKENS);

@@ -2096,6 +2096,97 @@ export const GENERATED_AGENT_CONTEXT = {
 					]
 				},
 				{
+					"id": "dsp.set.complexData",
+					"title": "Assign DSP complex data",
+					"purpose": "Assign an external or embedded complex data object to a node's complex-data slot.",
+					"syntax": "dsp set-complex-data --module <module> --node <node> --type <Table|SliderPack|AudioFile|FilterCoefficients|DisplayBuffer> [--slot <n>] --index <n>",
+					"command": {
+						"argv": [
+							"hise-cli",
+							"dsp",
+							"set-complex-data",
+							"--module",
+							"Script FX1",
+							"--node",
+							"Env",
+							"--type",
+							"Table",
+							"--index",
+							"3",
+							"--agent"
+						],
+						"display": "hise-cli dsp set-complex-data --module \"Script FX1\" --node Env --type Table --index 3 --agent"
+					},
+					"tags": [
+						"dsp",
+						"complex-data",
+						"table",
+						"slider-pack",
+						"mutation",
+						"scriptnode"
+					],
+					"aliases": [
+						"set dsp table",
+						"assign slider pack",
+						"set external complex data"
+					],
+					"contexts": [
+						"cli"
+					],
+					"agentRelevance": "high",
+					"danger": true,
+					"help": {
+						"visibility": "common",
+						"order": 30
+					},
+					"examples": [
+						{
+							"title": "Assign an external table",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set-complex-data",
+								"--module",
+								"Script FX1",
+								"--node",
+								"Env",
+								"--type",
+								"Table",
+								"--index",
+								"3",
+								"--agent"
+							],
+							"display": "hise-cli dsp set-complex-data --module \"Script FX1\" --node Env --type Table --index 3 --agent"
+						},
+						{
+							"title": "Select embedded slider-pack data",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"set-complex-data",
+								"--module",
+								"Script FX1",
+								"--node",
+								"Lfo",
+								"--type",
+								"SliderPack",
+								"--slot",
+								"1",
+								"--index",
+								"-1",
+								"--agent"
+							],
+							"display": "hise-cli dsp set-complex-data --module \"Script FX1\" --node Lfo --type SliderPack --slot 1 --index -1 --agent"
+						}
+					],
+					"notes": [
+						"--slot is optional and defaults to 0.",
+						"--index -1 selects embedded data; non-negative values select external data registration indexes.",
+						"The DSL form is set_complex_data <node>.<dataType>[.<slot>] index <index>.",
+						"Supported data types are Table, SliderPack, AudioFile, FilterCoefficients, and DisplayBuffer."
+					]
+				},
+				{
 					"id": "dsp.trace",
 					"title": "Trace DSP runtime behavior",
 					"purpose": "Inject a temporary signal or parameter value and capture signal or parameter effects at runtime.",

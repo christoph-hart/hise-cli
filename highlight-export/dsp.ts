@@ -7,7 +7,7 @@ const DSP_KEYWORDS = new Set([
 	"show", "networks", "modules", "connections", "tree",
 	"use", "init", "load", "create", "save", "reset",
 	"add", "remove", "move", "connect", "disconnect",
-	"set", "get", "bypass", "enable",
+	"set", "set_complex_data", "get", "bypass", "enable",
 	"create_parameter",
 	"source", "parent", "of", "from", "to", "as", "at",
 	"default", "step", "into",

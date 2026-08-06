@@ -317,6 +317,7 @@ Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 | \`set <node>.bypassed <bool>\` | Toggle bypass via property write |
 | \`set <node>.parent <path>\` / \`set <node>.index <n>\` | Reparent / reorder (move op) |
 | \`set <root>.<NetworkProp> <value>\` | Network-level property write (root only) |
+| \`set_complex_data <node>.<type>[.<slot>] index <index>\` | Assign complex data (slot defaults to 0; index -1 means embedded) |
 | \`create_parameter <container>.<name> [<min>, <max>] [default N] [stepSize N] [middlePosition N | skewFactor N]\` | Dynamic parameter on a container |
 | \`screenshot scale <s> file "<path>"\` | Render the DspNetwork graph to a PNG |
 

@@ -46,6 +46,23 @@ describe("translateHscToCli", () => {
 		]);
 	});
 
+	it("serializes DSP complex data assignments", () => {
+		const source = [
+			"/dsp",
+			"cd ScriptFX1",
+			"set_complex_data Env.Table index 3, Lfo.SliderPack.1 index -1",
+		].join("\n");
+
+		const result = translateHscToCli(source);
+
+		expect(result.lines).toEqual([
+			"# hsc-context: /dsp",
+			"# hsc-context: cd ScriptFX1",
+			"hise-cli dsp set-complex-data --module ScriptFX1 --node Env --type Table --index 3",
+			"hise-cli dsp set-complex-data --module ScriptFX1 --node Lfo --type SliderPack --slot 1 --index -1",
+		]);
+	});
+
 	it("translates selector fixture without parse errors", () => {
 		const source = readFileSync(new URL("../../../hsc_examples/selector.hsc", import.meta.url), "utf-8");
 		const result = translateHscToCli(source);

@@ -466,6 +466,21 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP complex data assignment with optional slot", () => {
+		const defaultSlot = parseCliArgs(["node", "hise-cli", "dsp", "set-complex-data", "--module", "Script FX1", "--node", "Env", "--type", "Table", "--index", "3"], getCliCommands());
+		expect(defaultSlot.kind).toBe("execute");
+		if (defaultSlot.kind === "execute") expect(defaultSlot.canonicalCommand).toBe('/dsp."Script FX1" set_complex_data Env.Table index 3');
+
+		const explicitSlot = parseCliArgs(["node", "hise-cli", "dsp", "set-complex-data", "--module", "Script FX1", "--node", "Env", "--type", "SliderPack", "--slot", "2", "--index", "-1"], getCliCommands());
+		expect(explicitSlot.kind).toBe("execute");
+		if (explicitSlot.kind === "execute") expect(explicitSlot.canonicalCommand).toBe('/dsp."Script FX1" set_complex_data Env.SliderPack.2 index -1');
+	});
+
+	it("rejects invalid direct DSP complex data indexes", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "set-complex-data", "--module", "Script FX1", "--node", "Env", "--type", "Table", "--index", "-2"], getCliCommands());
+		expect(result).toEqual({ kind: "error", message: "dsp set-complex-data --index must be -1 or greater" });
+	});
+
 	it("parses combined direct DSP parameter metadata flags", () => {
 		const result = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--param", "Frequency", "--range", "20,20000", "--default", "1000", "--skewFactor", "0.3"], getCliCommands());
 		expect(result.kind).toBe("execute");

@@ -618,6 +618,22 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		if (pairs.length === 0) return directUsage("dsp set requires at least one value flag");
 		return `${prefix}set ${formatDspSetClauses(node, param, pairs)}`;
 	}
+	if (command === "set-complex-data") {
+		const node = readRequiredFlag(rest, "--node");
+		if (typeof node !== "string") return node;
+		const type = readRequiredFlag(rest, "--type");
+		if (typeof type !== "string") return type;
+		const index = readRequiredFlag(rest, "--index");
+		if (typeof index !== "string") return index;
+		const slot = readOptionalFlag(rest, "--slot");
+		if (typeof slot !== "string" && slot !== undefined) return slot;
+		const slotValue = slot === undefined ? 0 : Number(slot);
+		const indexValue = Number(index);
+		if (!Number.isInteger(slotValue) || slotValue < 0) return directUsage("dsp set-complex-data --slot must be a non-negative integer");
+		if (!Number.isInteger(indexValue) || indexValue < -1) return directUsage("dsp set-complex-data --index must be -1 or greater");
+		const path = `${formatDslSegment(node)}.${formatDslSegment(type)}${slotValue === 0 ? "" : `.${slotValue}`}`;
+		return `${prefix}set_complex_data ${path} index ${indexValue}`;
+	}
 	if (command === "connect") {
 		const source = readRequiredFlag(rest, "--source");
 		if (typeof source !== "string") return source;

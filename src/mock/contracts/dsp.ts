@@ -38,6 +38,12 @@ export interface RawDspProperty {
 	value: string | number | boolean;
 }
 
+export interface RawDspComplexData {
+	dataType: string;
+	slotIndex: number;
+	dataIndex: number;
+}
+
 export interface RawDspNode {
 	nodeId: string;
 	factoryPath: string;
@@ -45,6 +51,8 @@ export interface RawDspNode {
 	parameters: RawDspParameter[];
 	/** Node-level properties (Name, NodeColour, Comment, factory-specific). */
 	properties?: RawDspProperty[];
+	/** Complex-data assignments exposed by verbose DSP tree responses. */
+	complexData?: RawDspComplexData[];
 	/** Present on container nodes. Lists modulation edges scoped to this container. */
 	connections?: RawDspConnection[];
 	children: RawDspNode[];
@@ -96,6 +104,9 @@ export function validateRawDspNode(value: unknown, path = "root"): RawDspNode {
 	const properties = raw.properties !== undefined
 		? validateProperties(raw.properties, raw.nodeId as string)
 		: undefined;
+	const complexData = raw.complexData !== undefined
+		? validateComplexData(raw.complexData, raw.nodeId as string)
+		: undefined;
 	const connections = raw.connections !== undefined
 		? validateConnections(raw.connections, raw.nodeId as string)
 		: undefined;
@@ -107,6 +118,7 @@ export function validateRawDspNode(value: unknown, path = "root"): RawDspNode {
 		bypassed: raw.bypassed,
 		parameters,
 		properties,
+		complexData,
 		connections,
 		children,
 	};
@@ -169,6 +181,37 @@ function validateRawParameter(value: unknown, path: string): RawDspParameter {
 	if (middlePosition !== undefined) out.middlePosition = middlePosition;
 	if (defaultValue !== undefined) out.defaultValue = defaultValue;
 	return out;
+}
+
+function validateComplexData(value: unknown, nodeId: string): RawDspComplexData[] {
+	if (!Array.isArray(value)) {
+		throw new Error(`DSP complexData on "${nodeId}" must be an array`);
+	}
+	return value.map((entry, i) => {
+		if (!entry || typeof entry !== "object") {
+			throw new Error(`DSP complexData at "${nodeId}".complexData[${i}] must be an object`);
+		}
+		const raw = entry as Record<string, unknown>;
+		if (typeof raw.dataType !== "string") {
+			throw new Error(`DSP complexData at "${nodeId}".complexData[${i}] missing string "dataType"`);
+		}
+		const slotIndex = numericRequired(raw.slotIndex, "slotIndex", nodeId, i);
+		const dataIndex = numericRequired(raw.dataIndex, "dataIndex", nodeId, i);
+		if (!Number.isInteger(slotIndex) || !Number.isInteger(dataIndex)) {
+			throw new Error(`DSP complexData at "${nodeId}".complexData[${i}] indexes must be integers`);
+		}
+		return { dataType: raw.dataType, slotIndex, dataIndex };
+	});
+}
+
+function numericRequired(value: unknown, field: string, nodeId: string, index: number): number {
+	const number = typeof value === "number"
+		? value
+		: typeof value === "string" && value.trim() !== "" ? Number(value) : NaN;
+	if (!Number.isFinite(number)) {
+		throw new Error(`DSP complexData at "${nodeId}".complexData[${index}] "${field}" must be numeric`);
+	}
+	return number;
 }
 
 function numericOptional(value: unknown): number | undefined {
