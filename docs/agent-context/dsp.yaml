@@ -351,12 +351,12 @@ commands:
       - title: Set filter frequency
         argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --value, "1000", --agent]
   - id: dsp.set.parameterRange
-    syntax: dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]
+    syntax: dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>] [--externalModulation <mode>]
     title: Set DSP parameter range
     purpose: Update a live scriptnode parameter range and curve metadata.
     command:
       argv: [hise-cli, dsp, set, --module, "Script FX1", --node, F1, --param, Frequency, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
-    aliases: [set dsp parameter range, change node parameter range, set scriptnode parameter metadata]
+    aliases: [set dsp parameter range, change node parameter range, set scriptnode parameter metadata, set external modulation slot]
     tags: [dsp, set, parameter, range, metadata, node, mutation]
     contexts: [cli]
     agentRelevance: high
@@ -365,6 +365,7 @@ commands:
       - Reversed ranges are valid for DSP parameters and intentionally invert scaled connections targeting that parameter, for example --range "1,0" maps source 0.1 to target 0.9.
       - Metadata flags require --param because they target a node parameter, not the node itself.
       - middlePosition and skewFactor are alternatives; do not use both.
+      - --externalModulation marks a root dynamic parameter as a used extra modulation slot for bridge nodes like core.extra_mod.
     help:
       visibility: common
       order: 52
@@ -477,7 +478,7 @@ commands:
       - title: Disconnect filter modulation
         argv: [hise-cli, dsp, disconnect, --module, "Script FX1", --target, F1.Frequency, --agent]
   - id: dsp.create_parameter
-    syntax: dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]
+    syntax: dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>] [--externalModulation <mode>]
     title: Create scriptnode macro parameter
     purpose: Create a top-level or container dynamic parameter with range and curve metadata.
     command:
@@ -491,12 +492,15 @@ commands:
       - --id is the new dynamic parameter ID.
       - --range accepts min,max and maps to [min, max].
       - middlePosition and skewFactor are alternatives; do not use both.
+      - --externalModulation marks a root dynamic parameter as a used extra modulation slot for bridge nodes like core.extra_mod.
     help:
       visibility: common
       order: 68
     examples:
       - title: Create a cutoff macro parameter
         argv: [hise-cli, dsp, create_parameter, --module, "Script FX1", --container, root, --id, Cutoff, --range, "20,20000", --default, "1000", --skewFactor, "0.3", --agent]
+      - title: Create an extra modulation slot parameter
+        argv: [hise-cli, dsp, create_parameter, --module, "Script FX1", --container, root, --id, ModDepth, --range, "0,1", --default, "0.5", --externalModulation, Combined, --agent]
   - id: dsp.rename.node
     syntax: dsp rename --module <module> --node <id-or-path> --id <new-id>
     title: Rename DSP node

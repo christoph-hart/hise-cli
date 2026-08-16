@@ -313,12 +313,12 @@ Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 | \`connect <src>[.<output>] to <target>.<param> [matched]\` | Connect modulation |
 | \`disconnect <node>.<param> [, ...]\` | Disconnect modulation (target-only) |
 | \`set <node>.<param> <value>\` | Set a parameter |
-| \`set <node>.<param>.<field> <number>\` | Range sub-field write (stepSize, middlePosition, skewFactor, default) |
+| \`set <node>.<param>.<field> <value>\` | Parameter sub-field write (stepSize, middlePosition, skewFactor, default, ExternalModulation) |
 | \`set <node>.bypassed <bool>\` | Toggle bypass via property write |
 | \`set <node>.parent <path>\` / \`set <node>.index <n>\` | Reparent / reorder (move op) |
 | \`set <root>.<NetworkProp> <value>\` | Network-level property write (root only) |
 | \`set_complex_data <node>.<type>[.<slot>] index <index>\` | Assign complex data (slot defaults to 0; index -1 means embedded) |
-| \`create_parameter <container>.<name> [<min>, <max>] [default N] [stepSize N] [middlePosition N | skewFactor N]\` | Dynamic parameter on a container |
+| \`create_parameter <container>.<name> [<min>, <max>] [default N] [stepSize N] [middlePosition N | skewFactor N] [ExternalModulation <mode>]\` | Dynamic parameter on a container |
 | \`screenshot scale <s> file "<path>"\` | Render the DspNetwork graph to a PNG |
 
 ## Property IDs
@@ -326,7 +326,8 @@ Once a network is loaded on a host, use \`/dsp\` then \`cd <moduleId>\` and run:
 Long-form HISE property IDs are canonical:
 
 - **stepSize** (range step), **middlePosition** (skew anchor), **skewFactor**
-- **default** (default value), **matched** (post-connect range copy on \`connect\`)
+- **default** (default value), **ExternalModulation** (root extra modulation slot mode), **matched** (post-connect range copy on \`connect\`)
+- \`core.extra_mod\` requires the selected \`Index\` to point at a used root dynamic parameter slot; create or set a root parameter with \`ExternalModulation\`, eg. \`create_parameter root.ModDepth [0, 1] ExternalModulation Combined\`.
 - Connection inversion: for scaled DSP connections, swap the target range min/max
   (eg. \`set AddNode.Value.range [1, 0]\`) to map source \`0.1\` to target \`0.9\`.
 - Network-root: \`AllowCompilation\`, \`AllowPolyphonic\`, \`HasTail\`,

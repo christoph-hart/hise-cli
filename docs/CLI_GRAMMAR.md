@@ -182,7 +182,7 @@ Builder-specific `add` note: HISE automatically adds a `SimpleEnvelope` named `D
 | `scale` | render multiplier (1.0 = full size) | `scale <N>` |
 | `matched` | DSP normalize flag | trailing |
 
-Range/curve clauses for `create_parameter`: `default`, `stepSize`, `middlePosition`, `skewFactor`.
+Range/curve clauses for `create_parameter`: `default`, `stepSize`, `middlePosition`, `skewFactor`, `ExternalModulation`.
 
 ## Numeric arrays
 
@@ -370,7 +370,7 @@ Inversion: scaled DSP connections use the target parameter range as the output m
 | `trace` | `trace [<container>] <trace-clause>...` |
 | `show` | `show tree` \| `show networks [<filter>]` \| `show modules [<filter>]` \| `show connections [<filter>]` \| `show status [autofix]` \| `show <nodeId>` \| `show <nodeId>.<param>` (live HISE state only) |
 | `docs` | `docs` \| `docs <factory>` \| `docs <factory.node>` \| `docs <factory.node>.<param>` (static MCP documentation) |
-| `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m>] [skewFactor <k>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
+| `create_parameter` | `create_parameter <container>.<paramName> [<min>, <max>] [default <d>] [stepSize <s>] [middlePosition <m>] [skewFactor <k>] [ExternalModulation <mode>]` (`<paramName>` is the new parameter's id, e.g. `Cutoff`, `Drive`) |
 | `cd` / `ls` / `pwd` | navigation |
 
 `trace` runs a runtime signal and/or parameter probe against a scriptnode
@@ -486,6 +486,7 @@ show g1                                           # node summary
 show g1.Gain                                      # parameter detail
 screenshot scale 50% file "patch.png"
 create_parameter root.Cutoff [20, 20000] default 1000 stepSize 1 skewFactor 0.3
+create_parameter root.ModDepth [0, 1] default 0.5 ExternalModulation Combined
 set_complex_data Env.Table index 3
 set_complex_data Lfo.SliderPack.1 index -1
 trace root inject dirac gain 0.25 before "gain" probe after "delay"
@@ -590,6 +591,7 @@ ScreenshotStmt       := 'screenshot' 'scale' ScalarValue 'file' QuotedString
 CreateParameterStmt  := 'create_parameter' DottedPath Array2
                         ['default' Number] ['stepSize' Number]
                         ['middlePosition' Number] ['skewFactor' Number]
+                        ['ExternalModulation' (Identifier | QuotedString)]
 
 TypeRef              := Identifier ['.' Identifier]          ; 2-segment for DSP factory.node
 BuilderShowNoun      := 'types' | 'tree'

@@ -24,6 +24,7 @@ export interface RawDspParameter {
 	stepSize?: number;
 	middlePosition?: number;
 	defaultValue?: number;
+	externalModulation?: string;
 }
 
 export interface RawDspConnection {
@@ -175,11 +176,17 @@ function validateRawParameter(value: unknown, path: string): RawDspParameter {
 	const stepSize = numericOptional(raw.stepSize);
 	const middlePosition = numericOptional(raw.middlePosition);
 	const defaultValue = numericOptional(raw.defaultValue);
+	const externalModulation = typeof raw.externalModulation === "string"
+		? raw.externalModulation
+		: typeof raw.ExternalModulation === "string"
+			? raw.ExternalModulation
+			: undefined;
 	if (min !== undefined) out.min = min;
 	if (max !== undefined) out.max = max;
 	if (stepSize !== undefined) out.stepSize = stepSize;
 	if (middlePosition !== undefined) out.middlePosition = middlePosition;
 	if (defaultValue !== undefined) out.defaultValue = defaultValue;
+	if (externalModulation !== undefined) out.externalModulation = externalModulation;
 	return out;
 }
 
@@ -318,6 +325,7 @@ export function cleanDspParameterForLlm(raw: unknown): unknown {
 	if (typeof p.middlePosition === "number") range.middlePosition = p.middlePosition;
 	if (Object.keys(range).length > 0) out.range = range;
 	if (p.defaultValue !== undefined) out.defaultValue = p.defaultValue;
+	if (typeof p.externalModulation === "string") out.externalModulation = p.externalModulation;
 	if (typeof p.value === "number") out.value = p.value;
 	return out;
 }

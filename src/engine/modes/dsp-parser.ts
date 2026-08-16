@@ -137,6 +137,7 @@ export interface CreateParameterCommand {
 	stepSize?: number;
 	middlePosition?: number;
 	skewFactor?: number;
+	externalModulation?: string;
 }
 
 export interface ScreenshotCommand {
@@ -218,8 +219,34 @@ class DspParser extends CstParser {
 	public pathSegment = this.RULE("pathSegment", () => {
 		this.OR([
 			{ ALT: () => this.CONSUME(Identifier) },
+			{ ALT: () => this.CONSUME(CreateParameter) },
+			{ ALT: () => this.CONSUME(SetComplexData) },
+			{ ALT: () => this.CONSUME(Disconnect) },
+			{ ALT: () => this.CONSUME(Connections) },
+			{ ALT: () => this.CONSUME(Connect) },
+			{ ALT: () => this.CONSUME(Networks) },
+			{ ALT: () => this.CONSUME(Modules) },
+			{ ALT: () => this.CONSUME(Screenshot) },
+			{ ALT: () => this.CONSUME(Trace) },
 			{ ALT: () => this.CONSUME(Add) },
+			{ ALT: () => this.CONSUME(Remove) },
+			{ ALT: () => this.CONSUME(Rename) },
+			{ ALT: () => this.CONSUME(Show) },
+			{ ALT: () => this.CONSUME(Set) },
+			{ ALT: () => this.CONSUME(Get) },
+			{ ALT: () => this.CONSUME(Cd) },
+			{ ALT: () => this.CONSUME(Ls) },
+			{ ALT: () => this.CONSUME(Pwd) },
+			{ ALT: () => this.CONSUME(Reset) },
+			{ ALT: () => this.CONSUME(Save) },
+			{ ALT: () => this.CONSUME(To) },
+			{ ALT: () => this.CONSUME(As) },
+			{ ALT: () => this.CONSUME(Tree) },
+			{ ALT: () => this.CONSUME(Types) },
 			{ ALT: () => this.CONSUME(Type) },
+			{ ALT: () => this.CONSUME(Scale) },
+			{ ALT: () => this.CONSUME(File) },
+			{ ALT: () => this.CONSUME(BooleanLiteral) },
 			{ ALT: () => this.CONSUME(NumberLiteral) },
 			{ ALT: () => this.CONSUME(QuotedString) },
 		]);
@@ -245,13 +272,16 @@ class DspParser extends CstParser {
 	// accepts NumberLiteral so `xfader1.0` and `set X.p 0.5` both parse).
 	// The extractor converts a bare-numeric segment back to a number.
 	public value = this.RULE("value", () => {
-		this.OR([
+		this.OR({
+			IGNORE_AMBIGUITIES: true,
+			DEF: [
 			{ ALT: () => this.SUBRULE(this.arrayValue) },
 			{ ALT: () => this.CONSUME(HexLiteral) },
 			{ ALT: () => this.CONSUME(PercentLiteral) },
 			{ ALT: () => this.CONSUME(BooleanLiteral) },
 			{ ALT: () => this.SUBRULE(this.pathExpr) },
-		]);
+		],
+		});
 	});
 
 	public addClause = this.RULE("addClause", () => {
@@ -351,9 +381,17 @@ class DspParser extends CstParser {
 	// create_parameter <DottedPath> <Array2> [Identifier <NumberLiteral>]*
 	// The optional clauses are post-validated as one of:
 	//   default | stepSize | middlePosition | skewFactor
+	public createParamValue = this.RULE("createParamValue", () => {
+		this.OR([
+			{ ALT: () => this.CONSUME(NumberLiteral) },
+			{ ALT: () => this.CONSUME(QuotedString) },
+			{ ALT: () => this.CONSUME(Identifier) },
+		]);
+	});
+
 	public createParamClause = this.RULE("createParamClause", () => {
 		this.CONSUME(Identifier, { LABEL: "name" });
-		this.CONSUME(NumberLiteral, { LABEL: "value" });
+		this.SUBRULE(this.createParamValue, { LABEL: "value" });
 	});
 
 	public createParameterCommand = this.RULE("createParameterCommand", () => {
@@ -426,7 +464,9 @@ class DspParser extends CstParser {
 
 	public showCommand = this.RULE("showCommand", () => {
 		this.CONSUME(Show);
-		this.OR([
+		this.OR({
+			IGNORE_AMBIGUITIES: true,
+			DEF: [
 			{
 				ALT: () => {
 					this.OR2([
@@ -444,7 +484,8 @@ class DspParser extends CstParser {
 				},
 			},
 			{ ALT: () => this.SUBRULE(this.pathExpr, { LABEL: "target" }) },
-		]);
+		],
+		});
 	});
 
 	public cdCommand = this.RULE("cdCommand", () => {
@@ -490,11 +531,37 @@ const parser = new DspParser();
 function extractPathSegmentImage(node: CstNode): string {
 	const c = node.children;
 	if (c.Identifier) return (c.Identifier[0] as IToken).image;
+	if (c.CreateParameter) return (c.CreateParameter[0] as IToken).image;
+	if (c.SetComplexData) return (c.SetComplexData[0] as IToken).image;
+	if (c.Disconnect) return (c.Disconnect[0] as IToken).image;
+	if (c.Connections) return (c.Connections[0] as IToken).image;
+	if (c.Connect) return (c.Connect[0] as IToken).image;
+	if (c.Networks) return (c.Networks[0] as IToken).image;
+	if (c.Modules) return (c.Modules[0] as IToken).image;
+	if (c.Screenshot) return (c.Screenshot[0] as IToken).image;
+	if (c.Trace) return (c.Trace[0] as IToken).image;
 	if (c.Add) return (c.Add[0] as IToken).image;
+	if (c.Remove) return (c.Remove[0] as IToken).image;
+	if (c.Rename) return (c.Rename[0] as IToken).image;
+	if (c.Show) return (c.Show[0] as IToken).image;
+	if (c.Set) return (c.Set[0] as IToken).image;
+	if (c.Get) return (c.Get[0] as IToken).image;
+	if (c.Cd) return (c.Cd[0] as IToken).image;
+	if (c.Ls) return (c.Ls[0] as IToken).image;
+	if (c.Pwd) return (c.Pwd[0] as IToken).image;
+	if (c.Reset) return (c.Reset[0] as IToken).image;
+	if (c.Save) return (c.Save[0] as IToken).image;
+	if (c.To) return (c.To[0] as IToken).image;
+	if (c.As) return (c.As[0] as IToken).image;
+	if (c.Tree) return (c.Tree[0] as IToken).image;
+	if (c.Types) return (c.Types[0] as IToken).image;
 	if (c.Type) return (c.Type[0] as IToken).image;
+	if (c.Scale) return (c.Scale[0] as IToken).image;
+	if (c.File) return (c.File[0] as IToken).image;
+	if (c.BooleanLiteral) return (c.BooleanLiteral[0] as IToken).image;
 	if (c.QuotedString) return (c.QuotedString[0] as IToken).image;
 	if (c.NumberLiteral) return (c.NumberLiteral[0] as IToken).image;
-	throw new Error("pathSegment: no Identifier / QuotedString / NumberLiteral");
+	throw new Error("pathSegment: no Identifier / keyword / QuotedString / NumberLiteral");
 }
 
 function extractPathExpr(node: CstNode): { ref: PathRef } | { error: string } {
@@ -713,7 +780,7 @@ function extractDisconnectCommand(node: CstNode): { command: DisconnectCommand }
 	return { command: { type: "disconnect", targets } };
 }
 
-const VALID_CREATE_PARAM_KEYS = new globalThis.Set(["default", "stepsize", "middleposition", "skewfactor"]);
+const VALID_CREATE_PARAM_KEYS = new globalThis.Set(["default", "stepsize", "middleposition", "skewfactor", "externalmodulation"]);
 
 function extractCreateParameterCommand(node: CstNode): { command: CreateParameterCommand } | { error: string } {
 	const path = extractPathExpr(node.children.path![0] as CstNode);
@@ -751,12 +818,17 @@ function extractCreateParameterCommand(node: CstNode): { command: CreateParamete
 		const name = (c.name![0] as IToken).image;
 		const lowerName = name.toLowerCase();
 		if (!VALID_CREATE_PARAM_KEYS.has(lowerName)) {
-			return { error: `create_parameter: unknown clause "${name}" (expected default, stepSize, middlePosition, or skewFactor)` };
+			return { error: `create_parameter: unknown clause "${name}" (expected default, stepSize, middlePosition, skewFactor, or ExternalModulation)` };
 		}
-		const valueRes = parseNumberLiteral((c.value![0] as IToken).image);
-		if (!valueRes.ok) return { error: valueRes.error };
-		if (valueRes.value.kind !== "number") return { error: "create_parameter: clause value must be numeric" };
-		const n = valueRes.value.n;
+		const valueRes = extractCreateParamValue(c.value![0] as CstNode);
+		if ("error" in valueRes) return valueRes;
+		if (lowerName === "externalmodulation") {
+			if (typeof valueRes.value !== "string") return { error: "create_parameter: ExternalModulation expects a string mode" };
+			cmd.externalModulation = valueRes.value;
+			continue;
+		}
+		if (typeof valueRes.value !== "number") return { error: `create_parameter: ${name} expects a numeric value` };
+		const n = valueRes.value;
 		switch (lowerName) {
 			case "default": cmd.defaultValue = n; break;
 			case "stepsize": cmd.stepSize = n; break;
@@ -765,6 +837,23 @@ function extractCreateParameterCommand(node: CstNode): { command: CreateParamete
 		}
 	}
 	return { command: cmd };
+}
+
+function extractCreateParamValue(node: CstNode): { value: number | string } | { error: string } {
+	const c = node.children;
+	if (c.NumberLiteral) {
+		const valueRes = parseNumberLiteral((c.NumberLiteral[0] as IToken).image);
+		if (!valueRes.ok) return { error: valueRes.error };
+		if (valueRes.value.kind !== "number") return { error: "create_parameter: clause value must be numeric" };
+		return { value: valueRes.value.n };
+	}
+	if (c.QuotedString) {
+		const valueRes = parseQuotedString((c.QuotedString[0] as IToken).image);
+		if (!valueRes.ok || valueRes.value.kind !== "string") return { error: "create_parameter: invalid string value" };
+		return { value: valueRes.value.s };
+	}
+	if (c.Identifier) return { value: (c.Identifier[0] as IToken).image };
+	return { error: "create_parameter: invalid clause value" };
 }
 
 function extractScreenshotCommand(node: CstNode): { command: ScreenshotCommand } | { error: string } {
@@ -990,6 +1079,9 @@ function extractShowCommand(node: CstNode): { command: ShowCommand } | { error: 
 	}
 	const target = extractPathExpr(c.target![0] as CstNode);
 	if ("error" in target) return { error: target.error };
+	if (target.ref.kind === "bare" && !target.ref.segment.quoted && target.ref.segment.id.toLowerCase() === "types") {
+		return { error: "Parse error: `show types` is not a DSP command; use `docs` for scriptnode reference." };
+	}
 	if (target.ref.kind === "bare" && !target.ref.segment.quoted && target.ref.segment.id.toLowerCase() === "status") {
 		return { command: { type: "show", kind: "status" } };
 	}

@@ -489,6 +489,25 @@ describe("parseCliArgs", () => {
 		}
 	});
 
+	it("parses direct DSP ExternalModulation metadata forms", () => {
+		const dotted = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "root", "--param", "ModDepth.ExternalModulation", "--value", "Combined"], getCliCommands());
+		const explicit = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "root", "--param", "ModDepth", "--externalModulation", "Combined"], getCliCommands());
+
+		expect(dotted.kind).toBe("execute");
+		if (dotted.kind === "execute") expect(dotted.canonicalCommand).toBe('/dsp."Script FX1" set root.ModDepth.ExternalModulation Combined');
+		expect(explicit.kind).toBe("execute");
+		if (explicit.kind === "execute") expect(explicit.canonicalCommand).toBe('/dsp."Script FX1" set root.ModDepth.ExternalModulation Combined');
+	});
+
+	it("parses direct DSP create_parameter ExternalModulation flag", () => {
+		const result = parseCliArgs(["node", "hise-cli", "dsp", "create_parameter", "--module", "Script FX1", "--container", "root", "--id", "ModDepth", "--range", "0,1", "--default", "0.5", "--externalModulation", "Combined"], getCliCommands());
+
+		expect(result.kind).toBe("execute");
+		if (result.kind === "execute") {
+			expect(result.canonicalCommand).toBe('/dsp."Script FX1" create_parameter root.ModDepth [0,1] default 0.5 ExternalModulation Combined');
+		}
+	});
+
 	it("rejects invalid direct DSP parameter metadata flags", () => {
 		const missingParam = parseCliArgs(["node", "hise-cli", "dsp", "set", "--module", "Script FX1", "--node", "F1", "--range", "20,20000"], getCliCommands());
 		expect(missingParam).toEqual({ kind: "error", message: "dsp set parameter metadata flags require --param" });

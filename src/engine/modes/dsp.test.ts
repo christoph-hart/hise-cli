@@ -197,6 +197,22 @@ describe("DspMode — integration", () => {
 		expect(set.type).not.toBe("error");
 	});
 
+	it("sets and reads ExternalModulation on root dynamic parameters", async () => {
+		const { mode, ctx } = makeSession();
+		await bootstrapNetwork(ctx, "ExtraModDSP");
+		mode.invalidateTree();
+		await mode.onEnter(ctx);
+
+		const created = await mode.parse("create_parameter ExtraModDSP.ModDepth [0, 1] default 0.5", ctx);
+		expect(created.type).not.toBe("error");
+
+		const set = await mode.parse("set ExtraModDSP.ModDepth.ExternalModulation Combined", ctx);
+		expect(set.type).not.toBe("error");
+
+		const get = await mode.parse("get ExtraModDSP.ModDepth.ExternalModulation", ctx);
+		expect(get.type === "text" && get.content === "Combined").toBe(true);
+	});
+
 	it("rejects add with unknown factory path (local validation)", async () => {
 		const { mode, ctx } = makeSession();
 		await bootstrapNetwork(ctx, "MyDSP");

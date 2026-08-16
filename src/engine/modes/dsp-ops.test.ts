@@ -189,6 +189,14 @@ describe("dsp-ops — set X.p.range / sub-fields", () => {
 		expect(ops[0]!.skewFactor).toBe(0.3);
 	});
 
+	it("set X.p.ExternalModulation emits externalModulation sub-field", () => {
+		const bare = opsOk("set root.ModDepth.ExternalModulation Combined");
+		const quoted = opsOk('set root.ModDepth.ExternalModulation "Combined"');
+
+		expect(bare[0]).toMatchObject({ op: "set", nodeId: "root", parameterId: "ModDepth", externalModulation: "Combined" });
+		expect(quoted[0]).toMatchObject({ op: "set", nodeId: "root", parameterId: "ModDepth", externalModulation: "Combined" });
+	});
+
 	it("rejects 3-segment range with wrong arity", () => {
 		expect(opsErr("set g1.Gain.range [0, 1, 2]")).toMatch(/expects \[min, max\]/);
 	});
@@ -248,6 +256,12 @@ describe("dsp-ops — create_parameter", () => {
 		const ops = opsOk("create_parameter root.Cutoff [20, 20000] default 1000 stepSize 0.1");
 		expect(ops[0]!.defaultValue).toBe(1000);
 		expect(ops[0]!.stepSize).toBe(0.1);
+	});
+
+	it("includes ExternalModulation", () => {
+		const ops = opsOk("create_parameter root.ModDepth [0, 1] ExternalModulation Combined");
+
+		expect(ops[0]).toMatchObject({ externalModulation: "Combined" });
 	});
 });
 

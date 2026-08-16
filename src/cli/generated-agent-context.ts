@@ -2603,7 +2603,7 @@ export const GENERATED_AGENT_CONTEXT = {
 					"id": "dsp.set.parameterRange",
 					"title": "Set DSP parameter range",
 					"purpose": "Update a live scriptnode parameter range and curve metadata.",
-					"syntax": "dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]",
+					"syntax": "dsp set --module <module> --node <id-or-path> --param <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>] [--externalModulation <mode>]",
 					"command": {
 						"argv": [
 							"hise-cli",
@@ -2637,7 +2637,8 @@ export const GENERATED_AGENT_CONTEXT = {
 					"aliases": [
 						"set dsp parameter range",
 						"change node parameter range",
-						"set scriptnode parameter metadata"
+						"set scriptnode parameter metadata",
+						"set external modulation slot"
 					],
 					"contexts": [
 						"cli"
@@ -2712,7 +2713,8 @@ export const GENERATED_AGENT_CONTEXT = {
 						"--range accepts x,y style shorthand like UI --bounds; use \"20,20000\" or \"[20,20000]\".",
 						"Reversed ranges are valid for DSP parameters and intentionally invert scaled connections targeting that parameter, for example --range \"1,0\" maps source 0.1 to target 0.9.",
 						"Metadata flags require --param because they target a node parameter, not the node itself.",
-						"middlePosition and skewFactor are alternatives; do not use both."
+						"middlePosition and skewFactor are alternatives; do not use both.",
+						"--externalModulation marks a root dynamic parameter as a used extra modulation slot for bridge nodes like core.extra_mod."
 					]
 				},
 				{
@@ -3106,7 +3108,7 @@ export const GENERATED_AGENT_CONTEXT = {
 					"id": "dsp.create_parameter",
 					"title": "Create scriptnode macro parameter",
 					"purpose": "Create a top-level or container dynamic parameter with range and curve metadata.",
-					"syntax": "dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>]",
+					"syntax": "dsp create_parameter --module <module> --container <container> --id <param> --range <min,max> [--default <n>] [--stepSize <n>] [--middlePosition <n> | --skewFactor <n>] [--externalModulation <mode>]",
 					"command": {
 						"argv": [
 							"hise-cli",
@@ -3173,13 +3175,36 @@ export const GENERATED_AGENT_CONTEXT = {
 								"--agent"
 							],
 							"display": "hise-cli dsp create_parameter --module \"Script FX1\" --container root --id Cutoff --range \"20,20000\" --default 1000 --skewFactor 0.3 --agent"
+						},
+						{
+							"title": "Create an extra modulation slot parameter",
+							"argv": [
+								"hise-cli",
+								"dsp",
+								"create_parameter",
+								"--module",
+								"Script FX1",
+								"--container",
+								"root",
+								"--id",
+								"ModDepth",
+								"--range",
+								"0,1",
+								"--default",
+								"0.5",
+								"--externalModulation",
+								"Combined",
+								"--agent"
+							],
+							"display": "hise-cli dsp create_parameter --module \"Script FX1\" --container root --id ModDepth --range \"0,1\" --default 0.5 --externalModulation Combined --agent"
 						}
 					],
 					"notes": [
 						"--container is the scriptnode container path; root targets the network root container.",
 						"--id is the new dynamic parameter ID.",
 						"--range accepts min,max and maps to [min, max].",
-						"middlePosition and skewFactor are alternatives; do not use both."
+						"middlePosition and skewFactor are alternatives; do not use both.",
+						"--externalModulation marks a root dynamic parameter as a used extra modulation slot for bridge nodes like core.extra_mod."
 					]
 				},
 				{

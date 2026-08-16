@@ -69,6 +69,16 @@ describe("cleanDspParameterForLlm", () => {
 		expect(range.middlePosition).toBe(1000);
 	});
 
+	it("preserves ExternalModulation", () => {
+		const cleaned = cleanDspParameterForLlm({
+			parameterId: "ModDepth",
+			value: 0.5,
+			externalModulation: "Combined",
+		}) as Record<string, unknown>;
+
+		expect(cleaned.externalModulation).toBe("Combined");
+	});
+
 	it("returns null for non-object inputs", () => {
 		expect(cleanDspParameterForLlm(null)).toBeNull();
 		expect(cleanDspParameterForLlm(123)).toBeNull();

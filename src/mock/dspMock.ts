@@ -350,6 +350,7 @@ function applySet(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): string | null
 	if (typeof op.stepSize === "number") param.stepSize = op.stepSize;
 	if (typeof op.middlePosition === "number") param.middlePosition = op.middlePosition;
 	if (typeof op.defaultValue === "number") param.defaultValue = op.defaultValue;
+	if (typeof op.externalModulation === "string") param.externalModulation = op.externalModulation;
 	diff.push({ domain: "dsp", action: "*", target: nodeId });
 	return null;
 }
@@ -379,6 +380,7 @@ function applyCreateParameter(tree: RawDspNode, op: DspOp, diff: DiffEntry[]): s
 	if (typeof op.stepSize === "number") param.stepSize = op.stepSize;
 	if (typeof op.middlePosition === "number") param.middlePosition = op.middlePosition;
 	if (typeof op.defaultValue === "number") param.defaultValue = op.defaultValue;
+	if (typeof op.externalModulation === "string") param.externalModulation = op.externalModulation;
 	if (!existing) node.parameters.push(param);
 	diff.push({ domain: "dsp", action: "*", target: nodeId });
 	return null;

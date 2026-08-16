@@ -199,6 +199,16 @@ Two directions exist:
 - Scriptnode source -> Scriptnode target parameter
 - HISE modulation chain -> Scriptnode via bridge nodes like `core.global_mod`, `core.extra_mod`, `core.pitch_mod`, `core.matrix_mod`
 
+`core.extra_mod` reads HISE extra modulation slots by index. The selected `Index`
+must point at a used root dynamic parameter slot, so create or update a root
+parameter with `ExternalModulation` before relying on the bridge:
+
+```text
+create_parameter root.ModDepth [0, 1] default 0.5 ExternalModulation Combined
+# or after creation:
+set root.ModDepth.ExternalModulation Combined
+```
+
 Update rate depends on context, not just node type:
 
 - frame container: sample-accurate

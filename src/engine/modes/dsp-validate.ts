@@ -77,6 +77,7 @@ export function validateSetCommand(
 
 const UNIVERSAL_FIELDS = new Set(["bypassed", "parent", "index", "name"]);
 const RANGE_SUBFIELDS_FLOAT = new Set(["min", "max", "stepsize", "middleposition", "skewfactor"]);
+const STRING_SUBFIELDS = new Set(["externalmodulation"]);
 const COMPLEX_DATA_TYPES = new Set(["table", "sliderpack", "audiofile", "filtercoefficients", "displaybuffer"]);
 
 export function validateSetComplexDataCommand(
@@ -141,6 +142,11 @@ function validateSetClause(
 			}
 			return { valid: true, errors: [] };
 		}
+		if (STRING_SUBFIELDS.has(subfield)) {
+			if (clause.value.kind === "string") return { valid: true, errors: [] };
+			if (clause.value.kind === "path" && pathRefSegments(clause.value.ref).length === 1) return { valid: true, errors: [] };
+			return { valid: false, errors: [`${nodeId}.${fieldName}.${segs[2].id} expects a string value`] };
+		}
 		return { valid: false, errors: [`unknown sub-field: ${nodeId}.${fieldName}.${segs[2].id}`] };
 	}
 
@@ -158,12 +164,14 @@ function validateSetClause(
 	const factoryDef = findScriptnode(node.factoryPath, list);
 	if (!factoryDef) return { valid: true, errors: [] };
 
+	const liveParam = node.parameters.find((p) => p.parameterId === fieldName);
 	const param = factoryDef.parameters.find((p) => p.id === fieldName);
-	if (!param) {
+	if (!liveParam && !param) {
 		const propertyNames = nodePropertyNames(factoryDef);
 		if (propertyNames.includes(fieldName)) return { valid: true, errors: [] };
 		const isRoot = rawTree?.nodeId === nodeId;
 		const allNames = [
+			...node.parameters.map((p) => p.parameterId),
 			...factoryDef.parameters.map((p) => p.id),
 			...propertyNames,
 			...(isRoot ? ROOT_NETWORK_PROPERTY_NAMES : []),
@@ -176,9 +184,9 @@ function validateSetClause(
 
 	if (clause.value.kind === "number" || clause.value.kind === "hex") {
 		const v = clause.value.n;
-		const liveParam = node.parameters.find((p) => p.parameterId === fieldName);
-		const min = liveParam?.min ?? param.range.min;
-		const max = liveParam?.max ?? param.range.max;
+		const min = liveParam?.min ?? param?.range.min;
+		const max = liveParam?.max ?? param?.range.max;
+		if (min === undefined || max === undefined) return { valid: true, errors: [] };
 		if (v < min || v > max) {
 			return {
 				valid: false,

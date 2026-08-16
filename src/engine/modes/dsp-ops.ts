@@ -37,6 +37,7 @@ export interface DspOp {
 
 const READONLY_PARAM_SUBFIELDS = new Set(["source"]);
 const RANGE_FIELDS = new Set(["min", "max", "stepsize", "middleposition", "skewfactor"]);
+const STRING_PARAM_SUBFIELDS = new Set(["externalmodulation"]);
 const COMPLEX_DATA_TYPES = new Map([
 	["table", "Table"],
 	["sliderpack", "SliderPack"],
@@ -318,10 +319,44 @@ function translateSetClause(
 			};
 		}
 
+		if (STRING_PARAM_SUBFIELDS.has(subLower)) {
+			const value = coerceParameterString(clause.value);
+			if ("error" in value) return value;
+			const node = findDspNode(rawTree, nodeId);
+			const currentValue = node?.parameters.find((p) => p.parameterId === fieldName)?.value ?? 0;
+			return {
+				ops: [{
+					op: "set",
+					nodeId,
+					parameterId: fieldName,
+					value: currentValue,
+					[canonicalStringFieldName(subfield)]: value.out,
+				}],
+			};
+		}
+
 		return { error: `unknown sub-field: ${nodeId}.${fieldName}.${subfield}` };
 	}
 
 	return { error: `set: path too deep (got ${segs.length} segments)` };
+}
+
+function canonicalStringFieldName(name: string): string {
+	switch (name.toLowerCase()) {
+		case "externalmodulation": return "externalModulation";
+		default: return name;
+	}
+}
+
+function coerceParameterString(value: Value): { out: string } | { error: string } {
+	if (value.kind === "string") return { out: value.s };
+	if (value.kind === "path") {
+		const segs = pathRefSegments(value.ref);
+		if (segs.length === 1) return { out: segs[0].id };
+	}
+	const s = coerceString(value);
+	if (s.ok) return { out: s.out };
+	return { error: `cannot coerce ${value.kind} to string` };
 }
 
 function canonicalRangeFieldName(name: string): string {
@@ -432,6 +467,7 @@ function translateCreateParameter(cmd: CreateParameterCommand): { ops: DspOp[] }
 	if (cmd.stepSize !== undefined) op.stepSize = cmd.stepSize;
 	if (cmd.middlePosition !== undefined) op.middlePosition = cmd.middlePosition;
 	if (cmd.skewFactor !== undefined) op.skewFactor = cmd.skewFactor;
+	if (cmd.externalModulation !== undefined) op.externalModulation = cmd.externalModulation;
 	return { ops: [op] };
 }
 

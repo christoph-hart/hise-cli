@@ -289,10 +289,10 @@ function formatDspSetClauses(node: string, param: string | undefined, pairs: Arr
 
 function readDspParameterMetadataFlags(rest: string[]): Array<{ flag: string; value: string }> | { error: string } {
 	const pairs: Array<{ flag: string; value: string }> = [];
-	for (const flag of ["--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor"]) {
+	for (const flag of ["--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor", "--externalModulation", "--ExternalModulation"]) {
 		const value = readOptionalFlag(rest, flag);
 		if (typeof value !== "string" && value !== undefined) return value;
-		if (value !== undefined) pairs.push({ flag: `.${flag.slice(2)}`, value });
+		if (value !== undefined) pairs.push({ flag: flag.toLowerCase() === "--externalmodulation" ? ".ExternalModulation" : `.${flag.slice(2)}`, value });
 	}
 	if (pairs.some((pair) => pair.flag === ".middlePosition") && pairs.some((pair) => pair.flag === ".skewFactor")) {
 		return { error: "dsp set accepts --middlePosition or --skewFactor, not both" };
@@ -610,7 +610,7 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 			return directUsage("dsp set parameter metadata flags require --param");
 		}
 		const reserved = param
-			? new Set(["--module", "--node", "--param", "--value", "--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor"])
+			? new Set(["--module", "--node", "--param", "--value", "--range", "--min", "--max", "--default", "--stepSize", "--middlePosition", "--skewFactor", "--externalModulation", "--ExternalModulation"])
 			: new Set(["--module", "--node", "--param", "--value"]);
 		const dynamic = parseFlagPairs(rest, reserved);
 		if ("error" in dynamic) return dynamic;
@@ -661,10 +661,10 @@ function renderDspDirectCommand(args: string[]): string | { error: string } {
 		const range = readRequiredFlag(rest, "--range");
 		if (typeof range !== "string") return range;
 		const clauses: string[] = [];
-		for (const flag of ["--default", "--stepSize", "--middlePosition", "--skewFactor"]) {
+		for (const flag of ["--default", "--stepSize", "--middlePosition", "--skewFactor", "--externalModulation", "--ExternalModulation"]) {
 			const value = readOptionalFlag(rest, flag);
 			if (typeof value !== "string" && value !== undefined) return value;
-			if (value !== undefined) clauses.push(`${flag.slice(2)} ${value}`);
+			if (value !== undefined) clauses.push(`${flag.toLowerCase() === "--externalmodulation" ? "ExternalModulation" : flag.slice(2)} ${formatDslValue(value)}`);
 		}
 		return `${prefix}create_parameter ${joinTargetParam(container, id)} ${formatArrayShorthand(range)}${clauses.length > 0 ? ` ${clauses.join(" ")}` : ""}`;
 	}
@@ -1334,4 +1334,3 @@ export function parseCliArgs(argv: string[], commands: CommandEntry[]): CliParse
 
 	return { kind: "execute", entry, canonicalCommand, mode, useMock, stdin, dryRun, output };
 }
-

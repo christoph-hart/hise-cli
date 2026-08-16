@@ -650,7 +650,22 @@ export class DspMode implements Mode {
 
 		// Parameter / property value
 		const param = node.parameters.find((p) => p.parameterId === fieldName);
-		if (param) return textResult(String(param.value));
+		if (param) {
+			if (segs.length >= 3) {
+				const subfield = segs[2].id.toLowerCase();
+				switch (subfield) {
+					case "value": return textResult(String(param.value));
+					case "min": return param.min === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(String(param.min));
+					case "max": return param.max === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(String(param.max));
+					case "stepsize": return param.stepSize === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(String(param.stepSize));
+					case "middleposition": return param.middlePosition === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(String(param.middlePosition));
+					case "default": return param.defaultValue === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(String(param.defaultValue));
+					case "externalmodulation": return param.externalModulation === undefined ? errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`) : textResult(param.externalModulation);
+				}
+				return errorResult(`"${segs[2].id}" not found on ${nodeId}.${fieldName}`);
+			}
+			return textResult(String(param.value));
+		}
 		const prop = node.properties?.find((p) => p.propertyId === fieldName);
 		if (prop) return textResult(String(prop.value));
 		return errorResult(`"${fieldName}" not found on ${nodeId}`);
@@ -850,7 +865,7 @@ export class DspMode implements Mode {
 				const secondDot = afterFirst.indexOf(".");
 				if (first === "set" && secondDot !== -1) {
 					const fieldPrefix = afterFirst.slice(secondDot + 1).toLowerCase();
-					const fields = ["min", "max", "stepSize", "middlePosition", "skewFactor", "range"]
+					const fields = ["min", "max", "stepSize", "middlePosition", "skewFactor", "ExternalModulation", "range"]
 						.filter((f) => f.toLowerCase().startsWith(fieldPrefix))
 						.map((f) => ({ label: f }));
 					return {

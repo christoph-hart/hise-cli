@@ -8,6 +8,7 @@ describe("CLI grammar docs", () => {
 		expect(grammar).toContain("`stepSize`");
 		expect(grammar).toContain("`middlePosition`");
 		expect(grammar).toContain("`skewFactor`");
+		expect(grammar).toContain("`ExternalModulation`");
 		expect(grammar).not.toMatch(/\b(?:step|mid|skew)\b/);
 	});
 

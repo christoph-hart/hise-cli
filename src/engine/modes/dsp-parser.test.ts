@@ -18,6 +18,7 @@ import {
 	type ShowCommand,
 	type TraceCommand,
 } from "./dsp-parser.js";
+import { pathRefSegments } from "../grammar/path-parser.js";
 
 function parseOk<T extends DspCommand = DspCommand>(input: string): T {
 	const r = parseSingleDspCommand(input);
@@ -87,6 +88,12 @@ describe("dsp parser — remove / rename", () => {
 		expect(cmd.targets).toHaveLength(3);
 	});
 
+	it("parses command keywords as remove targets", () => {
+		const cmd = parseOk<RemoveCommand>("remove reset");
+
+		expect(pathRefSegments(cmd.targets[0]!).map((s) => s.id)).toEqual(["reset"]);
+	});
+
 	it("parses rename with `as`", () => {
 		const cmd = parseOk<RenameCommand>('rename g1 as "Gain1"');
 		expect(cmd.name).toBe("Gain1");
@@ -138,6 +145,21 @@ describe("dsp parser — set", () => {
 
 		expect(comment.clauses[0]!.value.kind).toBe("string");
 		expect(folded.clauses[0]!.value.kind).toBe("boolean");
+	});
+
+	it("parses Scale as a parameter path segment", () => {
+		const cmd = parseOk<SetCommand>("set B.Scale 0.65");
+
+		expect(pathRefSegments(cmd.clauses[0]!.path).map((s) => s.id)).toEqual(["B", "Scale"]);
+		expect(cmd.clauses[0]!.value.kind).toBe("number");
+	});
+
+	it("parses DSP keywords as parameter path segments", () => {
+		const setParam = parseOk<SetCommand>("set n.file 1");
+		const booleanParam = parseOk<SetCommand>("set n.true 1");
+
+		expect(pathRefSegments(setParam.clauses[0]!.path).map((s) => s.id)).toEqual(["n", "file"]);
+		expect(pathRefSegments(booleanParam.clauses[0]!.path).map((s) => s.id)).toEqual(["n", "true"]);
 	});
 
 	it("rejects `to` keyword in set value (no longer optional)", () => {
@@ -195,6 +217,18 @@ describe("dsp parser — get", () => {
 	it("parses get X.p.source as 3-seg path tail", () => {
 		const cmd = parseOk<GetCommand>("get g1.Gain.source");
 		expect(cmd.paths[0]!.kind).toBe("dotted");
+	});
+
+	it("parses Scale as a parameter path segment with value tail", () => {
+		const cmd = parseOk<GetCommand>("get B.Scale.value");
+
+		expect(pathRefSegments(cmd.paths[0]!).map((s) => s.id)).toEqual(["B", "Scale", "value"]);
+	});
+
+	it("parses command keywords as get path segments", () => {
+		const cmd = parseOk<GetCommand>("get n.set");
+
+		expect(pathRefSegments(cmd.paths[0]!).map((s) => s.id)).toEqual(["n", "set"]);
 	});
 });
 
@@ -270,6 +304,22 @@ describe("dsp parser — create_parameter", () => {
 			"create_parameter root.Cutoff [20, 20000] middlePosition 1000",
 		);
 		expect(cmd.middlePosition).toBe(1000);
+	});
+
+	it("parses ExternalModulation as a string clause", () => {
+		const bare = parseOk<CreateParameterCommand>(
+			"create_parameter root.ModDepth [0, 1] ExternalModulation Combined",
+		);
+		const quoted = parseOk<CreateParameterCommand>(
+			'create_parameter root.ModDepth [0, 1] ExternalModulation "Combined"',
+		);
+
+		expect(bare.externalModulation).toBe("Combined");
+		expect(quoted.externalModulation).toBe("Combined");
+	});
+
+	it("rejects numeric-only clauses with string values", () => {
+		expect(parseErr("create_parameter root.Cutoff [20, 20000] default Combined")).toMatch(/default expects a numeric value/);
 	});
 
 	it("rejects unknown clause keyword", () => {
